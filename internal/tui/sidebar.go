@@ -14,6 +14,7 @@ type sidebarItem struct {
 	id     string
 	title  string // first line of the prompt, the topic title, or the id
 	status string // "done" | "in_progress" | ""
+	active bool   // true when this row is the challenge currently open in the editor
 	header bool   // a non-selectable section heading (e.g. a curriculum module)
 }
 
@@ -152,23 +153,50 @@ func (s sidebarModel) renderRow(it sidebarItem, selected bool) string {
 		return headerRow.Width(s.w).Render(it.title)
 	}
 
-	glyph := "  "
-	switch it.status {
-	case "done":
-		glyph = doneGlyph.Render("✓ ")
-	case "in_progress":
-		glyph = wipGlyph.Render("… ")
+	active := " "
+	if it.active {
+		active = "▶"
 	}
 
 	title := it.title
-	max := s.w - 2 // reserve room for the 2-cell glyph
+	max := s.w - 3 // reserve room for active marker, status glyph, and a space
 	if max > 0 && lipgloss.Width(title) > max {
 		title = truncate(title, max)
 	}
 
-	row := glyph + title
-	if selected {
-		row = selectedRow.Width(s.w).Render(row)
+	if !selected {
+		glyph := " "
+		switch it.status {
+		case "done":
+			glyph = doneGlyph.Render("✓")
+		case "in_progress":
+			glyph = wipGlyph.Render("…")
+		}
+		return active + glyph + " " + title
+	}
+
+	// Paint one continuous cursor bar across the whole row. We style each segment
+	// with the bar background rather than wrapping the finished row in a single
+	// style: a nested glyph color emits an SGR reset that would otherwise punch a
+	// hole in the highlight after it. The bar is bright when the pane is focused
+	// and dimmed when it's blurred, like ranger/lf fade an inactive pane.
+	bg := selectedBg
+	if !s.focused {
+		bg = selectedBlurredBg
+	}
+	base := lipgloss.NewStyle().Background(bg).Foreground(selectedFg)
+
+	glyph := base.Render(" ")
+	switch it.status {
+	case "done":
+		glyph = base.Foreground(doneColor).Render("✓")
+	case "in_progress":
+		glyph = base.Foreground(wipColor).Render("…")
+	}
+
+	row := base.Render(active) + glyph + base.Render(" "+title)
+	if pad := s.w - 3 - lipgloss.Width(title); pad > 0 {
+		row += base.Render(strings.Repeat(" ", pad))
 	}
 	return row
 }

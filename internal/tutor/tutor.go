@@ -211,8 +211,10 @@ func (t *Tutor) Feedback(ctx context.Context, ch Challenge, code, runOutput stri
 
 	system := "You are a supportive programming tutor giving feedback on a learner's code. " +
 		"If their solution passed, congratulate briefly and note one thing they did well. " +
-		"If it failed, give ONE focused hint pointing toward the problem. " +
-		"NEVER provide the full corrected solution or write the function for them. Keep it to 2-4 sentences."
+		"If it failed, give detailed but concise diagnostic feedback: identify the likely bug, " +
+		"quote or name the relevant line/function when possible, explain why the observed output fails the test, " +
+		"and give the next small debugging step. " +
+		"NEVER provide the full corrected solution or write the function for them. Keep it to 1 short paragraph or 3 bullets."
 
 	status := "PASSED"
 	if !passed {

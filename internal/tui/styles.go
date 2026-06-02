@@ -25,14 +25,29 @@ var (
 			Background(lipgloss.Color("236")).
 			Padding(0, 1)
 
+	editorHeader = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("231")).
+			Background(lipgloss.Color("238")).
+			Padding(0, 1)
+
 	hintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	errStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
 
-	// Sidebar row styles.
-	selectedRow = lipgloss.NewStyle().Foreground(lipgloss.Color("231")).Background(lipgloss.Color("24"))
+	// Sidebar row styles and colors. selectedBg paints the cursor bar when the
+	// pane is focused; selectedBlurredBg is the dimmed bar shown when the pane has
+	// lost focus (the way ranger/lf fade an inactive pane's selection). doneColor
+	// and wipColor are reused both for the standalone glyph styles and for the
+	// glyphs painted onto the selection bar.
+	selectedBg        = lipgloss.Color("24")
+	selectedBlurredBg = lipgloss.Color("238")
+	selectedFg        = lipgloss.Color("231")
+	doneColor         = lipgloss.Color("42")
+	wipColor          = lipgloss.Color("214")
+
+	selectedRow = lipgloss.NewStyle().Foreground(selectedFg).Background(selectedBg)
 	headerRow   = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Background(lipgloss.Color("238")).Bold(true)
-	doneGlyph   = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	wipGlyph    = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	doneGlyph   = lipgloss.NewStyle().Foreground(doneColor)
+	wipGlyph    = lipgloss.NewStyle().Foreground(wipColor)
 
 	// Chat transcript role styles.
 	chatUserStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)

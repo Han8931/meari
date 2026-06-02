@@ -107,12 +107,12 @@ func TestSetupWizardCustomTopicFlow(t *testing.T) {
 	// Title bar, sidebar title, editor buffer, and chat transcript should all
 	// be visible — one assertion per pane plus the chrome.
 	for _, want := range []string{
-		"Meari",       // title bar
-		"loops",           // topic in title bar
-		"Write sum_list",  // sidebar item title (first line of prompt)
-		"def sum_list",    // editor buffer (starter code)
-		"Loops repeat",    // chat transcript (lesson)
-		"editor",          // status bar focused-pane name
+		"Meari",          // title bar
+		"loops",          // topic in title bar
+		"Write sum_list", // sidebar item title (first line of prompt)
+		"def sum_list",   // editor buffer (starter code)
+		"Loops repeat",   // chat transcript (lesson)
+		"editor",         // status bar focused-pane name
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q", want)
@@ -148,6 +148,40 @@ func TestRunResultRecordsProgressAndChainsFeedback(t *testing.T) {
 	m = step(t, m, fb)
 	if !strings.Contains(m.chat.view(), "tutor") {
 		t.Errorf("feedback not shown in chat transcript:\n%s", m.chat.view())
+	}
+}
+
+func TestRunFailureShowsStructuredChatSummary(t *testing.T) {
+	m := newModel(testDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+	ch := tutor.Challenge{ID: "fail-id", Prompt: "do it", Tests: []string{"assert is_even(4) == True"}}
+	m = step(t, m, challengeMsg{ch: ch})
+
+	out := "Traceback (most recent call last):\n  File \"solution.py\", line 8, in <module>\n    assert is_even(4) == True\nAssertionError"
+	tm, cmd := m.Update(runResultMsg{res: executor.Result{Output: out}, ch: ch, code: "def is_even(n): return False"})
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("expected a feedback command to be chained after a failing run")
+	}
+
+	view := m.chat.view()
+	for _, want := range []string{"✗ Tests failed", "Failed:", "assert is_even(4) == True", "Output:"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("failure summary missing %q:\n%s", want, view)
+		}
+	}
+	if got := m.deps.Progress.Challenges["fail-id"].Status; got != "in_progress" {
+		t.Fatalf("failing run status = %q, want in_progress", got)
+	}
+}
+
+func TestFailureSummaryTimeoutIncludesNextStep(t *testing.T) {
+	got := failureSummary(executor.Result{TimedOut: true})
+	for _, want := range []string{"Reason:", "execution timed out", "Try:", "loops"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("timeout summary missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -422,5 +456,101 @@ func TestChatQuestionRoundTrip(t *testing.T) {
 	reply := cmd()
 	if _, ok := reply.(chatReplyMsg); !ok {
 		t.Fatalf("chat cmd produced %T, want chatReplyMsg", reply)
+	}
+}
+
+// fillChat appends enough blocks that the transcript overflows its viewport, so
+// scrolling has somewhere to go.
+func fillChat(m *Model) {
+	for i := 0; i < 60; i++ {
+		m.chat.append(roleTutor, "transcript line for scrolling")
+	}
+}
+
+func TestChatTypingDoesNotScroll(t *testing.T) {
+	m := newModel(testDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+	m.setFocus(paneChat)
+	fillChat(&m)
+	if !m.chat.vp.AtBottom() {
+		t.Fatal("transcript should start pinned to the bottom")
+	}
+
+	// "b" is bound to page-up in the viewport's default keymap; typed in the chat
+	// box it must insert a character, not scroll the history.
+	m = step(t, m, keyRunes("b"))
+	if got := m.chat.input.Value(); got != "b" {
+		t.Fatalf("typed key not inserted into input: got %q", got)
+	}
+	if !m.chat.vp.AtBottom() {
+		t.Fatal("typing scrolled the transcript; it should stay at the bottom")
+	}
+}
+
+func TestChatVimKeysScroll(t *testing.T) {
+	m := newModel(testDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+	m.setFocus(paneChat)
+	fillChat(&m)
+
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlU}) // half page up
+	if m.chat.vp.AtBottom() {
+		t.Fatal("ctrl+u did not scroll the transcript up")
+	}
+	if m.chat.input.Value() != "" {
+		t.Fatalf("ctrl+u leaked into the input: %q", m.chat.input.Value())
+	}
+
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}) // half page down
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	if !m.chat.vp.AtBottom() {
+		t.Fatal("ctrl+d did not return to the bottom")
+	}
+}
+
+func TestNewMessageKeepsScrollPosition(t *testing.T) {
+	m := newModel(testDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+	fillChat(&m)
+
+	m.chat.vp.GotoTop() // reader scrolled up into the history
+	m.chat.append(roleTutor, "a reply arrives while reading")
+	if m.chat.vp.AtBottom() {
+		t.Fatal("a new message yanked the reader to the bottom")
+	}
+
+	m.chat.vp.GotoBottom()
+	m.chat.append(roleTutor, "another reply")
+	if !m.chat.vp.AtBottom() {
+		t.Fatal("a new message should follow the tail when already at the bottom")
+	}
+}
+
+func TestWheelScrollsPaneUnderCursor(t *testing.T) {
+	m := newModel(testDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+	m.setFocus(paneEditor) // focus stays elsewhere; the wheel shouldn't move it
+	fillChat(&m)
+
+	m.sidebar.setItems([]sidebarItem{{id: "a", title: "A"}, {id: "b", title: "B"}, {id: "c", title: "C"}})
+
+	// Wheel up over the chat column (rightmost) scrolls the transcript.
+	chatX := m.sidebarW + m.editorW + 5
+	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: chatX, Y: 10})
+	if m.chat.vp.AtBottom() {
+		t.Fatal("wheel over the chat pane did not scroll the transcript")
+	}
+	if m.focus != paneEditor {
+		t.Fatal("wheel scrolling should not steal focus")
+	}
+
+	// Wheel down over the sidebar column moves its selection (ranger-style).
+	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: 2, Y: 5})
+	if m.sidebar.cursor != 1 {
+		t.Fatalf("wheel over the sidebar should move the cursor, got %d", m.sidebar.cursor)
 	}
 }

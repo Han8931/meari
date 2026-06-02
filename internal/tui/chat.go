@@ -64,11 +64,16 @@ func (c *chatModel) setSize(w, h int) {
 	c.reflow()
 }
 
-// append adds a block to the transcript, re-wraps, and scrolls to the bottom.
+// append adds a block to the transcript and re-wraps. It follows the tail only
+// when the view was already pinned to the bottom, so a new message can't yank
+// the reader away while they're scrolled up in the history.
 func (c *chatModel) append(role chatRole, text string) {
+	follow := c.vp.AtBottom()
 	c.blocks = append(c.blocks, chatBlock{role: role, text: strings.TrimRight(text, "\n")})
 	c.reflow()
-	c.vp.GotoBottom()
+	if follow {
+		c.vp.GotoBottom()
+	}
 }
 
 // reflow renders all blocks wrapped to the current width and loads them into
@@ -130,20 +135,49 @@ func (c *chatModel) submit() (text string, ok bool) {
 	return v, true
 }
 
-// Update routes keys to the input (when focused) and lets the viewport handle
-// scrolling. The parent only forwards messages here when this pane is focused.
+// Update routes input to the transcript or the text field. Scroll keys and mouse
+// wheel events drive the viewport; everything else is typing. We deliberately do
+// NOT forward keystrokes to the viewport's own keymap — its defaults bind j/k/f/b
+// etc., which would scroll the transcript while the learner types those letters.
 func (c chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
-	var cmds []tea.Cmd
+	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		var cmd tea.Cmd
+		c.vp, cmd = c.vp.Update(msg)
+		return c, cmd
+	case tea.KeyMsg:
+		if c.scrollKey(msg) {
+			return c, nil
+		}
+	}
 
-	var icmd tea.Cmd
-	c.input, icmd = c.input.Update(msg)
-	cmds = append(cmds, icmd)
+	var cmd tea.Cmd
+	c.input, cmd = c.input.Update(msg)
+	return c, cmd
+}
 
-	var vcmd tea.Cmd
-	c.vp, vcmd = c.vp.Update(msg)
-	cmds = append(cmds, vcmd)
-
-	return c, tea.Batch(cmds...)
+// scrollKey handles transcript scrolling and reports whether it consumed the key.
+// Bindings are vim-flavored — Ctrl+D/U for a half page, Ctrl+F/B for a full page —
+// because the focused input box owns j/k, g/G, and the plain arrows. PgUp/PgDn and
+// Shift+↑/↓ (single line) are accepted too for non-vim muscle memory.
+func (c *chatModel) scrollKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "ctrl+d":
+		c.vp.HalfViewDown()
+	case "ctrl+u":
+		c.vp.HalfViewUp()
+	case "ctrl+f", "pgdown":
+		c.vp.ViewDown()
+	case "ctrl+b", "pgup":
+		c.vp.ViewUp()
+	case "shift+down":
+		c.vp.ScrollDown(1)
+	case "shift+up":
+		c.vp.ScrollUp(1)
+	default:
+		return false
+	}
+	return true
 }
 
 func (c chatModel) view() string {

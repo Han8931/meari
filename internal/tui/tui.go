@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -20,6 +21,7 @@ import (
 	"meari/internal/curriculum"
 	"meari/internal/drafts"
 	"meari/internal/editor"
+	"meari/internal/executor"
 	"meari/internal/progress"
 	"meari/internal/tutor"
 )
@@ -123,7 +125,7 @@ type Model struct {
 // Run constructs the model and runs the full-screen program.
 func Run(d Deps) error {
 	m := newModel(d)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
@@ -288,6 +290,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	}
 
 	return m.forwardToFocus(msg)
@@ -353,6 +358,67 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleMouse routes wheel events to the pane under the cursor, like ranger/lf:
+// scrolling never changes focus, it just moves the hovered pane. Non-wheel mouse
+// events (clicks, motion) are ignored so the terminal keeps its own selection.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.phase == phaseSetup || !tea.MouseEvent(msg).IsWheel() {
+		return m, nil
+	}
+	p, ok := m.paneAt(msg.X, msg.Y)
+	if !ok {
+		return m, nil
+	}
+	switch p {
+	case paneChat:
+		var cmd tea.Cmd
+		m.chat, cmd = m.chat.Update(msg) // the viewport scrolls on wheel events
+		return m, cmd
+	case paneSidebar:
+		// The sidebar has no viewport; move the selection instead (ranger-style).
+		switch msg.Button {
+		case tea.MouseButtonWheelDown:
+			m.sidebar.move(1)
+		case tea.MouseButtonWheelUp:
+			m.sidebar.move(-1)
+		}
+		return m, nil
+	case paneEditor:
+		tm, cmd := m.editor.Update(msg)
+		m.editor = tm.(editor.Model)
+		return m, cmd
+	}
+	return m, nil
+}
+
+// paneAt maps a terminal cell to the pane drawn there, accounting for the title
+// bar (top row), status bar (bottom row), and the one-cell border around each
+// box. ok is false for cells outside any pane (the bars or border gutters).
+func (m Model) paneAt(x, y int) (pane, bool) {
+	if y < 1 || y > m.height-2 { // row 0 is the title bar, the last row the status bar
+		return 0, false
+	}
+	if m.horizontal {
+		// sidebar on the left; chat stacked over the editor on the right.
+		if x < m.sidebarW+2 {
+			return paneSidebar, true
+		}
+		if y < 1+m.chatH+2 {
+			return paneChat, true
+		}
+		return paneEditor, true
+	}
+	// vertical: sidebar | editor | chat, each box +2 columns for its border.
+	switch {
+	case x < m.sidebarW+2:
+		return paneSidebar, true
+	case x < m.sidebarW+2+m.editorW+2:
+		return paneEditor, true
+	default:
+		return paneChat, true
+	}
+}
+
 // setupOptions returns the selectable options for the current selection step
 // (empty for the free-text topic step).
 func (m Model) setupOptions() []string {
@@ -364,7 +430,12 @@ func (m Model) setupOptions() []string {
 		}
 		return []string{cont, "Start something new"}
 	case stepLanguage:
-		return []string{"Python", "Go"}
+		langs := curriculum.Languages()
+		opts := make([]string, 0, len(langs))
+		for _, lang := range langs {
+			opts = append(opts, titleCase(lang))
+		}
+		return opts
 	case stepPath:
 		return []string{"Start from the beginning (full curriculum)", "Learn a specific topic (AI-generated)"}
 	case stepLevel:
@@ -443,12 +514,15 @@ func (m Model) setupSelect() (tea.Model, tea.Cmd) {
 		}
 		m.advance(stepLanguage)
 	case stepLanguage:
-		if m.setupCursor == 0 {
-			m.lang = "python"
+		langs := curriculum.Languages()
+		if m.setupCursor < 0 || m.setupCursor >= len(langs) {
+			m.setupCursor = 0
+		}
+		m.lang = langs[m.setupCursor]
+		if m.lang == "python" {
 			m.advance(stepPath) // Python offers curriculum or a specific topic
 		} else {
-			m.lang = "go"
-			m.curriculum = true // Go is curriculum-only (graded test runner)
+			m.curriculum = true // non-Python languages are curriculum-only
 			m.advance(stepLevel)
 		}
 	case stepPath:
@@ -623,6 +697,7 @@ func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
 	}
 	m.current = ch
 	*m.curID = ch.ID
+	m.editor.SetLanguage(ch.Lang)
 
 	code := ch.StarterCode
 	if d, ok := m.deps.Store.Load(ch.ID); ok {
@@ -645,6 +720,7 @@ func (m *Model) loadChallenge(ch tutor.Challenge) tea.Cmd {
 	m.addOrder(ch.ID)
 	m.current = ch
 	*m.curID = ch.ID
+	m.editor.SetLanguage(ch.Lang)
 
 	code := ch.StarterCode
 	if d, ok := m.deps.Store.Load(ch.ID); ok {
@@ -679,10 +755,8 @@ func (m *Model) handleRunResult(msg runResultMsg) tea.Cmd {
 			m.chat.append(roleSystem, "🎓 Topic complete! Press Ctrl-N for the next topic, or pick any topic on the left.")
 		}
 	} else {
-		m.chat.append(roleFail, "✗ Some tests failed.")
-		if out := strings.TrimSpace(msg.res.Output); out != "" {
-			m.chat.append(roleSystem, out)
-		}
+		m.chat.append(roleFail, "✗ Tests failed")
+		m.chat.append(roleSystem, failureSummary(msg.res))
 		m.deps.Progress.MarkInProgress(msg.ch.ID)
 	}
 	m.deps.Progress.RecordAttempt(msg.ch.ID, msg.res.Passed)
@@ -692,6 +766,62 @@ func (m *Model) handleRunResult(msg runResultMsg) tea.Cmd {
 	m.pending++
 	m.loadKind = "tutor feedback"
 	return feedbackCmd(m.deps.Tutor, msg.ch, msg.code, msg.res.Output, msg.res.Passed)
+}
+
+func failureSummary(res executor.Result) string {
+	out := strings.TrimSpace(res.Output)
+	if res.TimedOut {
+		if out == "" {
+			out = "execution timed out (possible infinite loop)"
+		}
+		return "Reason:\n" + out + "\n\nTry:\nCheck loops and recursion for a condition that always makes progress."
+	}
+	if out == "" {
+		return "No output was captured. Check the challenge tests and rerun."
+	}
+
+	var b strings.Builder
+	if line := likelyFailureLine(out); line != "" {
+		b.WriteString("Failed:\n")
+		b.WriteString(line)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Output:\n")
+	b.WriteString(trimFailureOutput(out, 14))
+	return b.String()
+}
+
+func likelyFailureLine(out string) string {
+	lines := strings.Split(out, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(line, "assert ") {
+			return line
+		}
+	}
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "--- FAIL:"),
+			strings.Contains(line, ".go:"),
+			strings.Contains(line, "AssertionError"),
+			strings.Contains(line, "panic:"),
+			strings.Contains(line, "Error:"):
+			return line
+		}
+	}
+	return ""
+}
+
+func trimFailureOutput(out string, maxLines int) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) <= maxLines {
+		return strings.Join(lines, "\n")
+	}
+	return strings.Join(lines[:maxLines], "\n") + "\n... (" + strconv.Itoa(len(lines)-maxLines) + " more lines)"
 }
 
 // nextChallenge advances to the next topic in curriculum mode, or asks the LLM
@@ -825,6 +955,7 @@ func (m *Model) rebuildSidebar() {
 					id:     t.ID,
 					title:  t.Title,
 					status: m.deps.Progress.TopicStatus(t.ID),
+					active: t.ID == m.currentTopicID,
 				})
 			}
 		}
@@ -843,6 +974,7 @@ func (m *Model) rebuildSidebar() {
 			status = e.Status
 		}
 		items = append(items, sidebarItem{id: id, title: title, status: status})
+		items[len(items)-1].active = id == m.current.ID
 	}
 	m.sidebar.setItems(items)
 }
@@ -880,7 +1012,7 @@ func (m *Model) layout() {
 
 		m.sidebar.setSize(m.sidebarW, m.contentH)
 		m.chat.setSize(m.rightW, m.chatH)
-		m.editor.SetSize(m.rightW, m.editorH)
+		m.editor.SetSize(m.rightW, max(1, m.editorH-1))
 		return
 	}
 
@@ -894,7 +1026,7 @@ func (m *Model) layout() {
 	m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
 
 	m.sidebar.setSize(m.sidebarW, m.contentH)
-	m.editor.SetSize(m.editorW, m.contentH)
+	m.editor.SetSize(m.editorW, max(1, m.contentH-1))
 	m.chat.setSize(m.chatW, m.contentH)
 }
 
@@ -915,12 +1047,12 @@ func (m Model) View() string {
 		// sidebar on the left; content (chat) above the input (editor) on the right.
 		sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
 		ch := m.box(paneChat, m.rightW, m.chatH, m.chat.view())
-		ed := m.box(paneEditor, m.rightW, m.editorH, m.editor.View())
+		ed := m.box(paneEditor, m.rightW, m.editorH, m.editorPaneView(m.rightW))
 		right := lipgloss.JoinVertical(lipgloss.Left, ch, ed)
 		row = lipgloss.JoinHorizontal(lipgloss.Top, sb, right)
 	} else {
 		sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
-		ed := m.box(paneEditor, m.editorW, m.contentH, m.editor.View())
+		ed := m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW))
 		ch := m.box(paneChat, m.chatW, m.contentH, m.chat.view())
 		row = lipgloss.JoinHorizontal(lipgloss.Top, sb, ed, ch)
 	}
@@ -1008,6 +1140,25 @@ func (m Model) box(p pane, w, h int, content string) string {
 		Render(content)
 }
 
+func (m Model) editorPaneView(w int) string {
+	return m.challengeHeader(w) + "\n" + m.editor.View()
+}
+
+func (m Model) challengeHeader(w int) string {
+	label := "No challenge selected"
+	if m.current.ID != "" {
+		prompt := firstLine(m.current.Prompt)
+		if prompt == "" {
+			prompt = m.topic
+		}
+		label = strings.ToUpper(m.current.Lang) + " · " + prompt
+	}
+	if w > 0 && lipgloss.Width(label) > w-2 {
+		label = truncate(label, max(1, w-2))
+	}
+	return editorHeader.Width(w).Render(label)
+}
+
 func (m Model) titleView() string {
 	t := "Meari"
 	if m.curriculum {
@@ -1030,8 +1181,11 @@ func (m Model) statusView() string {
 		left += " " + errStyle.Render("error: "+m.err.Error())
 	}
 	hints := "tab / ⌃w h·l focus · ⌃r run · ⌃n next · ⌃c quit"
-	if m.pendingWindow {
+	switch {
+	case m.pendingWindow:
 		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
+	case m.focus == paneChat:
+		hints = "⌃f/⌃b page · ⌃d/⌃u half · ⇧↑/↓ line · wheel scrolls · enter send"
 	}
 	line := left + "   " + hintStyle.Render(hints)
 	return statusBar.Width(m.width).Render(line)

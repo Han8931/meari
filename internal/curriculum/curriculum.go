@@ -89,7 +89,12 @@ var registry = map[string]map[string]func() []Module{
 		Intermediate: goIntermediate,
 		Advanced:     goAdvanced,
 	},
+	"physics": {
+		Beginner:     physicsBeginner,
+		Intermediate: physicsIntermediate,
+		Advanced:     physicsAdvanced,
+	},
 }
 
 // Languages returns the supported curriculum languages in display order.
-func Languages() []string { return []string{"python", "go"} }
+func Languages() []string { return []string{"python", "go", "physics"} }

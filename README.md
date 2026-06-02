@@ -179,4 +179,5 @@ internal/
 ```
 
 ## Todo
-- Syntax highlighting
+- Progress summary
+- 

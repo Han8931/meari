@@ -737,5 +737,215 @@ reference-like, so functions can modify their contents without a pointer.`,
 				},
 			},
 		},
+		{
+			Name: "App development",
+			Topics: []Topic{
+				{
+					ID:    "go-a-errors",
+					Title: "Error wrapping",
+					Lesson: `Production Go code treats errors as values with context. Return early when an
+operation fails, and wrap lower-level errors so callers can still inspect them:
+    n, err := strconv.Atoi(s)
+    if err != nil {
+        return 0, fmt.Errorf("parse port %q: %w", s, err)
+    }
+
+For domain errors, define a sentinel with errors.New and wrap it with %w:
+    var ErrInvalidPort = errors.New("invalid port")
+    return 0, fmt.Errorf("%w: %d", ErrInvalidPort, n)
+
+Callers can then use errors.Is(err, ErrInvalidPort), even when the error has
+extra detail. Good app errors say what failed and preserve the cause.`,
+					Challenge: Challenge{
+						Prompt:      "Write ParsePort(s string) (int, error). It should parse a TCP port, require 1..65535, wrap parse errors with context, and wrap ErrInvalidPort for out-of-range values.",
+						StarterCode: "import \"errors\"\n\nvar ErrInvalidPort = errors.New(\"invalid port\")\n\nfunc ParsePort(s string) (int, error) {\n\treturn 0, nil\n}\n",
+						Solution:    "import (\n\t\"errors\"\n\t\"fmt\"\n\t\"strconv\"\n)\n\nvar ErrInvalidPort = errors.New(\"invalid port\")\n\nfunc ParsePort(s string) (int, error) {\n\tn, err := strconv.Atoi(s)\n\tif err != nil {\n\t\treturn 0, fmt.Errorf(\"parse port %q: %w\", s, err)\n\t}\n\tif n < 1 || n > 65535 {\n\t\treturn 0, fmt.Errorf(\"%w: %d\", ErrInvalidPort, n)\n\t}\n\treturn n, nil\n}\n",
+						Tests: []string{
+							`got, err := ParsePort("8080"); if err != nil || got != 8080 { t.Fatalf("8080 -> %d %v", got, err) }`,
+							`_, err := ParsePort("70000"); if !errors.Is(err, ErrInvalidPort) { t.Fatalf("want ErrInvalidPort, got %v", err) }`,
+							`_, err := ParsePort("abc"); if err == nil || !strings.Contains(err.Error(), "parse port") { t.Fatalf("want contextual parse error, got %v", err) }`,
+						},
+					},
+				},
+				{
+					ID:    "go-a-io-writer",
+					Title: "io.Writer",
+					Lesson: `The io package gives Go apps small interfaces that compose well. io.Writer is:
+    type Writer interface {
+        Write([]byte) (int, error)
+    }
+
+Files, network connections, buffers, HTTP responses, and compressors can all be
+writers. Code that accepts io.Writer is easy to test because a bytes.Buffer can
+stand in for a file or socket.
+
+Always return write errors. App code often fails at the boundaries: disk full,
+client disconnected, permission denied. Propagating those errors keeps failures
+visible to the caller.`,
+					Challenge: Challenge{
+						Prompt:      "Write WriteLines(w io.Writer, lines []string) error. Write each line followed by \"\\n\" and stop immediately if a write fails.",
+						StarterCode: "import \"io\"\n\nfunc WriteLines(w io.Writer, lines []string) error {\n\treturn nil\n}\n",
+						Solution:    "import (\n\t\"fmt\"\n\t\"io\"\n)\n\nfunc WriteLines(w io.Writer, lines []string) error {\n\tfor _, line := range lines {\n\t\tif _, err := fmt.Fprintln(w, line); err != nil {\n\t\t\treturn err\n\t\t}\n\t}\n\treturn nil\n}\n",
+						Tests: []string{
+							`var b bytes.Buffer; err := WriteLines(&b, []string{"alpha", "beta"}); if err != nil || b.String() != "alpha\nbeta\n" { t.Fatalf("%q %v", b.String(), err) }`,
+							`var b bytes.Buffer; if err := WriteLines(&b, nil); err != nil || b.String() != "" { t.Fatalf("empty -> %q %v", b.String(), err) }`,
+						},
+					},
+				},
+				{
+					ID:    "go-a-http-json",
+					Title: "HTTP JSON handlers",
+					Lesson: `A Go web API is often just functions with this shape:
+    func handler(w http.ResponseWriter, r *http.Request)
+
+Read from the request, set response headers, choose a status code, and write a
+body. For JSON APIs, set Content-Type and use json.NewEncoder(w).Encode(value).
+
+Handlers are easy to test with net/http/httptest:
+    req := httptest.NewRequest(http.MethodGet, "/hello?name=Ada", nil)
+    rec := httptest.NewRecorder()
+    handler(rec, req)
+
+That lets you verify status, headers, and body without opening a real port.`,
+					Challenge: Challenge{
+						Prompt:      "Write GreetHandler(w http.ResponseWriter, r *http.Request). It should respond with JSON {\"message\":\"Hello, <name>\"}, using query parameter name or \"friend\" by default.",
+						StarterCode: "import \"net/http\"\n\nfunc GreetHandler(w http.ResponseWriter, r *http.Request) {\n}\n",
+						Solution:    "import (\n\t\"encoding/json\"\n\t\"net/http\"\n)\n\nfunc GreetHandler(w http.ResponseWriter, r *http.Request) {\n\tname := r.URL.Query().Get(\"name\")\n\tif name == \"\" {\n\t\tname = \"friend\"\n\t}\n\tw.Header().Set(\"Content-Type\", \"application/json\")\n\t_ = json.NewEncoder(w).Encode(map[string]string{\"message\": \"Hello, \" + name})\n}\n",
+						Tests: []string{
+							`req := httptest.NewRequest(http.MethodGet, "/hello?name=Ada", nil); rec := httptest.NewRecorder(); GreetHandler(rec, req); if rec.Code != http.StatusOK { t.Fatalf("status %d", rec.Code) }; if !strings.Contains(rec.Header().Get("Content-Type"), "application/json") { t.Fatalf("content-type %q", rec.Header().Get("Content-Type")) }; if !strings.Contains(rec.Body.String(), "Hello, Ada") { t.Fatalf("body %q", rec.Body.String()) }`,
+							`req := httptest.NewRequest(http.MethodGet, "/hello", nil); rec := httptest.NewRecorder(); GreetHandler(rec, req); if !strings.Contains(rec.Body.String(), "Hello, friend") { t.Fatalf("default body %q", rec.Body.String()) }`,
+						},
+					},
+				},
+				{
+					ID:    "go-a-context",
+					Title: "Context cancellation",
+					Lesson: `context.Context carries cancellation, deadlines, and request-scoped values
+through app code. The most important rule: if your function may block, accept a
+context and stop when ctx.Done() is closed.
+
+The pattern is usually a select:
+    select {
+    case v := <-work:
+        return v, nil
+    case <-ctx.Done():
+        return "", ctx.Err()
+    }
+
+HTTP servers, databases, queues, and CLIs all use context so shutdowns and
+timeouts can unwind work instead of leaking goroutines.`,
+					Challenge: Challenge{
+						Prompt:      "Write WaitForValue(ctx context.Context, ch <-chan string) (string, error). Return the value from ch, or return ctx.Err() if the context is canceled first.",
+						StarterCode: "import \"context\"\n\nfunc WaitForValue(ctx context.Context, ch <-chan string) (string, error) {\n\treturn \"\", nil\n}\n",
+						Solution:    "import \"context\"\n\nfunc WaitForValue(ctx context.Context, ch <-chan string) (string, error) {\n\tselect {\n\tcase v := <-ch:\n\t\treturn v, nil\n\tcase <-ctx.Done():\n\t\treturn \"\", ctx.Err()\n\t}\n}\n",
+						Tests: []string{
+							`ch := make(chan string, 1); ch <- "ready"; got, err := WaitForValue(context.Background(), ch); if err != nil || got != "ready" { t.Fatalf("%q %v", got, err) }`,
+							`ctx, cancel := context.WithCancel(context.Background()); cancel(); got, err := WaitForValue(ctx, make(chan string)); if got != "" || !errors.Is(err, context.Canceled) { t.Fatalf("%q %v", got, err) }`,
+						},
+					},
+				},
+				{
+					ID:    "go-a-channels",
+					Title: "Goroutines & channels",
+					Lesson: `A goroutine runs a function concurrently:
+    go doWork()
+
+Channels let goroutines communicate. Send with ch <- v, receive with v := <-ch,
+and close a channel when no more values will be sent. A range loop over a
+channel receives until it is closed:
+    for v := range ch {
+        use(v)
+    }
+
+Prefer simple ownership: one goroutine sends and closes, another receives. This
+keeps concurrent code readable and avoids races over shared memory.`,
+					Challenge: Challenge{
+						Prompt:      "Write Collect(ch <-chan int) []int that receives values until ch is closed and returns them in receive order.",
+						StarterCode: "func Collect(ch <-chan int) []int {\n\treturn nil\n}\n",
+						Solution:    "func Collect(ch <-chan int) []int {\n\tout := []int{}\n\tfor n := range ch {\n\t\tout = append(out, n)\n\t}\n\treturn out\n}\n",
+						Tests: []string{
+							`ch := make(chan int, 3); ch <- 1; ch <- 2; ch <- 3; close(ch); if !reflect.DeepEqual(Collect(ch), []int{1, 2, 3}) { t.Fatalf("got %v", Collect(ch)) }`,
+							`ch := make(chan int); close(ch); if !reflect.DeepEqual(Collect(ch), []int{}) { t.Fatal("closed empty channel") }`,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "Bubble Tea TUI apps",
+			Topics: []Topic{
+				{
+					ID:    "go-a-bubbletea-model",
+					Title: "Model, Update, View",
+					Lesson: `Bubble Tea uses The Elm Architecture. A TUI is a loop around three ideas:
+    Model   // all state needed to draw the screen
+    Update  // takes a message, returns the next model
+    View    // renders the model as a string
+
+Real Bubble Tea code uses tea.Model and tea.Msg, but the core idea is plain Go:
+keep state in a struct, make state transitions explicit, and render from state
+instead of printing from random places.
+
+This makes TUIs testable. You can call Update with fake messages, then assert
+on the new Model and View output.`,
+					Challenge: Challenge{
+						Prompt:      "Implement CounterModel.Update(msg Msg) CounterModel and CounterModel.View() string. \"up\" increments, \"down\" decrements, \"q\" sets Quit. View should render \"count: N\".",
+						StarterCode: "type Msg string\n\ntype CounterModel struct {\n\tCount int\n\tQuit  bool\n}\n\nfunc (m CounterModel) Update(msg Msg) CounterModel {\n\treturn m\n}\n\nfunc (m CounterModel) View() string {\n\treturn \"\"\n}\n",
+						Solution:    "import \"fmt\"\n\ntype Msg string\n\ntype CounterModel struct {\n\tCount int\n\tQuit  bool\n}\n\nfunc (m CounterModel) Update(msg Msg) CounterModel {\n\tswitch msg {\n\tcase \"up\":\n\t\tm.Count++\n\tcase \"down\":\n\t\tm.Count--\n\tcase \"q\":\n\t\tm.Quit = true\n\t}\n\treturn m\n}\n\nfunc (m CounterModel) View() string {\n\treturn fmt.Sprintf(\"count: %d\", m.Count)\n}\n",
+						Tests: []string{
+							`m := CounterModel{}.Update("up").Update("up").Update("down"); if m.Count != 1 || m.Quit { t.Fatalf("%+v", m) }`,
+							`m := CounterModel{Count: 4}.Update("q"); if !m.Quit || m.View() != "count: 4" { t.Fatalf("%+v view=%q", m, m.View()) }`,
+						},
+					},
+				},
+				{
+					ID:    "go-a-bubbletea-commands",
+					Title: "Commands & messages",
+					Lesson: `Bubble Tea keeps Update pure-ish by representing side effects as commands.
+A command is a function that eventually returns a message:
+    type Cmd func() Msg
+
+Update can return a new model and a command. Bubble Tea runs the command and
+feeds its message back into Update. That is how apps do timers, HTTP requests,
+file reads, and subprocesses without freezing the UI.
+
+The app stays understandable because state changes still happen in Update; the
+command only reports what happened.`,
+					Challenge: Challenge{
+						Prompt:      "Implement Loader.Update(msg Msg) (Loader, Cmd). \"load\" should set Loading and return a command that emits \"loaded\". \"loaded\" should set Ready and clear Loading.",
+						StarterCode: "type Msg string\ntype Cmd func() Msg\n\ntype Loader struct {\n\tLoading bool\n\tReady   bool\n}\n\nfunc (m Loader) Update(msg Msg) (Loader, Cmd) {\n\treturn m, nil\n}\n",
+						Solution:    "type Msg string\ntype Cmd func() Msg\n\ntype Loader struct {\n\tLoading bool\n\tReady   bool\n}\n\nfunc (m Loader) Update(msg Msg) (Loader, Cmd) {\n\tswitch msg {\n\tcase \"load\":\n\t\tm.Loading = true\n\t\treturn m, func() Msg { return \"loaded\" }\n\tcase \"loaded\":\n\t\tm.Loading = false\n\t\tm.Ready = true\n\t}\n\treturn m, nil\n}\n",
+						Tests: []string{
+							`m, cmd := (Loader{}).Update("load"); if !m.Loading || m.Ready || cmd == nil { t.Fatalf("%+v cmd=%v", m, cmd) }`,
+							`m, cmd := (Loader{}).Update("load"); m, cmd = m.Update(cmd()); if m.Loading || !m.Ready || cmd != nil { t.Fatalf("%+v cmd=%v", m, cmd) }`,
+						},
+					},
+				},
+				{
+					ID:    "go-a-bubbletea-list",
+					Title: "Lists & selection",
+					Lesson: `Many Bubble Tea apps are lists: files, menu choices, search results, tasks.
+The model usually stores the items and the selected index. Update handles keys
+like up/down and clamps the cursor so it never points outside the slice.
+
+View then renders every row, using a marker for the selected item:
+    > current
+      other
+
+This pattern scales: later you can add scrolling, filtering, status badges, and
+enter-to-open behavior without changing the basic state shape.`,
+					Challenge: Challenge{
+						Prompt:      "Implement Menu.Update(msg Msg) Menu and Menu.View() string. \"down\"/\"up\" move Selection within bounds. View should prefix the selected row with \"> \" and others with \"  \".",
+						StarterCode: "type Msg string\n\ntype Menu struct {\n\tItems     []string\n\tSelection int\n}\n\nfunc (m Menu) Update(msg Msg) Menu {\n\treturn m\n}\n\nfunc (m Menu) View() string {\n\treturn \"\"\n}\n",
+						Solution:    "import \"strings\"\n\ntype Msg string\n\ntype Menu struct {\n\tItems     []string\n\tSelection int\n}\n\nfunc (m Menu) Update(msg Msg) Menu {\n\tswitch msg {\n\tcase \"down\":\n\t\tif m.Selection < len(m.Items)-1 {\n\t\t\tm.Selection++\n\t\t}\n\tcase \"up\":\n\t\tif m.Selection > 0 {\n\t\t\tm.Selection--\n\t\t}\n\t}\n\treturn m\n}\n\nfunc (m Menu) View() string {\n\trows := make([]string, 0, len(m.Items))\n\tfor i, item := range m.Items {\n\t\tprefix := \"  \"\n\t\tif i == m.Selection {\n\t\t\tprefix = \"> \"\n\t\t}\n\t\trows = append(rows, prefix+item)\n\t}\n\treturn strings.Join(rows, \"\\n\")\n}\n",
+						Tests: []string{
+							`m := Menu{Items: []string{"one", "two", "three"}}.Update("down").Update("down").Update("down"); if m.Selection != 2 { t.Fatalf("selection %d", m.Selection) }`,
+							`m := Menu{Items: []string{"one", "two"}, Selection: 1}.Update("up"); if m.Selection != 0 { t.Fatalf("selection %d", m.Selection) }`,
+							`view := (Menu{Items: []string{"one", "two"}, Selection: 1}).View(); if view != "  one\n> two" { t.Fatalf("view %q", view) }`,
+						},
+					},
+				},
+			},
+		},
 	}
 }

@@ -17,6 +17,9 @@
 package editor
 
 import (
+	"strings"
+	"unicode"
+
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -69,6 +72,7 @@ type Model struct {
 	cmd    textinput.Model
 	save   SaveFunc
 	status string
+	lang   string
 	width  int
 	height int
 
@@ -111,6 +115,7 @@ func New(starter string, vim bool, save SaveFunc) Model {
 		ta:   ta,
 		cmd:  ci,
 		save: save,
+		lang: "python",
 	}
 	if !vim {
 		m.mode = modeInsert
@@ -145,6 +150,16 @@ func (m *Model) SetValue(s string) {
 // Value returns the current buffer contents.
 func (m Model) Value() string { return m.ta.Value() }
 
+// SetLanguage selects the syntax highlighter used when rendering the buffer.
+// Empty keeps the historical default: Python.
+func (m *Model) SetLanguage(lang string) {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	if lang == "" {
+		lang = "python"
+	}
+	m.lang = lang
+}
+
 // Focus gives the editor's textarea keyboard focus; the returned cmd blinks the cursor.
 func (m *Model) Focus() tea.Cmd { return m.ta.Focus() }
 
@@ -165,6 +180,12 @@ var (
 	// magenta in Insert — both always visible (the cursor is static, not blinking).
 	normalCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	insertCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("213"))
+
+	keywordStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
+	typeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	stringStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("106"))
+	commentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
+	numberStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("176"))
 )
 
 // Open launches the editor as its own full-screen program, pre-filled with
@@ -463,7 +484,263 @@ func (m Model) View() string {
 	} else {
 		m.ta.Cursor.Style = insertCursor
 	}
-	return m.ta.View() + "\n" + m.statusLine()
+	return highlightSyntax(m.lang, m.ta.View()) + "\n" + m.statusLine()
+}
+
+func highlightSyntax(lang, s string) string {
+	switch strings.ToLower(lang) {
+	case "go", "golang":
+		return highlightCode(s, goSyntax())
+	case "physics", "plain", "text":
+		return s
+	default:
+		return highlightCode(s, pythonSyntax())
+	}
+}
+
+type syntaxRules struct {
+	keywords     map[string]bool
+	types        map[string]bool
+	lineComments []string
+	blockStart   string
+	blockEnd     string
+}
+
+func goSyntax() syntaxRules {
+	return syntaxRules{
+		keywords: words("break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var"),
+		types:    words("any bool byte comparable complex64 complex128 error float32 float64 int int8 int16 int32 int64 rune string uint uint8 uint16 uint32 uint64 uintptr true false nil iota"),
+		lineComments: []string{
+			"//",
+		},
+		blockStart: "/*",
+		blockEnd:   "*/",
+	}
+}
+
+func pythonSyntax() syntaxRules {
+	return syntaxRules{
+		keywords: words("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield"),
+		types:    words("bool bytes dict float int list object set str tuple"),
+		lineComments: []string{
+			"#",
+		},
+	}
+}
+
+func words(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.Fields(s) {
+		out[w] = true
+	}
+	return out
+}
+
+func highlightCode(s string, rules syntaxRules) string {
+	lines := strings.SplitAfter(s, "\n")
+	var b strings.Builder
+	inBlock := false
+	for _, line := range lines {
+		b.WriteString(highlightLine(line, rules, &inBlock))
+	}
+	return b.String()
+}
+
+func highlightLine(line string, rules syntaxRules, inBlock *bool) string {
+	var b strings.Builder
+	for i := 0; i < len(line); {
+		if *inBlock {
+			end := strings.Index(line[i:], rules.blockEnd)
+			if end < 0 {
+				b.WriteString(commentStyle.Render(line[i:]))
+				return b.String()
+			}
+			end += i + len(rules.blockEnd)
+			b.WriteString(commentStyle.Render(line[i:end]))
+			i = end
+			*inBlock = false
+			continue
+		}
+
+		if raw, word, end, ok := readIdentToken(line, i); ok {
+			switch {
+			case rules.keywords[word]:
+				b.WriteString(renderToken(raw, keywordStyle))
+			case rules.types[word]:
+				b.WriteString(renderToken(raw, typeStyle))
+			default:
+				b.WriteString(raw)
+			}
+			i = end
+			continue
+		}
+
+		if escEnd := ansiEscapeEnd(line, i); escEnd > i {
+			b.WriteString(line[i:escEnd])
+			i = escEnd
+			continue
+		}
+
+		if rules.blockStart != "" && strings.HasPrefix(line[i:], rules.blockStart) {
+			end := strings.Index(line[i+len(rules.blockStart):], rules.blockEnd)
+			if end < 0 {
+				b.WriteString(commentStyle.Render(line[i:]))
+				*inBlock = true
+				return b.String()
+			}
+			end += i + len(rules.blockStart) + len(rules.blockEnd)
+			b.WriteString(commentStyle.Render(line[i:end]))
+			i = end
+			continue
+		}
+
+		if isLineComment(line[i:], rules.lineComments) {
+			b.WriteString(commentStyle.Render(line[i:]))
+			return b.String()
+		}
+
+		if line[i] == '"' || line[i] == '\'' || line[i] == '`' {
+			end := stringEnd(line, i)
+			b.WriteString(stringStyle.Render(line[i:end]))
+			i = end
+			continue
+		}
+
+		if isDigit(line[i]) {
+			end := numberEnd(line, i)
+			b.WriteString(numberStyle.Render(line[i:end]))
+			i = end
+			continue
+		}
+
+		b.WriteByte(line[i])
+		i++
+	}
+	return b.String()
+}
+
+func readIdentToken(s string, i int) (raw, word string, end int, ok bool) {
+	var rb, wb strings.Builder
+	seenIdent := false
+	for j := i; j < len(s); {
+		if escEnd := ansiEscapeEnd(s, j); escEnd > j {
+			rb.WriteString(s[j:escEnd])
+			j = escEnd
+			continue
+		}
+		c := s[j]
+		if !isIdentPart(c) {
+			word := wb.String()
+			if !seenIdent || !isIdentStart(word[0]) {
+				return "", "", i, false
+			}
+			return rb.String(), wb.String(), j, true
+		}
+		if !seenIdent && !isIdentStart(c) {
+			return "", "", i, false
+		}
+		seenIdent = true
+		rb.WriteByte(c)
+		wb.WriteByte(c)
+		j++
+	}
+	word = wb.String()
+	if !seenIdent || !isIdentStart(word[0]) {
+		return "", "", i, false
+	}
+	return rb.String(), wb.String(), len(s), true
+}
+
+func renderToken(raw string, style lipgloss.Style) string {
+	var b strings.Builder
+	for i := 0; i < len(raw); {
+		if escEnd := ansiEscapeEnd(raw, i); escEnd > i {
+			b.WriteString(raw[i:escEnd])
+			i = escEnd
+			continue
+		}
+		j := i + 1
+		for j < len(raw) {
+			if escEnd := ansiEscapeEnd(raw, j); escEnd > j {
+				break
+			}
+			j++
+		}
+		b.WriteString(style.Render(raw[i:j]))
+		i = j
+	}
+	return b.String()
+}
+
+func ansiEscapeEnd(s string, i int) int {
+	if i >= len(s) || s[i] != 0x1b {
+		return i
+	}
+	j := i + 1
+	if j < len(s) && s[j] == '[' {
+		j++
+	}
+	for ; j < len(s); j++ {
+		if s[j] >= '@' && s[j] <= '~' {
+			return j + 1
+		}
+	}
+	return len(s)
+}
+
+func isLineComment(s string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.HasPrefix(s, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func stringEnd(s string, i int) int {
+	quote := s[i]
+	j := i + 1
+	for j < len(s) {
+		if quote != '`' && s[j] == '\\' {
+			j += 2
+			continue
+		}
+		if s[j] == quote {
+			return j + 1
+		}
+		j++
+	}
+	return j
+}
+
+func numberEnd(s string, i int) int {
+	j := i + 1
+	for j < len(s) {
+		c := s[j]
+		if !(isDigit(c) || isIdentStart(c) || c == '.' || c == '_') {
+			break
+		}
+		j++
+	}
+	return j
+}
+
+func identEnd(s string, i int) int {
+	j := i + 1
+	for j < len(s) && isIdentPart(s[j]) {
+		j++
+	}
+	return j
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+func isIdentStart(c byte) bool {
+	return c == '_' || unicode.IsLetter(rune(c))
+}
+
+func isIdentPart(c byte) bool {
+	return isIdentStart(c) || isDigit(c)
 }
 
 func (m Model) statusLine() string {

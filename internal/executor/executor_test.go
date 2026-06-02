@@ -76,3 +76,21 @@ func TestRunGoUsesReflect(t *testing.T) {
 		t.Fatalf("expected pass, got output:\n%s", res.Output)
 	}
 }
+
+func TestRunPhysicsReflection(t *testing.T) {
+	res, err := Run("physics", "Energy changes form but is conserved.", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passed {
+		t.Fatalf("expected submitted reflection to pass, got %q", res.Output)
+	}
+
+	res, err = Run("physics", "   ", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Passed {
+		t.Fatal("empty physics response should not pass")
+	}
+}
