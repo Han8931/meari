@@ -1,0 +1,24 @@
+# Meari configuration. All fields are optional; defaults are shown.
+
+[ai]
+# provider: "openai" | "ollama" | "compatible"
+# Only chooses the default base_url; an explicit base_url always wins.
+provider = "ollama"
+base_url = "http://localhost:11434/v1"   # uncomment for Ollama
+model = "qwen3-coder-next:latest"                       # e.g. "llama3.1" for Ollama
+# Name of the env var holding the API key. Ollama needs no key.
+api_key_env = "OPENAI_API_KEY"
+
+[editor]
+# keybindings: "vim" | "default"
+keybindings = "vim"
+
+[navigation]
+keybindings = "vim"
+
+[ui]
+theme = "default"
+# layout: "vertical" (list | editor | chat — good for coding) or
+# "horizontal" (content on top, input on the bottom — good for reading/writing).
+# Edit live from inside the app with the :config command.
+layout = "vertical"
