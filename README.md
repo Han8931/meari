@@ -38,7 +38,7 @@ go build -o meari .
 On launch you're walked through a short **setup wizard** (use `↑`/`↓` or `j`/`k`,
 `Enter` to choose, `Esc` to go back):
 
-1. **Language** — Python (or another language, lessons-only).
+1. **Course** — Python, Go, or Physics.
 2. **How to learn** — *start from the beginning* (the full curriculum) or *a
    specific topic* (which you then type).
 3. **Level** — beginner / intermediate / advanced, which tunes how the tutor
@@ -46,9 +46,9 @@ On launch you're walked through a short **setup wizard** (use `↑`/`↓` or `j`
 
 This gives you one of two modes:
 
-- **Curriculum mode** — a built-in, ordered learning path for **Python** or
-  **Go**, at beginner / intermediate / advanced. Every lesson and challenge is
-  pre-authored (no AI needed) and verified, so the path is consistent and works
+- **Curriculum mode** — a built-in, ordered learning path for **Python**, **Go**,
+  or **Physics**, at beginner / intermediate / advanced. Every lesson and challenge
+  is pre-authored (no AI needed) and verified, so the path is consistent and works
   offline. The Go track goes deep — imperative basics & the type system
   (floats, the integer types & wraparound, `math/big`, runes/UTF-8, conversions)
   → functions, methods, closures, arrays/slices/`append`/maps → structs, JSON,
@@ -71,6 +71,25 @@ The `-curriculum` and `-topic` flags skip the wizard for returning users.
 
 In the **left pane**, `j`/`k` move and `Enter` opens the topic/challenge. In the
 **chat** pane, type a question and press `Enter` to ask the tutor.
+
+**Scrolling the chat** (lessons, history, and tutor replies can get long):
+
+- **Mouse wheel** — scrolls whatever pane is under the cursor (chat history, or
+  the left-pane selection), without changing focus — like `ranger`/`lf`.
+- With the chat focused: `Ctrl-F`/`Ctrl-B` page down/up, `Ctrl-D`/`Ctrl-U` half
+  page, `Shift-↑`/`Shift-↓` a line at a time, plus `PgUp`/`PgDn`. New messages
+  only jump you to the bottom when you were already there, so reading back
+  through history isn't interrupted.
+
+**Global commands** — type `:` in the left pane (or use the editor's `:` line) to
+open a command prompt:
+
+- `:topic <course>` / `:subject <course>` — switch course (e.g. `:topic go`,
+  `:subject physics`); with no argument it opens a course picker. Keeps your
+  current level.
+- `:progress` — show a progress summary (per-course completion bars + test runs).
+- `:clear` — clear the chat transcript. `:clear progress` and `:clear drafts`
+  wipe your saved learning history / draft code (each asks to confirm first).
 
 Runs **offline** out of the box with built-in content. Configure an AI provider
 for generated lessons, challenges, and feedback.
@@ -179,5 +198,4 @@ internal/
 ```
 
 ## Todo
-- Progress summary
 - 

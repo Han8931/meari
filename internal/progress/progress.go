@@ -80,6 +80,16 @@ func (s *State) SetLast(lang, level, topicID, title string) {
 	s.Last = &Session{Lang: lang, Level: level, TopicID: topicID, Title: title}
 }
 
+// Reset wipes all recorded learning history — challenge attempts, topic
+// completion, and the resume point — and persists the cleared state. It backs
+// the ":clear progress" command, so the change is durable, not just in-memory.
+func (s *State) Reset() error {
+	s.Challenges = map[string]*Entry{}
+	s.Topics = map[string]string{}
+	s.Last = nil
+	return s.Save()
+}
+
 func (s *State) entry(id string) *Entry {
 	e, ok := s.Challenges[id]
 	if !ok {

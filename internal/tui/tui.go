@@ -6,6 +6,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"sort"
@@ -64,6 +65,25 @@ const (
 	stepLevel                     // beginner / intermediate / advanced
 )
 
+// overlayKind selects which full-screen modal is active, if any.
+type overlayKind int
+
+const (
+	overlayNone     overlayKind = iota
+	overlayPicker               // course picker (":topic" with no argument)
+	overlayProgress             // progress summary (":progress")
+	overlayConfirm              // destructive-action confirmation (":clear progress|drafts")
+)
+
+// confirmKind is the action a confirmation modal will run if accepted.
+type confirmKind int
+
+const (
+	confirmNone confirmKind = iota
+	confirmClearProgress
+	confirmClearDrafts
+)
+
 // Model is the root Bubble Tea model coordinating the three panes.
 type Model struct {
 	deps   Deps
@@ -106,6 +126,18 @@ type Model struct {
 	// Vim window-command style.
 	pendingWindow bool
 
+	// Global ex-command line (":topic", ":clear", ":progress"). cmdMode shows the
+	// cmdLine input in the status row; it's opened with ":" from the sidebar and
+	// also driven by RunCommandMsg forwarded from the editor's own command line.
+	cmdMode bool
+	cmdLine textinput.Model
+
+	// Modal overlays drawn full-screen over the panes (like the setup wizard).
+	overlay       overlayKind
+	pickerCursor  int    // selection in the course picker
+	confirmKind   confirmKind
+	confirmPrompt string // the question shown in the confirm modal
+
 	pending  int    // in-flight async ops; spinner shows while > 0
 	loadKind string // label for the most recent op
 	spin     spinner.Model
@@ -143,6 +175,9 @@ func newModel(d Deps) Model {
 	ti.Placeholder = "python functions"
 	ti.Focus()
 
+	cl := textinput.New()
+	cl.Prompt = ":"
+
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	m := Model{
@@ -152,6 +187,7 @@ func newModel(d Deps) Model {
 		editor:     editor.New("", d.Cfg.VimEditor(), save),
 		chat:       newChat(),
 		topicInput: ti,
+		cmdLine:    cl,
 		curID:      curID,
 		challenges: map[string]tutor.Challenge{},
 		spin:       sp,
@@ -284,6 +320,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editor.OpenConfigMsg:
 		return m, m.openConfig()
 
+	case editor.RunCommandMsg:
+		return m.runEx(msg.Raw)
+
 	case configReloadMsg:
 		m.applyConfigReload(msg)
 		return m, nil
@@ -303,6 +342,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.phase == phaseSetup {
 		return m.updateSetup(msg)
+	}
+
+	// Modals and the command line capture all keys while they're open.
+	if m.overlay != overlayNone {
+		return m.updateOverlay(msg)
+	}
+	if m.cmdMode {
+		return m.updateCmdLine(msg)
 	}
 
 	// Ctrl-W starts a window command; the next key chooses a pane by direction.
@@ -335,6 +382,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.focus {
 	case paneSidebar:
+		if msg.String() == ":" {
+			return m.openCmdLine()
+		}
 		var enter bool
 		m.sidebar, enter = m.sidebar.Update(msg)
 		if enter {
@@ -362,7 +412,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // scrolling never changes focus, it just moves the hovered pane. Non-wheel mouse
 // events (clicks, motion) are ignored so the terminal keeps its own selection.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.phase == phaseSetup || !tea.MouseEvent(msg).IsWheel() {
+	if m.phase == phaseSetup || m.overlay != overlayNone || m.cmdMode || !tea.MouseEvent(msg).IsWheel() {
 		return m, nil
 	}
 	p, ok := m.paneAt(msg.X, msg.Y)
@@ -417,6 +467,274 @@ func (m Model) paneAt(x, y int) (pane, bool) {
 	default:
 		return paneChat, true
 	}
+}
+
+// --- global ex-command line ---
+
+// openCmdLine starts the ":" command prompt, shown in the status row.
+func (m Model) openCmdLine() (tea.Model, tea.Cmd) {
+	m.cmdMode = true
+	m.cmdLine.SetValue("")
+	return m, m.cmdLine.Focus()
+}
+
+// updateCmdLine drives the command prompt: Enter runs it, Esc cancels, Ctrl-C
+// still quits, anything else edits the text.
+func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		return m, m.quit()
+	case tea.KeyEnter:
+		raw := strings.TrimSpace(m.cmdLine.Value())
+		m.cmdMode = false
+		m.cmdLine.Blur()
+		if raw == "" {
+			return m, nil
+		}
+		return m.runEx(raw)
+	case tea.KeyEsc:
+		m.cmdMode = false
+		m.cmdLine.Blur()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.cmdLine, cmd = m.cmdLine.Update(msg)
+	return m, cmd
+}
+
+// runEx dispatches an ex-command (without the leading colon), from either the
+// global prompt or the editor's forwarded command line.
+func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return m, nil
+	}
+	switch fields[0] {
+	case "topic", "subject", "course":
+		return m.cmdTopic(fields[1:])
+	case "clear":
+		return m.cmdClear(fields[1:])
+	case "progress":
+		m.overlay = overlayProgress
+		return m, nil
+	case "config":
+		return m, m.openConfig()
+	default:
+		m.chat.append(roleSystem, "unknown command: :"+raw+"  (try :topic, :clear, :progress)")
+		return m, nil
+	}
+}
+
+// cmdTopic switches to another course. With no argument it opens the picker.
+func (m Model) cmdTopic(args []string) (tea.Model, tea.Cmd) {
+	if len(args) == 0 {
+		m.overlay = overlayPicker
+		m.pickerCursor = courseIndex(m.lang)
+		return m, nil
+	}
+	return m.switchCourse(strings.ToLower(args[0]))
+}
+
+// switchCourse enters the curriculum for course at the learner's current level
+// (defaulting to beginner), or reports an error if there's no such course.
+func (m Model) switchCourse(course string) (tea.Model, tea.Cmd) {
+	if !curriculum.HasCurriculum(course) {
+		m.chat.append(roleSystem, "no course \""+course+"\" — try: "+strings.Join(curriculum.Languages(), ", "))
+		return m, nil
+	}
+	level := m.level
+	if level == "" {
+		level = curriculum.Beginner
+	}
+	m.chat.append(roleSystem, "— now learning "+titleCase(course)+" ("+level+") —")
+	return m, m.loadCurriculum(course, level, "")
+}
+
+// cmdClear handles ":clear" (chat transcript), ":clear progress", and
+// ":clear drafts". The destructive variants route through a confirm modal.
+func (m Model) cmdClear(args []string) (tea.Model, tea.Cmd) {
+	if len(args) == 0 {
+		m.chat.blocks = nil
+		m.chatHist = nil
+		m.chat.reflow()
+		return m, nil
+	}
+	switch args[0] {
+	case "progress":
+		m.overlay = overlayConfirm
+		m.confirmKind = confirmClearProgress
+		m.confirmPrompt = "Erase ALL learning progress — completed topics, attempts, and your resume point?"
+	case "drafts":
+		m.overlay = overlayConfirm
+		m.confirmKind = confirmClearDrafts
+		m.confirmPrompt = "Delete ALL saved draft code?"
+	default:
+		m.chat.append(roleSystem, "clear what? try :clear · :clear progress · :clear drafts")
+	}
+	return m, nil
+}
+
+// runConfirm performs the pending destructive action after the learner accepts.
+func (m Model) runConfirm() (tea.Model, tea.Cmd) {
+	switch m.confirmKind {
+	case confirmClearProgress:
+		if err := m.deps.Progress.Reset(); err != nil {
+			m.chat.append(roleSystem, "⚠ couldn't clear progress: "+err.Error())
+		} else {
+			m.chat.append(roleSystem, "✓ learning progress cleared.")
+			m.rebuildSidebar()
+		}
+	case confirmClearDrafts:
+		if err := m.deps.Store.ClearAll(); err != nil {
+			m.chat.append(roleSystem, "⚠ couldn't clear drafts: "+err.Error())
+		} else {
+			m.chat.append(roleSystem, "✓ saved drafts cleared.")
+		}
+	}
+	m.overlay = overlayNone
+	m.confirmKind = confirmNone
+	return m, nil
+}
+
+// --- modal overlays ---
+
+// updateOverlay handles keys while a full-screen modal is open.
+func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, m.quit()
+	}
+	switch m.overlay {
+	case overlayPicker:
+		courses := curriculum.Languages()
+		switch msg.String() {
+		case "esc", "q":
+			m.overlay = overlayNone
+		case "j", "down":
+			if m.pickerCursor < len(courses)-1 {
+				m.pickerCursor++
+			}
+		case "k", "up":
+			if m.pickerCursor > 0 {
+				m.pickerCursor--
+			}
+		case "enter":
+			m.overlay = overlayNone
+			return m.switchCourse(courses[m.pickerCursor])
+		}
+	case overlayProgress:
+		switch msg.String() {
+		case "esc", "q", "enter":
+			m.overlay = overlayNone
+		}
+	case overlayConfirm:
+		switch msg.String() {
+		case "y", "Y":
+			return m.runConfirm()
+		case "n", "N", "esc", "q":
+			m.overlay = overlayNone
+			m.confirmKind = confirmNone
+		}
+	}
+	return m, nil
+}
+
+// overlayView renders the active modal as a centered card.
+func (m Model) overlayView() string {
+	switch m.overlay {
+	case overlayPicker:
+		return m.pickerView()
+	case overlayProgress:
+		return m.progressView()
+	case overlayConfirm:
+		return modalCard("Are you sure?", errStyle.Render("This cannot be undone.")+"\n\n"+m.confirmPrompt, "y to confirm · n / esc to cancel")
+	}
+	return ""
+}
+
+func (m Model) pickerView() string {
+	courses := curriculum.Languages()
+	var b strings.Builder
+	for i, c := range courses {
+		if i == m.pickerCursor {
+			b.WriteString(selectedRow.Render("▸ " + titleCase(c)))
+		} else {
+			b.WriteString("  " + titleCase(c))
+		}
+		if i < len(courses)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return modalCard("Switch course", b.String(), "↑/↓ or j/k · enter to switch · esc to cancel")
+}
+
+func (m Model) progressView() string {
+	var b strings.Builder
+	for _, course := range curriculum.Languages() {
+		done, total := m.courseCompletion(course)
+		b.WriteString(courseProgressLine(course, done, total))
+		b.WriteString("\n")
+	}
+	attempts, passes := 0, 0
+	for _, e := range m.deps.Progress.Challenges {
+		attempts += e.Attempts
+		passes += e.Passes
+	}
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render(fmt.Sprintf("Challenge runs: %d attempt(s), %d passed", attempts, passes)))
+	return modalCard("Your progress", b.String(), "esc / q to close")
+}
+
+// courseCompletion counts done vs total topics across all levels of a course.
+func (m Model) courseCompletion(course string) (done, total int) {
+	for _, level := range []string{curriculum.Beginner, curriculum.Intermediate, curriculum.Advanced} {
+		c, ok := curriculum.For(course, level)
+		if !ok {
+			continue
+		}
+		for _, t := range c.Topics() {
+			total++
+			if m.deps.Progress.TopicStatus(t.ID) == "done" {
+				done++
+			}
+		}
+	}
+	return done, total
+}
+
+// courseProgressLine renders one course's completion as a labeled bar.
+func courseProgressLine(course string, done, total int) string {
+	const width = 14
+	filled := 0
+	if total > 0 {
+		filled = done * width / total
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	return fmt.Sprintf("%-9s %s  %d/%d", titleCase(course), bar, done, total)
+}
+
+// modalCard wraps a title/body/hint in the same bordered card the setup wizard
+// uses, so modals look consistent with the rest of the app.
+func modalCard(title, body, hint string) string {
+	inner := lipgloss.NewStyle().Bold(true).Render(title) + "\n\n" + body
+	if hint != "" {
+		inner += "\n\n" + hintStyle.Render(hint)
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("39")).
+		Padding(1, 3).
+		Width(56).
+		Render(inner)
+}
+
+// courseIndex returns the position of course in the supported list, or 0.
+func courseIndex(course string) int {
+	for i, c := range curriculum.Languages() {
+		if c == course {
+			return i
+		}
+	}
+	return 0
 }
 
 // setupOptions returns the selectable options for the current selection step
@@ -583,6 +901,11 @@ func (m Model) finishResume() (tea.Model, tea.Cmd) {
 // forwardToFocus routes non-key messages (e.g. cursor blinks) to whatever
 // component currently has focus, so its cursor keeps animating.
 func (m Model) forwardToFocus(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.cmdMode {
+		var cmd tea.Cmd
+		m.cmdLine, cmd = m.cmdLine.Update(msg)
+		return m, cmd
+	}
 	if m.phase == phaseSetup {
 		var cmd tea.Cmd
 		m.topicInput, cmd = m.topicInput.Update(msg)
@@ -1042,6 +1365,10 @@ func (m Model) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.setupView())
 	}
 
+	if m.overlay != overlayNone {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.overlayView())
+	}
+
 	var row string
 	if m.horizontal {
 		// sidebar on the left; content (chat) above the input (editor) on the right.
@@ -1174,18 +1501,23 @@ func (m Model) titleView() string {
 }
 
 func (m Model) statusView() string {
+	if m.cmdMode {
+		return statusBar.Width(m.width).Render(m.cmdLine.View())
+	}
 	left := "[" + m.focusName() + "]"
 	if m.pending > 0 {
 		left += " " + m.spin.View() + " " + m.loadKind
 	} else if m.err != nil {
 		left += " " + errStyle.Render("error: "+m.err.Error())
 	}
-	hints := "tab / ⌃w h·l focus · ⌃r run · ⌃n next · ⌃c quit"
+	hints := "tab focus · : cmds · ⌃r run · ⌃n next · ⌃c quit"
 	switch {
 	case m.pendingWindow:
 		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
 	case m.focus == paneChat:
 		hints = "⌃f/⌃b page · ⌃d/⌃u half · ⇧↑/↓ line · wheel scrolls · enter send"
+	case m.focus == paneSidebar:
+		hints = "j/k move · enter open · : topic/clear/progress · ⌃r run · ⌃c quit"
 	}
 	line := left + "   " + hintStyle.Render(hints)
 	return statusBar.Width(m.width).Render(line)

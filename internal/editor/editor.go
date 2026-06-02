@@ -60,6 +60,12 @@ type DoneMsg struct{ Action Action }
 // itself stays open in Normal mode.
 type OpenConfigMsg struct{}
 
+// RunCommandMsg forwards an ex-command the editor doesn't own (e.g. ":topic go",
+// ":progress", ":clear") up to the embedding parent, which dispatches it. Raw is
+// the command without the leading colon. This lets the editor's command line
+// double as the app's global command line instead of having two of them.
+type RunCommandMsg struct{ Raw string }
+
 // SaveFunc persists an in-progress draft. Called on ":w" while editing.
 type SaveFunc func(code string) error
 
@@ -471,8 +477,10 @@ func (m Model) runCommand(raw string) (tea.Model, tea.Cmd) {
 		// Hand off to the parent to open the config in an external editor.
 		return m, func() tea.Msg { return OpenConfigMsg{} }
 	default:
-		m.status = "unknown command: :" + raw + "  (try :submit, :w, :q, :config)"
-		return m, nil
+		// Not an editor command — forward it to the parent's global dispatcher
+		// (e.g. ":topic go", ":progress", ":clear drafts").
+		cmd := raw
+		return m, func() tea.Msg { return RunCommandMsg{Raw: cmd} }
 	}
 }
 
@@ -762,7 +770,7 @@ func (m Model) statusLine() string {
 
 	var hint string
 	if m.vim {
-		hint = "  :submit  :w  :q  :config"
+		hint = "  :submit  :w  :q  :topic  :progress"
 		if m.pending != 0 {
 			hint = "  " + string(m.pending) + "…" // operator pending, awaiting motion
 		}

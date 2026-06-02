@@ -57,6 +57,28 @@ func (s *Store) Clear(challengeID string) error {
 	return err
 }
 
+// ClearAll removes every saved draft (the ".py" files this Store manages),
+// backing the ":clear drafts" command. Other files in the directory are left
+// alone, and a missing directory is treated as already empty.
+func (s *Store) ClearAll() error {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".py") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.dir, e.Name())); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 // Has reports whether a draft exists for a challenge.
 func (s *Store) Has(challengeID string) bool {
 	_, ok := s.Load(challengeID)

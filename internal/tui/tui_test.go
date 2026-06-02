@@ -10,7 +10,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"meari/internal/config"
+	"meari/internal/curriculum"
 	"meari/internal/drafts"
+	"meari/internal/editor"
 	"meari/internal/executor"
 	"meari/internal/progress"
 	"meari/internal/tutor"
@@ -552,5 +554,165 @@ func TestWheelScrollsPaneUnderCursor(t *testing.T) {
 	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: 2, Y: 5})
 	if m.sidebar.cursor != 1 {
 		t.Fatalf("wheel over the sidebar should move the cursor, got %d", m.sidebar.cursor)
+	}
+}
+
+// readyModel returns a sized, post-setup model already in a Python beginner
+// curriculum, so command tests can act on a live session.
+func readyModel(t *testing.T) Model {
+	t.Helper()
+	m := newModel(testDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+	m.loadCurriculum("python", curriculum.Beginner, "")
+	return m
+}
+
+func ex(t *testing.T, m Model, raw string) Model {
+	t.Helper()
+	tm, _ := m.runEx(raw)
+	return tm.(Model)
+}
+
+func TestCommandSwitchesCourse(t *testing.T) {
+	m := readyModel(t)
+	if m.lang != "python" {
+		t.Fatalf("setup: lang=%q", m.lang)
+	}
+	m = ex(t, m, "topic go")
+	if !m.curriculum || m.lang != "go" || m.current.Lang != "go" {
+		t.Fatalf("topic go did not switch course: curriculum=%v lang=%q chLang=%q", m.curriculum, m.lang, m.current.Lang)
+	}
+
+	// :subject is an alias; an unknown course is rejected without switching.
+	m = ex(t, m, "subject physics")
+	if m.lang != "physics" {
+		t.Fatalf("subject alias failed: %q", m.lang)
+	}
+	m = ex(t, m, "topic ruby")
+	if m.lang != "physics" {
+		t.Fatalf("unknown course should not switch, lang=%q", m.lang)
+	}
+}
+
+func TestBareTopicOpensPicker(t *testing.T) {
+	m := readyModel(t)
+	m = ex(t, m, "topic")
+	if m.overlay != overlayPicker {
+		t.Fatalf("bare :topic should open the picker, overlay=%d", m.overlay)
+	}
+	if curriculum.Languages()[m.pickerCursor] != "python" {
+		t.Fatal("picker cursor should start on the current course")
+	}
+	// Move down and choose: it should switch to that course and close the modal.
+	m = step(t, m, keyRunes("j"))
+	chosen := curriculum.Languages()[m.pickerCursor]
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.overlay != overlayNone || m.lang != chosen {
+		t.Fatalf("picker enter should switch to %q and close, got lang=%q overlay=%d", chosen, m.lang, m.overlay)
+	}
+}
+
+func TestClearChatTranscript(t *testing.T) {
+	m := readyModel(t)
+	if len(m.chat.blocks) == 0 {
+		t.Fatal("expected lesson/challenge blocks after setup")
+	}
+	m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "user", Content: "hi"})
+	m = ex(t, m, "clear")
+	if len(m.chat.blocks) != 0 || len(m.chatHist) != 0 {
+		t.Fatalf("clear did not empty the transcript: %d blocks, %d hist", len(m.chat.blocks), len(m.chatHist))
+	}
+}
+
+func TestClearProgressRequiresConfirmation(t *testing.T) {
+	m := readyModel(t)
+	c, _ := curriculum.For("python", curriculum.Beginner)
+	id := c.Topics()[0].ID
+	m.deps.Progress.MarkTopicDone(id)
+
+	m = ex(t, m, "clear progress")
+	if m.overlay != overlayConfirm || m.confirmKind != confirmClearProgress {
+		t.Fatalf("clear progress should open a confirm modal, overlay=%d", m.overlay)
+	}
+	if m.deps.Progress.TopicStatus(id) != "done" {
+		t.Fatal("progress wiped before confirmation")
+	}
+
+	// 'n' cancels and keeps progress.
+	m = step(t, m, keyRunes("n"))
+	if m.overlay != overlayNone || m.deps.Progress.TopicStatus(id) != "done" {
+		t.Fatal("cancel should close the modal and keep progress")
+	}
+
+	// Re-open and confirm with 'y'.
+	m = ex(t, m, "clear progress")
+	m = step(t, m, keyRunes("y"))
+	if m.overlay != overlayNone {
+		t.Fatal("y should close the modal")
+	}
+	if m.deps.Progress.TopicStatus(id) == "done" {
+		t.Fatal("confirm should clear progress")
+	}
+}
+
+func TestClearDraftsConfirmRemovesFiles(t *testing.T) {
+	m := readyModel(t)
+	if err := m.deps.Store.Save("py-b-vars", "x = 1"); err != nil {
+		t.Fatalf("seed draft: %v", err)
+	}
+	m = ex(t, m, "clear drafts")
+	if m.confirmKind != confirmClearDrafts {
+		t.Fatalf("clear drafts should arm the drafts confirm, got %d", m.confirmKind)
+	}
+	m = step(t, m, keyRunes("y"))
+	if m.deps.Store.Has("py-b-vars") {
+		t.Fatal("confirm should delete saved drafts")
+	}
+}
+
+func TestProgressSummaryListsCourses(t *testing.T) {
+	m := readyModel(t)
+	m = ex(t, m, "progress")
+	if m.overlay != overlayProgress {
+		t.Fatalf("progress overlay not open, overlay=%d", m.overlay)
+	}
+	view := m.progressView()
+	for _, want := range []string{"Python", "Go", "Physics"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("progress view missing %q:\n%s", want, view)
+		}
+	}
+	// Esc closes it.
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.overlay != overlayNone {
+		t.Fatal("esc should close the progress overlay")
+	}
+}
+
+func TestColonOpensCommandLineFromSidebar(t *testing.T) {
+	m := readyModel(t)
+	m.setFocus(paneSidebar)
+	m = step(t, m, keyRunes(":"))
+	if !m.cmdMode {
+		t.Fatal(": from the sidebar should open the command line")
+	}
+	for _, r := range "progress" {
+		m = step(t, m, keyRunes(string(r)))
+	}
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.cmdMode {
+		t.Fatal("enter should close the command line")
+	}
+	if m.overlay != overlayProgress {
+		t.Fatalf("typed :progress should open the overlay, overlay=%d", m.overlay)
+	}
+}
+
+func TestEditorForwardsGlobalCommand(t *testing.T) {
+	m := readyModel(t)
+	m = step(t, m, editor.RunCommandMsg{Raw: "topic go"})
+	if m.lang != "go" {
+		t.Fatalf("editor-forwarded command did not switch course: %q", m.lang)
 	}
 }
