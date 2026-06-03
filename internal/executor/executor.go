@@ -91,10 +91,10 @@ func runGo(code string, tests []string) (Result, error) {
 func goTestHarness(tests []string) string {
 	var b strings.Builder
 	b.WriteString("package sol\n\n")
-	b.WriteString("import (\n\t\"testing\"\n\t\"reflect\"\n\t\"fmt\"\n\t\"bytes\"\n\t\"context\"\n\t\"encoding/json\"\n\t\"errors\"\n\t\"io\"\n\t\"net/http\"\n\t\"net/http/httptest\"\n\t\"strings\"\n\t\"time\"\n)\n\n")
+	b.WriteString("import (\n\t\"testing\"\n\t\"reflect\"\n\t\"fmt\"\n\t\"bytes\"\n\t\"context\"\n\t\"encoding/json\"\n\t\"errors\"\n\t\"io\"\n\t\"net/http\"\n\t\"net/http/httptest\"\n\t\"os\"\n\t\"strings\"\n\t\"time\"\n)\n\n")
 	// Blank references so the imports are always \"used\" even if a given test set
 	// doesn't touch them.
-	b.WriteString("var (\n\t_ = reflect.DeepEqual\n\t_ = fmt.Sprint\n\t_ = bytes.Buffer{}\n\t_ = context.Background\n\t_ = json.NewDecoder\n\t_ = errors.Is\n\t_ io.Writer\n\t_ = http.MethodGet\n\t_ = httptest.NewRecorder\n\t_ = strings.Contains\n\t_ = time.Millisecond\n)\n\n")
+	b.WriteString("var (\n\t_ = reflect.DeepEqual\n\t_ = fmt.Sprint\n\t_ = bytes.Buffer{}\n\t_ = context.Background\n\t_ = json.NewDecoder\n\t_ = errors.Is\n\t_ io.Writer\n\t_ = http.MethodGet\n\t_ = httptest.NewRecorder\n\t_ = os.Open\n\t_ = strings.Contains\n\t_ = time.Millisecond\n)\n\n")
 	b.WriteString("func TestAll(t *testing.T) {\n")
 	// Each test gets its own block scope so local variable names (e.g. a ":=")
 	// declared in different tests don't collide.

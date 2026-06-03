@@ -818,6 +818,31 @@ That lets you verify status, headers, and body without opening a real port.`,
 					},
 				},
 				{
+					ID:    "go-a-channels",
+					Title: "Goroutines & channels",
+					Lesson: `A goroutine runs a function concurrently:
+    go doWork()
+
+Channels let goroutines communicate. Send with ch <- v, receive with v := <-ch,
+and close a channel when no more values will be sent. A range loop over a
+channel receives until it is closed:
+    for v := range ch {
+        use(v)
+    }
+
+Prefer simple ownership: one goroutine sends and closes, another receives. This
+keeps concurrent code readable and avoids races over shared memory.`,
+					Challenge: Challenge{
+						Prompt:      "Write Collect(ch <-chan int) []int that receives values until ch is closed and returns them in receive order.",
+						StarterCode: "func Collect(ch <-chan int) []int {\n\treturn nil\n}\n",
+						Solution:    "func Collect(ch <-chan int) []int {\n\tout := []int{}\n\tfor n := range ch {\n\t\tout = append(out, n)\n\t}\n\treturn out\n}\n",
+						Tests: []string{
+							`ch := make(chan int, 3); ch <- 1; ch <- 2; ch <- 3; close(ch); if !reflect.DeepEqual(Collect(ch), []int{1, 2, 3}) { t.Fatalf("got %v", Collect(ch)) }`,
+							`ch := make(chan int); close(ch); if !reflect.DeepEqual(Collect(ch), []int{}) { t.Fatal("closed empty channel") }`,
+						},
+					},
+				},
+				{
 					ID:    "go-a-context",
 					Title: "Context cancellation",
 					Lesson: `context.Context carries cancellation, deadlines, and request-scoped values
@@ -841,31 +866,6 @@ timeouts can unwind work instead of leaking goroutines.`,
 						Tests: []string{
 							`ch := make(chan string, 1); ch <- "ready"; got, err := WaitForValue(context.Background(), ch); if err != nil || got != "ready" { t.Fatalf("%q %v", got, err) }`,
 							`ctx, cancel := context.WithCancel(context.Background()); cancel(); got, err := WaitForValue(ctx, make(chan string)); if got != "" || !errors.Is(err, context.Canceled) { t.Fatalf("%q %v", got, err) }`,
-						},
-					},
-				},
-				{
-					ID:    "go-a-channels",
-					Title: "Goroutines & channels",
-					Lesson: `A goroutine runs a function concurrently:
-    go doWork()
-
-Channels let goroutines communicate. Send with ch <- v, receive with v := <-ch,
-and close a channel when no more values will be sent. A range loop over a
-channel receives until it is closed:
-    for v := range ch {
-        use(v)
-    }
-
-Prefer simple ownership: one goroutine sends and closes, another receives. This
-keeps concurrent code readable and avoids races over shared memory.`,
-					Challenge: Challenge{
-						Prompt:      "Write Collect(ch <-chan int) []int that receives values until ch is closed and returns them in receive order.",
-						StarterCode: "func Collect(ch <-chan int) []int {\n\treturn nil\n}\n",
-						Solution:    "func Collect(ch <-chan int) []int {\n\tout := []int{}\n\tfor n := range ch {\n\t\tout = append(out, n)\n\t}\n\treturn out\n}\n",
-						Tests: []string{
-							`ch := make(chan int, 3); ch <- 1; ch <- 2; ch <- 3; close(ch); if !reflect.DeepEqual(Collect(ch), []int{1, 2, 3}) { t.Fatalf("got %v", Collect(ch)) }`,
-							`ch := make(chan int); close(ch); if !reflect.DeepEqual(Collect(ch), []int{}) { t.Fatal("closed empty channel") }`,
 						},
 					},
 				},
@@ -942,6 +942,101 @@ enter-to-open behavior without changing the basic state shape.`,
 							`m := Menu{Items: []string{"one", "two", "three"}}.Update("down").Update("down").Update("down"); if m.Selection != 2 { t.Fatalf("selection %d", m.Selection) }`,
 							`m := Menu{Items: []string{"one", "two"}, Selection: 1}.Update("up"); if m.Selection != 0 { t.Fatalf("selection %d", m.Selection) }`,
 							`view := (Menu{Items: []string{"one", "two"}, Selection: 1}).View(); if view != "  one\n> two" { t.Fatalf("view %q", view) }`,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "Deferral and cleanup",
+			Topics: []Topic{
+				{
+					ID:    "go-a-defer",
+					Title: "Defer for cleanup",
+					Lesson: `The defer statement schedules a function call to run just before the surrounding
+function returns. This is the Go idiom for cleanup: closing files, unlocking
+mutexes, releasing resources.
+
+    file, err := os.Open("data.txt")
+    if err != nil { return err }
+    defer file.Close()   // Runs when enclosing function returns
+
+Multiple defers run in LIFO order (last in, first out). You can also defer
+recovery from panics:
+
+    defer func() {
+        if r := recover(); r != nil {
+            log.Println("recovered:", r)
+        }
+    }()
+
+Defer arguments are evaluated immediately (when the defer runs, not when called):
+    defer fmt.Println("t", t)   // t captured at defer time
+
+Use defer for cleanup at function entry - it's cleaner than multiple close()
+calls at every return path.`,
+					Challenge: Challenge{
+						Prompt:      "Write ProcessFile(path string) error that opens a file, defers its Close(), reads all bytes, and returns an error if the file can't be opened or read. Use defer.",
+						StarterCode: "import \"os\"\n\nfunc ProcessFile(path string) error {\n\treturn nil\n}\n",
+						Solution:    "import (\n\t\"io\"\n\t\"os\"\n)\n\nfunc ProcessFile(path string) error {\n\tf, err := os.Open(path)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer f.Close()\n\t_, err = io.ReadAll(f)\n\treturn err\n}\n",
+						Tests: []string{
+							`tmp, _ := os.CreateTemp("", "test-*"); tmp.WriteString("hello"); tmp.Close(); err := ProcessFile(tmp.Name()); os.Remove(tmp.Name()); if err != nil { t.Fatalf("%v", err) }`,
+							`if err := ProcessFile("/nonexistent/path/file.txt"); err == nil { t.Fatal("expected error") }`,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "Synchronization primitives",
+			Topics: []Topic{
+				{
+					ID:    "go-a-waitgroup",
+					Title: "sync.WaitGroup",
+					Lesson: `sync.WaitGroup waits for a collection of goroutines to finish. It has three
+operations:
+
+    var wg sync.WaitGroup
+    wg.Add(1)           // Increment counter (before launching goroutine)
+    go func() {
+        defer wg.Done() // Decrement counter when done
+        // work...
+    }()
+    wg.Wait()           // Block until counter is zero
+
+Add() should be called before the goroutine starts; Done() is usually deferred
+inside the goroutine. Wait() blocks until all expected goroutines have called Done().
+
+This pattern lets you launch many concurrent tasks and wait for them all:
+
+    for i := range jobs {
+        wg.Add(1)
+        go func(job int) {
+            defer wg.Done()
+            process(job)
+        }(i)
+    }
+    wg.Wait()
+
+When several goroutines touch the same variable, you also need a sync.Mutex so
+only one enters the critical section at a time. Lock before the shared access
+and Unlock after (defer is handy):
+    var mu sync.Mutex
+    mu.Lock()
+    total += n       // safe: one goroutine here at a time
+    mu.Unlock()
+
+Without the lock, concurrent writes race and the total comes out wrong (run the
+tests with -race to see it). WaitGroup answers "are they all done?"; Mutex
+answers "who may touch the shared state right now?"`,
+					Challenge: Challenge{
+						Prompt:      "Write SumConcurrently(nums []int) int that spawns one goroutine per number, each adding its value to a shared total. Use sync.WaitGroup and sync.Mutex to coordinate.",
+						StarterCode: "import \"sync\"\n\nfunc SumConcurrently(nums []int) int {\n\treturn 0\n}\n",
+						Solution:    "import \"sync\"\n\nfunc SumConcurrently(nums []int) int {\n\tvar mu sync.Mutex\n\ttotal := 0\n\tvar wg sync.WaitGroup\n\tfor _, n := range nums {\n\t\twg.Add(1)\n\t\tgo func(val int) {\n\t\t\tdefer wg.Done()\n\t\t\tmu.Lock()\n\t\t\ttotal += val\n\t\t\tmu.Unlock()\n\t\t}(n)\n\t}\n\twg.Wait()\n\treturn total\n}\n",
+						Tests: []string{
+							`if got := SumConcurrently([]int{1, 2, 3, 4, 5}); got != 15 { t.Fatalf("got %d", got) }`,
+							`if got := SumConcurrently([]int{}); got != 0 { t.Fatal("empty") }`,
+							`if got := SumConcurrently([]int{100}); got != 100 { t.Fatal("single") }`,
 						},
 					},
 				},

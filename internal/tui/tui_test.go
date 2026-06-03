@@ -187,18 +187,17 @@ func TestFailureSummaryTimeoutIncludesNextStep(t *testing.T) {
 	}
 }
 
-func TestFocusCyclesAcrossPanes(t *testing.T) {
+func TestTabDoesNotSwitchFocus(t *testing.T) {
 	m := newModel(testDeps(t))
 	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m.phase = phaseReady
+	m.setFocus(paneEditor)
+	// Tab is no longer a focus switch — it belongs to the focused pane (e.g.
+	// indenting in the editor), so focus must stay put.
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	// From the default (sidebar=0), two tabs land on chat (2).
-	if m.focus != paneChat {
-		t.Fatalf("after two tabs focus = %v, want paneChat", m.focus)
-	}
-	if !m.chat.focused {
-		t.Error("chat pane should report focused after tabbing to it")
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.focus != paneEditor {
+		t.Fatalf("Tab should not change focus, got %v", m.focus)
 	}
 }
 
@@ -706,6 +705,113 @@ func TestColonOpensCommandLineFromSidebar(t *testing.T) {
 	}
 	if m.overlay != overlayProgress {
 		t.Fatalf("typed :progress should open the overlay, overlay=%d", m.overlay)
+	}
+}
+
+func TestHelpCommandOpensModal(t *testing.T) {
+	m := readyModel(t)
+	m = ex(t, m, "help")
+	if m.overlay != overlayHelp {
+		t.Fatalf(":help should open the help overlay, overlay=%d", m.overlay)
+	}
+	view := m.overlayView()
+	for _, want := range []string{":topic", ":clear", ":progress", "focus"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("help view missing %q:\n%s", want, view)
+		}
+	}
+	m = step(t, m, keyRunes("q"))
+	if m.overlay != overlayNone {
+		t.Fatal("q should close the help overlay")
+	}
+}
+
+func TestFoldHidesSidebarAndReclaimsWidth(t *testing.T) {
+	m := readyModel(t)
+	m.setFocus(paneSidebar)
+	wantTitle := firstLine(m.curr.Modules[0].Name)
+	if !strings.Contains(m.View(), wantTitle) {
+		t.Fatalf("sidebar module %q should be visible before folding", wantTitle)
+	}
+	sidebarW, editorW := m.sidebarW, m.editorW
+
+	// :fold collapses the pane, moves focus off it, and widens the editor.
+	m = ex(t, m, "fold")
+	if !m.sidebarCollapsed {
+		t.Fatal(":fold should collapse the sidebar")
+	}
+	if m.focus == paneSidebar {
+		t.Fatal("folding the focused sidebar should move focus away")
+	}
+	if m.sidebarW != 0 {
+		t.Fatalf("folded sidebar width = %d, want 0", m.sidebarW)
+	}
+	if m.editorW <= editorW {
+		t.Fatalf("editor should reclaim width when folded: %d -> %d", editorW, m.editorW)
+	}
+	if strings.Contains(m.View(), wantTitle) {
+		t.Fatal("folded sidebar should not render its module headers")
+	}
+
+	// Ctrl-W h must not return focus to the hidden pane (clamps at the editor).
+	m.setFocus(paneEditor)
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlW})
+	m = step(t, m, keyRunes("h"))
+	if m.focus == paneSidebar {
+		t.Fatal("⌃w h should not focus a folded sidebar")
+	}
+
+	// :fold again restores the original geometry.
+	m = ex(t, m, "fold")
+	if m.sidebarCollapsed {
+		t.Fatal("second :fold should unfold the sidebar")
+	}
+	if m.sidebarW != sidebarW || m.editorW != editorW {
+		t.Fatalf("unfold should restore widths: sidebar %d->%d, editor %d->%d", sidebarW, m.sidebarW, editorW, m.editorW)
+	}
+	if !strings.Contains(m.View(), wantTitle) {
+		t.Fatal("unfolded sidebar should render again")
+	}
+}
+
+func TestCompactAndWideResizeEditor(t *testing.T) {
+	m := readyModel(t)
+	baseEditor, baseChat := m.editorW, m.chatW
+
+	// :compact shrinks the editor and widens the chat (the whole point).
+	m = ex(t, m, "compact")
+	if m.editorBias >= 0 {
+		t.Fatalf(":compact should bias toward the chat, got %d", m.editorBias)
+	}
+	if m.editorW >= baseEditor {
+		t.Fatalf(":compact should narrow the editor: %d -> %d", baseEditor, m.editorW)
+	}
+	if m.chatW <= baseChat {
+		t.Fatalf(":compact should widen the chat: %d -> %d", baseChat, m.chatW)
+	}
+	// Total width must still fit (sidebar + editor + chat + 6 borders <= width).
+	if tot := m.sidebarW + m.editorW + m.chatW + 6; tot > m.width {
+		t.Fatalf("panes overflow after :compact: %d > %d", tot, m.width)
+	}
+
+	// :wide reverses it; two :wide from one :compact lands net wider than default.
+	m = ex(t, m, "wide")
+	if m.editorBias != 0 {
+		t.Fatalf("one :compact then one :wide should return to default, got %d", m.editorBias)
+	}
+	if m.editorW != baseEditor || m.chatW != baseChat {
+		t.Fatalf("split not restored: editor %d->%d chat %d->%d", baseEditor, m.editorW, baseChat, m.chatW)
+	}
+
+	// Repeated :wide clamps instead of letting the chat vanish.
+	for i := 0; i < 10; i++ {
+		m = ex(t, m, "wide")
+	}
+	if m.editorBias != editorBiasMax {
+		t.Fatalf("editorBias should clamp at %d, got %d", editorBiasMax, m.editorBias)
+	}
+	if m.chatW < 16 {
+		t.Fatalf("chat pane fell below its floor: %d", m.chatW)
 	}
 }
 

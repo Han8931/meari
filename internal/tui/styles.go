@@ -49,12 +49,19 @@ var (
 	doneGlyph   = lipgloss.NewStyle().Foreground(doneColor)
 	wipGlyph    = lipgloss.NewStyle().Foreground(wipColor)
 
-	// Chat transcript role styles.
-	chatUserStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
-	chatTutorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
-	chatSystemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	chatOkStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
-	chatFailStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
+	// Chat transcript styles. Speaker labels are short and saturated so the eye
+	// can find who's talking; the message body stays a calm, high-contrast
+	// neutral so long passages read comfortably (the old scheme tinted whole
+	// paragraphs in a low-contrast role color, which was hard to read).
+	chatBodyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+	chatUserLabel   = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)  // learner — cyan-blue
+	chatTutorLabel  = lipgloss.NewStyle().Foreground(lipgloss.Color("79")).Bold(true)  // tutor — teal
+	chatLessonLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("222")).Bold(true) // lesson — warm gold
+
+	chatSystemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
+	chatOkStyle     = lipgloss.NewStyle().Foreground(doneColor).Bold(true)             // match the sidebar "done" green
+	chatFailStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("210")).Bold(true) // soft red, easier on the eyes than 203
 )
 
 // borderStyle returns the focused or blurred border depending on whether the

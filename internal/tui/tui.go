@@ -73,6 +73,7 @@ const (
 	overlayPicker               // course picker (":topic" with no argument)
 	overlayProgress             // progress summary (":progress")
 	overlayConfirm              // destructive-action confirmation (":clear progress|drafts")
+	overlayHelp                 // command & key reference (":help")
 )
 
 // confirmKind is the action a confirmation modal will run if accepted.
@@ -121,6 +122,15 @@ type Model struct {
 	// horizontal selects the stacked layout (content on top, input on the
 	// bottom) instead of the side-by-side columns. Toggled live via :config.
 	horizontal bool
+
+	// sidebarCollapsed hides the left tree pane so the editor and chat get the
+	// full width. Toggled live via ":fold" (alias ":sidebar").
+	sidebarCollapsed bool
+
+	// editorBias shifts the editor/chat split, in percentage points, so the chat
+	// pane can be widened when it's cramped. Positive favors the editor (":wide"),
+	// negative favors the chat (":compact"). Applied in layout(); 0 is the default.
+	editorBias int
 
 	// pendingWindow is set after Ctrl-W; the next key (h/j/k/l) picks a pane,
 	// Vim window-command style.
@@ -368,12 +378,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, m.quit()
 	case "ctrl+w":
+		// Focus moves only via the Vim window chord (Ctrl-W then h/l); bare Tab is
+		// left for the panes (e.g. indenting in the editor).
 		m.pendingWindow = true
 		return m, nil
-	case "tab":
-		return m, m.setFocus(m.shiftPane(1))
-	case "shift+tab":
-		return m, m.setFocus(m.shiftPane(-1))
 	case "ctrl+r":
 		return m, m.startRun()
 	case "ctrl+n":
@@ -448,9 +456,15 @@ func (m Model) paneAt(x, y int) (pane, bool) {
 	if y < 1 || y > m.height-2 { // row 0 is the title bar, the last row the status bar
 		return 0, false
 	}
+	// When folded, the sidebar occupies no columns; sidebarW is 0 and its border
+	// is gone, so the +2 offsets below collapse to the editor's left edge.
+	sidebarSpan := m.sidebarW + 2
+	if m.sidebarCollapsed {
+		sidebarSpan = 0
+	}
 	if m.horizontal {
 		// sidebar on the left; chat stacked over the editor on the right.
-		if x < m.sidebarW+2 {
+		if x < sidebarSpan {
 			return paneSidebar, true
 		}
 		if y < 1+m.chatH+2 {
@@ -460,9 +474,9 @@ func (m Model) paneAt(x, y int) (pane, bool) {
 	}
 	// vertical: sidebar | editor | chat, each box +2 columns for its border.
 	switch {
-	case x < m.sidebarW+2:
+	case x < sidebarSpan:
 		return paneSidebar, true
-	case x < m.sidebarW+2+m.editorW+2:
+	case x < sidebarSpan+m.editorW+2:
 		return paneEditor, true
 	default:
 		return paneChat, true
@@ -514,13 +528,22 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdTopic(fields[1:])
 	case "clear":
 		return m.cmdClear(fields[1:])
+	case "fold", "sidebar":
+		return m.cmdFold()
+	case "compact":
+		return m.cmdResizeEditor(-editorBiasStep)
+	case "wide":
+		return m.cmdResizeEditor(editorBiasStep)
 	case "progress":
 		m.overlay = overlayProgress
+		return m, nil
+	case "help":
+		m.overlay = overlayHelp
 		return m, nil
 	case "config":
 		return m, m.openConfig()
 	default:
-		m.chat.append(roleSystem, "unknown command: :"+raw+"  (try :topic, :clear, :progress)")
+		m.chat.append(roleSystem, "unknown command: :"+raw+"  (try :help)")
 		return m, nil
 	}
 }
@@ -574,6 +597,55 @@ func (m Model) cmdClear(args []string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// cmdFold toggles the left tree pane. When folding away the pane that currently
+// has focus, focus jumps to the editor so keys never vanish into a hidden pane;
+// the layout is re-flowed so the editor and chat reclaim the freed width.
+func (m Model) cmdFold() (tea.Model, tea.Cmd) {
+	m.sidebarCollapsed = !m.sidebarCollapsed
+	var cmd tea.Cmd
+	if m.sidebarCollapsed && m.focus == paneSidebar {
+		cmd = m.setFocus(paneEditor)
+	}
+	m.layout()
+	if m.sidebarCollapsed {
+		m.chat.append(roleSystem, "Sidebar folded — :fold to bring it back.")
+	}
+	return m, cmd
+}
+
+// editorBias bounds: one step per :compact / :wide, clamped so neither the
+// editor nor the chat can be squeezed past a usable share.
+const (
+	editorBiasStep = 8
+	editorBiasMax  = 24
+)
+
+// cmdResizeEditor nudges the editor/chat split by delta percentage points
+// (":compact" shrinks the editor so the chat gets more room, ":wide" grows it),
+// clamps it, re-flows, and reports the new emphasis.
+func (m Model) cmdResizeEditor(delta int) (tea.Model, tea.Cmd) {
+	prev := m.editorBias
+	m.editorBias = clampRange(m.editorBias+delta, -editorBiasMax, editorBiasMax)
+	if m.editorBias == prev {
+		edge := "widest"
+		if delta < 0 {
+			edge = "narrowest"
+		}
+		m.chat.append(roleSystem, "Editor already at its "+edge+" — chat can't go further.")
+		return m, nil
+	}
+	m.layout()
+	switch {
+	case m.editorBias < 0:
+		m.chat.append(roleSystem, "Editor narrowed — more room for chat. (:wide to grow it back)")
+	case m.editorBias > 0:
+		m.chat.append(roleSystem, "Editor widened. (:compact to give chat more room)")
+	default:
+		m.chat.append(roleSystem, "Editor/chat split reset to default.")
+	}
+	return m, nil
+}
+
 // runConfirm performs the pending destructive action after the learner accepts.
 func (m Model) runConfirm() (tea.Model, tea.Cmd) {
 	switch m.confirmKind {
@@ -621,7 +693,7 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.overlay = overlayNone
 			return m.switchCourse(courses[m.pickerCursor])
 		}
-	case overlayProgress:
+	case overlayProgress, overlayHelp:
 		switch msg.String() {
 		case "esc", "q", "enter":
 			m.overlay = overlayNone
@@ -647,6 +719,8 @@ func (m Model) overlayView() string {
 		return m.progressView()
 	case overlayConfirm:
 		return modalCard("Are you sure?", errStyle.Render("This cannot be undone.")+"\n\n"+m.confirmPrompt, "y to confirm · n / esc to cancel")
+	case overlayHelp:
+		return helpView()
 	}
 	return ""
 }
@@ -683,6 +757,34 @@ func (m Model) progressView() string {
 	b.WriteString(hintStyle.Render(fmt.Sprintf("Challenge runs: %d attempt(s), %d passed", attempts, passes)))
 	return modalCard("Your progress", b.String(), "esc / q to close")
 }
+
+// helpView lists the global commands and key bindings (":help").
+func helpView() string {
+	cmds := strings.Join([]string{
+		bold("Commands"),
+		"  :help              this screen",
+		"  :topic <course>    switch course (python/go/physics)",
+		"  :subject <course>  alias for :topic",
+		"  :fold              fold/unfold the left tree pane",
+		"  :compact / :wide   shrink/grow the editor (frees chat space)",
+		"  :progress          progress summary",
+		"  :clear             clear the chat transcript",
+		"  :clear progress    erase saved progress (asks first)",
+		"  :clear drafts      delete saved drafts (asks first)",
+		"  :config            edit config.toml",
+		"",
+		bold("Keys"),
+		"  : (left pane)      open this command prompt",
+		"  ⌃w then h/l        move focus between panes",
+		"  ⌃r / ⌃n            run tests / next challenge",
+		"  chat ⌃f ⌃b ⌃d ⌃u   page / half-page scroll",
+		"  mouse wheel        scroll the pane under the cursor",
+		"  ⌃c                 quit",
+	}, "\n")
+	return modalCard("Meari — help", cmds, "esc / q to close")
+}
+
+func bold(s string) string { return lipgloss.NewStyle().Bold(true).Render(s) }
 
 // courseCompletion counts done vs total topics across all levels of a course.
 func (m Model) courseCompletion(course string) (done, total int) {
@@ -1224,16 +1326,17 @@ func (m *Model) applyConfigReload(msg configReloadMsg) {
 
 // --- focus & ordering helpers ---
 
-func (m *Model) shiftPane(delta int) pane {
-	return pane((int(m.focus) + delta + 3) % 3)
-}
-
 // focusDir moves focus one pane in direction d (-1 left, +1 right), clamping at
 // the edges (Vim windows don't wrap).
 func (m *Model) focusDir(d int) tea.Cmd {
+	// A folded sidebar isn't a focus target, so the left edge becomes the editor.
+	lo := int(paneSidebar)
+	if m.sidebarCollapsed {
+		lo = int(paneEditor)
+	}
 	n := int(m.focus) + d
-	if n < 0 {
-		n = 0
+	if n < lo {
+		n = lo
 	}
 	if n > int(paneChat) {
 		n = int(paneChat)
@@ -1317,20 +1420,33 @@ func (m *Model) layout() {
 	}
 
 	if m.horizontal {
-		// sidebar | (content on top, input on the bottom)
-		contentW := m.width - 4 // two columns -> 4 border columns
+		// (sidebar) | (content on top, input on the bottom). Each visible column
+		// costs 2 border columns: 4 with the sidebar, 2 when it's folded away.
+		borders := 4
+		if m.sidebarCollapsed {
+			borders = 2
+		}
+		contentW := m.width - borders
 		if contentW < 3 {
 			contentW = 3
 		}
-		m.sidebarW = clampMin(contentW*22/100, 14)
-		m.rightW = clampMin(contentW-m.sidebarW, 20)
+		if m.sidebarCollapsed {
+			m.sidebarW = 0
+			m.rightW = clampMin(contentW, 20)
+		} else {
+			m.sidebarW = clampMin(contentW*22/100, 14)
+			m.rightW = clampMin(contentW-m.sidebarW, 20)
+		}
 		// The two stacked boxes cost 4 border rows vs the sidebar's 2, so their
 		// combined content height is contentH-2.
 		rightContent := m.contentH - 2
 		if rightContent < 2 {
 			rightContent = 2
 		}
-		m.chatH = clampMin(rightContent*55/100, 3)
+		// In this stacked layout the editor sits below the chat, so :compact /
+		// :wide trade height between them rather than width.
+		chatPct := clampRange(55-m.editorBias, 40, 75)
+		m.chatH = clampMin(rightContent*chatPct/100, 3)
 		m.editorH = clampMin(rightContent-m.chatH, 3)
 
 		m.sidebar.setSize(m.sidebarW, m.contentH)
@@ -1339,14 +1455,27 @@ func (m *Model) layout() {
 		return
 	}
 
-	// vertical: sidebar | editor | chat (three borders eat 6 columns)
-	contentW := m.width - 6
+	// vertical: (sidebar) | editor | chat. Each visible box eats 2 border
+	// columns: 6 with the sidebar, 4 when it's folded away.
+	borders := 6
+	if m.sidebarCollapsed {
+		borders = 4
+	}
+	contentW := m.width - borders
 	if contentW < 3 {
 		contentW = 3
 	}
-	m.sidebarW = clampMin(contentW*22/100, 12)
-	m.chatW = clampMin(contentW*30/100, 16)
-	m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
+	// :compact / :wide shift the chat's share of the width away from the default.
+	chatPct := clampRange(30-m.editorBias, 22, 50)
+	if m.sidebarCollapsed {
+		m.sidebarW = 0
+		m.chatW = clampMin(contentW*chatPct/100, 16)
+		m.editorW = clampMin(contentW-m.chatW, 10)
+	} else {
+		m.sidebarW = clampMin(contentW*22/100, 12)
+		m.chatW = clampMin(contentW*chatPct/100, 16)
+		m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
+	}
 
 	m.sidebar.setSize(m.sidebarW, m.contentH)
 	m.editor.SetSize(m.editorW, max(1, m.contentH-1))
@@ -1372,16 +1501,24 @@ func (m Model) View() string {
 	var row string
 	if m.horizontal {
 		// sidebar on the left; content (chat) above the input (editor) on the right.
-		sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
 		ch := m.box(paneChat, m.rightW, m.chatH, m.chat.view())
 		ed := m.box(paneEditor, m.rightW, m.editorH, m.editorPaneView(m.rightW))
 		right := lipgloss.JoinVertical(lipgloss.Left, ch, ed)
-		row = lipgloss.JoinHorizontal(lipgloss.Top, sb, right)
+		if m.sidebarCollapsed {
+			row = right
+		} else {
+			sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
+			row = lipgloss.JoinHorizontal(lipgloss.Top, sb, right)
+		}
 	} else {
-		sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
 		ed := m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW))
 		ch := m.box(paneChat, m.chatW, m.contentH, m.chat.view())
-		row = lipgloss.JoinHorizontal(lipgloss.Top, sb, ed, ch)
+		if m.sidebarCollapsed {
+			row = lipgloss.JoinHorizontal(lipgloss.Top, ed, ch)
+		} else {
+			sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
+			row = lipgloss.JoinHorizontal(lipgloss.Top, sb, ed, ch)
+		}
 	}
 
 	frame := lipgloss.JoinVertical(lipgloss.Left, m.titleView(), row, m.statusView())
@@ -1510,14 +1647,14 @@ func (m Model) statusView() string {
 	} else if m.err != nil {
 		left += " " + errStyle.Render("error: "+m.err.Error())
 	}
-	hints := "tab focus · : cmds · ⌃r run · ⌃n next · ⌃c quit"
+	hints := "⌃w h·l focus · : cmds (:help) · ⌃r run · ⌃n next · ⌃c quit"
 	switch {
 	case m.pendingWindow:
 		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
 	case m.focus == paneChat:
 		hints = "⌃f/⌃b page · ⌃d/⌃u half · ⇧↑/↓ line · wheel scrolls · enter send"
 	case m.focus == paneSidebar:
-		hints = "j/k move · enter open · : topic/clear/progress · ⌃r run · ⌃c quit"
+		hints = "j/k move · enter open · : cmds (:help) · ⌃r run · ⌃c quit"
 	}
 	line := left + "   " + hintStyle.Render(hints)
 	return statusBar.Width(m.width).Render(line)
@@ -1551,6 +1688,16 @@ func firstLine(s string) string {
 func clampMin(v, lo int) int {
 	if v < lo {
 		return lo
+	}
+	return v
+}
+
+func clampRange(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
 	}
 	return v
 }

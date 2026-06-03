@@ -85,33 +85,39 @@ func (c *chatModel) reflow() {
 	var b strings.Builder
 	for i, blk := range c.blocks {
 		if i > 0 {
-			b.WriteString("\n")
+			b.WriteString("\n\n") // a blank line between blocks so turns don't run together
 		}
 		b.WriteString(renderBlock(blk, c.w))
 	}
 	c.vp.SetContent(b.String())
 }
 
-// renderBlock styles one transcript block and wraps it to width w.
+// renderBlock styles one transcript block and wraps it to width w. Conversational
+// turns get a colored speaker label followed by neutral, easy-to-read body text;
+// status lines (pass/fail and app notices) are short, so they keep a single tint.
 func renderBlock(blk chatBlock, w int) string {
-	var style lipgloss.Style
-	var prefix string
 	switch blk.role {
 	case roleUser:
-		style, prefix = chatUserStyle, "you  "
+		return chatTurn(chatUserLabel, "you", blk.text, w)
 	case roleTutor:
-		style, prefix = chatTutorStyle, "tutor  "
+		return chatTurn(chatTutorLabel, "tutor", blk.text, w)
 	case roleLesson:
-		style, prefix = chatTutorStyle, "lesson  "
+		return chatTurn(chatLessonLabel, "lesson", blk.text, w)
 	case roleOK:
-		style, prefix = chatOkStyle, ""
+		return chatOkStyle.Width(w).Render(blk.text)
 	case roleFail:
-		style, prefix = chatFailStyle, ""
+		return chatFailStyle.Width(w).Render(blk.text)
 	default:
-		style, prefix = chatSystemStyle, ""
+		return chatSystemStyle.Width(w).Render(blk.text)
 	}
-	body := prefix + blk.text
-	return style.Width(w).Render(body)
+}
+
+// chatTurn renders a "‹label›  ‹body›" turn: the label is bold and saturated, the
+// body neutral. Both segments are styled inline first, then the whole thing is
+// word-wrapped to w as one unit so the colors survive across wrapped lines.
+func chatTurn(label lipgloss.Style, name, text string, w int) string {
+	seg := label.Render(name) + "  " + chatBodyStyle.Render(text)
+	return lipgloss.NewStyle().Width(w).Render(seg)
 }
 
 func (c *chatModel) focus() tea.Cmd {

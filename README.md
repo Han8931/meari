@@ -198,4 +198,6 @@ internal/
 ```
 
 ## Todo
-- 
+- GUI / Web mode
+- Contents building update / Connect to Wiki
+- Chat UI color scheme
