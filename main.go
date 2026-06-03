@@ -1,13 +1,14 @@
-// Command meari is an interactive, AI-powered TUI that teaches programming
-// by having the learner write code themselves and checking it against tests.
+// Command meari is an interactive, AI-powered self-learning vault. It runs as a
+// terminal app (the default) or a local web app (the "serve" subcommand); both
+// drive the same vault and tutor.
 //
-// The screen is split into three panes:
+// The terminal UI splits the screen into three panes:
 //
-//	challenges (left)  -> the learner's challenges & drafts, with progress
-//	editor (center)    -> the in-app Vim/default code editor
-//	chat (right)       -> lesson, test results, and an interactive tutor chat
+//	notes (left)    -> the learner's vault / learning path, with progress
+//	editor (center) -> the in-app Vim/default editor
+//	chat (right)    -> lessons, study results, and an interactive tutor chat
 //
-// All AI calls and test runs happen asynchronously so the UI stays responsive.
+// All AI calls and checks happen asynchronously so the UI stays responsive.
 package main
 
 import (
@@ -16,10 +17,13 @@ import (
 	"os"
 
 	"meari/internal/config"
+	"meari/internal/core"
 	"meari/internal/drafts"
 	"meari/internal/progress"
 	"meari/internal/tutor"
 	"meari/internal/tui"
+	"meari/internal/vault"
+	"meari/internal/web"
 )
 
 func main() {
@@ -30,6 +34,26 @@ func main() {
 }
 
 func run() error {
+	// Subcommand dispatch: "meari serve" launches the web UI; anything else is
+	// the TUI. We peel the subcommand off os.Args before flag parsing so each
+	// mode owns its own flag set.
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		return runServe(os.Args[2:])
+	}
+	return runTUI()
+}
+
+// loadConfig loads config rooted at the working directory.
+func loadConfig(cfgPath string) (config.Config, string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return config.Config{}, "", err
+	}
+	cfg, err := config.Load(cfgPath, wd)
+	return cfg, wd, err
+}
+
+func runTUI() error {
 	var (
 		cfgPath   = flag.String("config", "config.toml", "path to config file")
 		topicFlag = flag.String("topic", "", "topic to learn (skips the startup prompt)")
@@ -39,12 +63,7 @@ func run() error {
 	)
 	flag.Parse()
 
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	cfg, err := config.Load(*cfgPath, wd)
+	cfg, wd, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}
@@ -76,4 +95,29 @@ func run() error {
 		ConfigPath: *cfgPath,
 		BaseDir:    wd,
 	})
+}
+
+// runServe starts the local web UI over the same vault and tutor as the TUI.
+func runServe(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	cfgPath := fs.String("config", "config.toml", "path to config file")
+	addr := fs.String("addr", ":8765", "address to listen on")
+	_ = fs.Parse(args)
+
+	cfg, _, err := loadConfig(*cfgPath)
+	if err != nil {
+		return err
+	}
+
+	v, err := vault.Open(cfg.VaultDir)
+	if err != nil {
+		return err
+	}
+	svc := core.New(v, tutor.New(cfg.AI))
+
+	fmt.Printf("Meari web UI on http://localhost%s  (vault: %s)\n", *addr, cfg.VaultDir)
+	if svc.Offline() {
+		fmt.Println("(offline — no AI provider configured; set OPENAI_API_KEY or use Ollama for generated lessons)")
+	}
+	return web.Serve(*addr, svc)
 }

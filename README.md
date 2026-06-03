@@ -1,104 +1,118 @@
 # Meari
 
-An interactive, AI-powered **TUI** that teaches programming by having you **write the
-code yourself** and checking it against real tests.
+A **self-directed learning vault** — Obsidian-style markdown notes you own, with an
+AI tutor that turns *"I want to learn X"* into a saved lesson note and then helps you
+**practice and remember it** through active-recall study modes. Any subject:
+languages, math, history, science — not just programming.
 
-The screen is split into three panes:
+Meari runs as a **terminal app (TUI)** and a **local web GUI** (`meari serve`); both
+are thin front-ends over the same vault and tutor, converging on one shared Go core.
 
-```
-┌ challenges ┐┌──────── editor ────────┐┌──── chat ────┐
-│ ✓ list-sum ││ def sum_list(xs):       ││ lesson  …     │
-│ … reverse  ││     pass                ││ tutor   …     │
-└────────────┘└─────────────────────────┘└── › ask… ────┘
-```
+> **Status: in active evolution.** Meari began as an AI *coding* tutor (write code →
+> run hidden tests → get feedback) and that loop still works end-to-end today. It's
+> being generalized into the subject-agnostic learning vault described above. See
+> [Roadmap](#roadmap) for what's landed and what's next.
 
-- **challenges** (left) — your challenges & draft files, with progress
-  (`✓` solved / `…` in-progress).
-- **editor** (center) — the in-app Vim/default code editor.
-- **chat** (right) — the lesson, test results, tutor feedback, **and** an
-  interactive chat where you can ask the tutor questions.
+## The idea
 
-The loop: **pick a topic → lesson + challenge → write code → run the tests →
-tutor feedback → next challenge.** All AI calls and test runs happen
-asynchronously, so the UI never freezes.
+- **You own your notes.** Every note is a plain `.md` file with YAML frontmatter in a
+  local *vault* — readable, editable, and syncable with anything (git, Obsidian, …).
+  Notes link to each other with `[[wikilinks]]`; backlinks and search come from a
+  derived index, never from a lock-in database.
+- **AI lessons become notes.** Ask to learn a topic and the tutor writes a focused
+  lesson as a new note in your vault (with `[[links]]` to prerequisites) — not a
+  throwaway chat message.
+- **Study modes reinforce any note.** Layer active recall on top of your notes:
+  **Essay** (free-text answer, AI-graded), **Quiz**, **Flashcards** with spaced
+  repetition, and **Code** (write code checked against tests) as one optional mode.
+- **Offline-friendly.** Runs with built-in content when no AI provider is configured;
+  configure one for generated lessons, study items, and feedback.
 
 ## Run
 
 ```bash
 go build -o meari .
-./meari                      # guided setup wizard (recommended)
-./meari -curriculum          # skip the wizard, start the curriculum
-./meari -topic "python loops"  # skip the wizard, jump to a topic
-./meari -default             # force non-Vim editor keybindings
-./meari -vim                 # force Vim editor keybindings
+./meari                        # guided setup wizard (recommended)
+./meari -curriculum            # skip the wizard, start a built-in learning path
+./meari -topic "spanish subjunctive"  # skip the wizard, jump to a topic
+./meari -vim / -default        # force Vim / non-Vim editor keybindings
 ```
+
+### Web GUI
+
+```bash
+./meari serve                  # http://localhost:8765
+./meari serve --addr :9000     # custom port
+```
+
+Opens a 3-pane browser app over your vault: **notes** (left) with a "Generate lesson"
+box, a **markdown editor + live preview** (center) with `[[wikilink]]` navigation and
+backlinks, and a **chat / study** panel (right) with tutor chat and an Essay study mode.
+Runs offline with built-in content; configure an AI provider for generated lessons and
+grading. (Notes live in `./vault`.)
+
+### The three panes
+
+```
+┌ notes ──────┐┌──────── editor ─────────┐┌──── chat / study ────┐
+│ ▸ math/     ││ # Derivatives           ││ lesson  …             │
+│   limits    ││ A derivative measures…  ││ tutor   …             │
+│ ▸ spanish/  ││ [[Limits]] first.       ││ › ask the tutor…      │
+└─────────────┘└─────────────────────────┘└───────────────────────┘
+```
+
+- **notes** (left) — your vault / learning path, with progress (`✓` done / `…` started).
+- **editor** (center) — the in-app Vim/default editor for the current note or answer.
+- **chat / study** (right) — the lesson, study results, tutor feedback, **and** an
+  interactive chat where you can ask the tutor questions.
+
+All AI calls and checks run asynchronously, so the UI never freezes.
 
 ### Getting started
 
-On launch you're walked through a short **setup wizard** (use `↑`/`↓` or `j`/`k`,
-`Enter` to choose, `Esc` to go back):
+On launch you're walked through a short **setup wizard** (`↑`/`↓` or `j`/`k` to move,
+`Enter` to choose, `Esc` to go back). It drops you into one of:
 
-1. **Course** — Python, Go, or Physics.
-2. **How to learn** — *start from the beginning* (the full curriculum) or *a
-   specific topic* (which you then type).
-3. **Level** — beginner / intermediate / advanced, which tunes how the tutor
-   pitches lessons and challenges.
-
-This gives you one of two modes:
-
-- **Curriculum mode** — a built-in, ordered learning path for **Python**, **Go**,
-  or **Physics**, at beginner / intermediate / advanced. Every lesson and challenge
-  is pre-authored (no AI needed) and verified, so the path is consistent and works
-  offline. The Go track goes deep — imperative basics & the type system
-  (floats, the integer types & wraparound, `math/big`, runes/UTF-8, conversions)
-  → functions, methods, closures, arrays/slices/`append`/maps → structs, JSON,
-  constructors, composition, interfaces, and pointers. The **left pane** shows
-  the modules and topics with progress (`✓` done / `…` started); `Enter` on a
-  topic loads its lesson and challenge. Your spot is saved — relaunch and pick
-  **Continue where you left off**.
-- **Custom mode** — any single topic you type. The left pane lists the
-  challenges you generate for it (AI-generated; Python).
+- **Curriculum mode** — a built-in, ordered, pre-authored learning path (no AI needed,
+  works offline), with progress saved so you can **Continue where you left off**. The
+  Go track, for example, goes deep — imperative basics & the type system → functions,
+  methods, closures, slices/maps → structs, JSON, interfaces, and pointers.
+- **Custom mode** — any topic you type; the AI generates the material for it.
 
 The `-curriculum` and `-topic` flags skip the wizard for returning users.
 
-**Pane keys** (global, in any pane):
+**Global keys** (any pane):
 
-- `Tab` / `Shift-Tab` — cycle focus between panes
 - `Ctrl-W` then `h` / `l` — move focus left / right, Vim window-style
-- `Ctrl-R` — run the tests for the current challenge
-- `Ctrl-N` — generate the next challenge for the current topic
-- `Ctrl-C` — quit (your draft and progress are saved)
+  (`Tab` / `Shift-Tab` also cycle focus)
+- `Ctrl-R` — check / submit the current item
+- `Ctrl-N` — advance to the next item on the current topic
+- `Ctrl-C` — quit (your work and progress are saved)
 
-In the **left pane**, `j`/`k` move and `Enter` opens the topic/challenge. In the
-**chat** pane, type a question and press `Enter` to ask the tutor.
+In the **left pane**, `j`/`k` move and `Enter` opens an item. In the **chat** pane,
+type a question and press `Enter` to ask the tutor.
 
-**Scrolling the chat** (lessons, history, and tutor replies can get long):
+**Scrolling the chat** (lessons and replies get long):
 
-- **Mouse wheel** — scrolls whatever pane is under the cursor (chat history, or
-  the left-pane selection), without changing focus — like `ranger`/`lf`.
-- With the chat focused: `Ctrl-F`/`Ctrl-B` page down/up, `Ctrl-D`/`Ctrl-U` half
-  page, `Shift-↑`/`Shift-↓` a line at a time, plus `PgUp`/`PgDn`. New messages
-  only jump you to the bottom when you were already there, so reading back
-  through history isn't interrupted.
+- **Mouse wheel** — scrolls whatever pane is under the cursor, without changing focus
+  (like `ranger`/`lf`).
+- With the chat focused: `Ctrl-F`/`Ctrl-B` page, `Ctrl-D`/`Ctrl-U` half-page,
+  `Shift-↑`/`Shift-↓` by line, plus `PgUp`/`PgDn`. New messages only jump you to the
+  bottom when you were already there, so reading back isn't interrupted.
 
-**Global commands** — type `:` in the left pane (or use the editor's `:` line) to
-open a command prompt:
+**Global commands** — type `:` in the left pane (or use the editor's `:` line):
 
-- `:topic <course>` / `:subject <course>` — switch course (e.g. `:topic go`,
-  `:subject physics`); with no argument it opens a course picker. Keeps your
-  current level.
-- `:progress` — show a progress summary (per-course completion bars + test runs).
-- `:clear` — clear the chat transcript. `:clear progress` and `:clear drafts`
-  wipe your saved learning history / draft code (each asks to confirm first).
-
-Runs **offline** out of the box with built-in content. Configure an AI provider
-for generated lessons, challenges, and feedback.
+- `:topic <subject>` / `:subject <subject>` — switch subject; no argument opens a
+  picker. Keeps your current level.
+- `:progress` — progress summary (completion bars + activity).
+- `:clear` — clear the chat transcript. `:clear progress` / `:clear drafts` wipe saved
+  history / drafts (each confirms first).
 
 ## AI providers (OpenAI-compatible)
 
-Every provider is reached through the OpenAI-compatible chat-completions API, so
-the same code path works for all of them — only the base URL / model / key differ.
-Configure in `config.toml`:
+Every provider is reached through the OpenAI-compatible chat-completions API, so one
+code path works for all — only the base URL / model / key differ. Configure in
+`config.toml`:
 
 **OpenAI**
 ```toml
@@ -131,26 +145,21 @@ api_key_env = "YOUR_KEY_ENV"
 ## In-app editor (center pane)
 
 A modal, Vim-style editor (configurable). Set `editor.keybindings` to `"vim"` or
-`"default"` in `config.toml`.
-
-The current mode is unmistakable: a **green `NORMAL`** / **blue `INSERT`** badge in
-the editor's status line, and a **steady, color-coded cursor** — a green block in
-Normal, a magenta block in Insert (it never blinks, so it can't disappear).
+`"default"` in `config.toml`. The current mode is unmistakable: a **green `NORMAL`** /
+**blue `INSERT`** badge in the status line and a steady, color-coded cursor.
 
 **Vim mode — Normal**
 - Move: `h j k l` · `w`/`b` word fwd/back · `e` end-of-word · `0`/`^` line start ·
   `$` line end · `gg`/`G` top/bottom of file
-- Enter Insert: `i` `a` (after) · `I`/`A` (line start/end) · `o`/`O` (open line below/above)
-- Edit: `x` delete char · `r<char>` replace char · `dd` delete line · `dw` delete word ·
-  `D` delete to end of line · `cc`/`cw`/`C` change line/word/to-end · `p` paste
+- Enter Insert: `i` `a` · `I`/`A` (line start/end) · `o`/`O` (open line below/above)
+- Edit: `x` · `r<char>` · `dd` · `dw` · `D` · `cc`/`cw`/`C` · `p`
 - `Esc` returns to Normal (and cancels a half-typed operator like `d`)
 
 **Command line (`:`)**
-- `:submit` — check your solution (same as `Ctrl-R`)
-- `:w` — save a draft and keep editing (resume the challenge later)
+- `:submit` — check the current item (same as `Ctrl-R`)
+- `:w` — save a draft and keep editing (resume later)
 - `:q` — leave the app (`:wq` saves + submits)
-- `:config` — open `config.toml` in your `$EDITOR`; on save, the layout is
-  re-applied live (other settings take effect next launch)
+- `:config` — open `config.toml` in your `$EDITOR`; on save, the layout re-applies live
 
 `Ctrl-S` submit / `Ctrl-Q` quit work in any mode.
 
@@ -158,46 +167,64 @@ Normal, a magenta block in Insert (it never blinks, so it can't disappear).
 
 Set `ui.layout` in `config.toml` (or change it live with `:config`):
 
-- **`vertical`** (default) — three side-by-side columns: list │ editor │ chat.
-  Best for coding.
-- **`horizontal`** — the list on the left, with the **content (lesson/chat) on
-  top and your input on the bottom**. Better for reading- and writing-heavy
-  subjects.
+- **`vertical`** (default) — three side-by-side columns: notes │ editor │ chat.
+- **`horizontal`** — notes on the left, with the **content on top and your input on the
+  bottom**. Better for reading- and writing-heavy subjects.
 
-**Default mode** — ordinary typing; `Ctrl-S` submit, `Ctrl-Q` quit.
+> `:w` (save & resume) is intentionally separate from `:submit` (check), so you can stop
+> mid-answer and come back to it.
 
-> `:w` (save & resume) is intentionally separate from `:submit` (check), so you can
-> stop mid-solution and come back to it.
-
-## Layout
+## Project layout
 
 ```
-main.go                 entry point: load config, construct deps, launch the TUI
+main.go                 entry point: load config, construct deps, launch a front-end
 internal/
+  core/                 ✅ headless engine: vault+tutor orchestration both         (NEW)
+                        front-ends drive (list/open/save/generate/backlinks/chat/essay)
+  vault/                ✅ markdown vault: notes + frontmatter + [[wikilinks]]      (NEW)
+  web/                  ✅ local web GUI (net/http) + `meari serve`, over core      (NEW)
+  tutor/                OpenAI-compatible client; lesson/challenge/feedback/chat,
+                        plus subject-agnostic GenerateNote + GradeEssay, + offline
   tui/                  the 3-pane Bubble Tea program (panes, async cmds, layout)
   config/               TOML config + defaults + flag overrides
-  tutor/                OpenAI-compatible client (lesson/challenge/feedback/chat + offline)
-  curriculum/           the built-in ordered learning path (modules + topics)
+  curriculum/           built-in ordered learning paths (modules + topics)
   editor/               embeddable Bubble Tea modal Vim editor
-  executor/             runs the learner's code against tests (timeout-guarded)
-  drafts/               save/load/clear in-progress solutions by challenge id
-  progress/             progress.json — challenge attempts + curriculum topic status
+  executor/             runs code against tests (timeout-guarded)
+  drafts/               save/load/clear in-progress work by id
+  progress/             progress.json — attempts + topic status
+
+planned (see Roadmap):
+  index/                derived SQLite index: search, link graph, SRS, progress
+  study/  srs/          study-mode graders (Quiz/Flashcard/Essay/Code) + scheduling
 ```
+
+## Roadmap
+
+The pivot from coding tutor → general learning vault, in phases. **Files are the source
+of truth; the index is rebuildable. New dependencies are kept pure-Go / cgo-free** so a
+desktop build (Wails/Tauri) stays a thin later step.
+
+- **✅ Vault** — own your notes as markdown with frontmatter and `[[wikilinks]]`.
+- **✅ Subject-agnostic tutor** — `GenerateNote` (lesson → note) and `GradeEssay` for any subject.
+- **✅ Web GUI (first cut)** — `meari serve`: 3-pane browser UI with lesson generation,
+  markdown editor + preview, wikilink navigation, backlinks, chat, and Essay study.
+- **✅ Core engine** — a headless `core.Service` owns the vault+tutor orchestration and
+  returns plain data; the web GUI drives it (no business logic in handlers). The TUI
+  adopts it next.
+- **▢ Index** — SQLite-backed search, backlinks, and the SRS/progress store (replaces the
+  current in-memory backlink scan).
+- **▢ TUI vault parity** — browse/edit vault notes and run Essay study in the terminal too,
+  on the same core.
+- **▢ Spaced repetition** — flashcards with SM-2 scheduling and a review queue.
+- **▢ More study modes** — Quiz, and Code-with-tests restored as one optional mode.
+- **▢ Knowledge graph** — backlink panels and a visual link graph.
+- **▢ Desktop app** — package the core + web UI as a native window.
 
 ## Notes / current limits
 
-- The executor runs Python via `python3` with a 5s timeout. It is **not a
+- The code-execution path runs Python via `python3` with a timeout. It is **not a
   sandbox** — fine for a single trusted local learner; don't run untrusted code.
-- Vim mode is "Vim-*style*" (a useful core: motions, operators `d`/`c`, `r`, and
-  the command line), not full Vim — there's no visual mode, counts, or undo.
-- `Tab` and `Ctrl-W` are reserved for pane navigation, so they can't be typed
-  into the editor.
-- Drafts are preserved and resumed by challenge id; `Ctrl-N` asks the AI for a
-  fresh challenge on the same topic, and you can revisit any past challenge from
-  the left pane.
-```
-
-## Todo
-- GUI / Web mode
-- Contents building update / Connect to Wiki
-- Chat UI color scheme
+- Vim mode is "Vim-*style*" (motions, `d`/`c` operators, `r`, the command line), not
+  full Vim — no visual mode, counts, or undo.
+- `Tab` and `Ctrl-W` are reserved for pane navigation, so they can't be typed into the
+  editor.

@@ -38,3 +38,36 @@ func offlineFeedback(passed bool) string {
 	return "Not quite. Think about how the modulo operator `%` tells you the " +
 		"remainder when dividing by 2. (Configure an AI provider for tailored hints.)"
 }
+
+// offlineNote returns a placeholder lesson note when no AI provider is set, so
+// the vault + study loop is still exercisable offline.
+func offlineNote(request string) NoteContent {
+	topic := request
+	if topic == "" {
+		topic = "Untitled"
+	}
+	body := "_[offline tutor — no AI provider configured]_\n\n" +
+		"This is a placeholder note for **" + topic + "**. " +
+		"Write what you already know here, link related ideas with [[wikilinks]], " +
+		"and use the study modes to test yourself.\n\n" +
+		"Set `OPENAI_API_KEY`, or point the config at Ollama, to generate real lessons."
+	return NoteContent{
+		Title:   topic,
+		Subject: "general",
+		Tags:    []string{"offline"},
+		Body:    body,
+	}
+}
+
+// offlineEssayGrade gives generic encouragement when no provider is configured.
+// A non-empty answer "passes" (score 1) so the reflection loop still advances.
+func offlineEssayGrade(answer string) EssayGrade {
+	if len(answer) == 0 {
+		return EssayGrade{Score: 0, Feedback: "Write a short response before submitting."}
+	}
+	return EssayGrade{
+		Score: 1,
+		Feedback: "Response submitted. (Configure an AI provider for a graded, " +
+			"personalized critique of your answer.)",
+	}
+}

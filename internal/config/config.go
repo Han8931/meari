@@ -22,6 +22,7 @@ type Config struct {
 	// Paths are derived at load time, not read from the file.
 	WorkspaceDir string `toml:"-"`
 	DataDir      string `toml:"-"`
+	VaultDir     string `toml:"-"` // the learner's markdown note vault
 }
 
 // AIConfig selects the model backend. All providers are reached through the
@@ -102,6 +103,7 @@ func Load(path, baseDir string) (Config, error) {
 
 	cfg.WorkspaceDir = filepath.Join(baseDir, "workspace")
 	cfg.DataDir = filepath.Join(baseDir, "data")
+	cfg.VaultDir = filepath.Join(baseDir, "vault")
 
 	// Normalize unknown values back to safe defaults.
 	if cfg.Editor.Keybindings != "vim" && cfg.Editor.Keybindings != "default" {
