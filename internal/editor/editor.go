@@ -109,6 +109,19 @@ type Model struct {
 	undoStack []editState
 	redoStack []editState
 
+	// count is the numeric prefix being typed (3w, 2dd, 5x); 0 = none.
+	// pendingCount preserves it across a two-key command (2dd arms 'd' with 2).
+	count        int
+	pendingCount int
+
+	// lastFindOp/Ch remember the latest f/F/t/T so ; and , can repeat it.
+	lastFindOp rune
+	lastFindCh rune
+
+	// searchMode marks the command line as a / search; lastSearch feeds n/N.
+	searchMode bool
+	lastSearch string
+
 	action Action
 	done   bool
 }
@@ -326,25 +339,75 @@ func (m *Model) arrow(t tea.KeyType) {
 func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.status = ""
 
-	// A prefix/operator is pending (d, c, g, r): this key completes it.
+	// A prefix/operator is pending (d, c, g, r, f, …): this key completes it.
 	if m.pending != 0 {
 		op := m.pending
 		m.pending = 0
 		return m.runPending(op, msg)
 	}
 
-	// Motions are shared with Visual mode (the cursor moves the same way; only
-	// what happens afterwards differs).
-	if m.applyMotion(msg.String()) {
+	key := msg.String()
+
+	// Numeric prefix: digits accumulate a count for the next command (3w, 2dd).
+	// "0" is the line-start motion unless a count is already in progress.
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count > 0) {
+		m.count = m.count*10 + int(key[0]-'0')
+		return m, nil
+	}
+	if msg.Type == tea.KeyEsc {
+		m.count = 0
 		return m, nil
 	}
 
-	switch msg.String() {
+	// Motions are shared with Visual mode; a count repeats them.
+	if m.applyMotion(key) {
+		for n := m.takeCount() - 1; n > 0; n-- {
+			m.applyMotion(key)
+		}
+		return m, nil
+	}
+
+	switch key {
 	// --- undo / redo ---
 	case "u":
 		m.undo()
 	case "ctrl+r":
 		m.redo()
+
+	// --- char find & repeat ---
+	case "f", "F", "t", "T":
+		m.pendingCount = m.takeCount()
+		m.pending = []rune(key)[0]
+		return m, nil
+	case ";":
+		m.repeatFind(false, m.takeCount())
+	case ",":
+		m.repeatFind(true, m.takeCount())
+
+	// --- line edits ---
+	case "J":
+		m.pushUndo()
+		m.joinLines(m.takeCount())
+	case "~":
+		m.pushUndo()
+		m.toggleCase(m.takeCount())
+
+	// --- search ---
+	case "/":
+		m.searchMode = true
+		m.mode = modeCommand
+		m.cmd.Prompt = "/"
+		m.cmd.SetValue("")
+		m.cmd.Focus()
+		return m, textinput.Blink
+	case "n":
+		if !m.search(m.lastSearch, 1) {
+			m.status = "pattern not found: " + m.lastSearch
+		}
+	case "N":
+		if !m.search(m.lastSearch, -1) {
+			m.status = "pattern not found: " + m.lastSearch
+		}
 
 	// --- enter Visual ---
 	case "v":
@@ -393,7 +456,12 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// --- edits ---
 	case "x":
 		m.pushUndo()
-		m.captureDelete(false, func() { m.send(tea.KeyDelete) })
+		n := m.takeCount()
+		m.captureDelete(false, func() {
+			for i := 0; i < n; i++ {
+				m.send(tea.KeyDelete)
+			}
+		})
 	case "D":
 		m.pushUndo()
 		m.captureDelete(false, func() { m.send(tea.KeyCtrlK) }) // delete to end of line
@@ -402,15 +470,14 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.captureDelete(false, func() { m.send(tea.KeyCtrlK) })
 		m.mode = modeInsert
 	case "p":
-		m.pushUndo()
-		return m.paste(true) // register first; system clipboard as fallback
+		return m.pasteCmd(true) // register first; system clipboard as fallback
 	case "P":
-		m.pushUndo()
-		return m.paste(false)
+		return m.pasteCmd(false)
 
 	// --- prefixes / operators ---
 	case "d", "c", "g", "r", "y", "<", ">":
-		m.pending = []rune(msg.String())[0]
+		m.pendingCount = m.takeCount()
+		m.pending = []rune(key)[0]
 		return m, nil
 
 	// --- command line ---
@@ -435,6 +502,16 @@ func (m Model) runPending(op rune, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pushUndo()
 	}
 	switch op {
+	case 'f', 'F', 't', 'T':
+		if len(msg.Runes) == 1 {
+			n := m.pendingCount
+			if n < 1 {
+				n = 1
+			}
+			if !m.findChar(op, msg.Runes[0], n) {
+				m.status = "not found: " + string(msg.Runes)
+			}
+		}
 	case 'g':
 		if key == "g" {
 			m.send(tea.KeyCtrlHome) // gg -> top of buffer
@@ -442,7 +519,15 @@ func (m Model) runPending(op rune, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case 'd':
 		switch key {
 		case "d":
-			m.captureDelete(true, m.deleteLine)
+			n := m.pendingCount
+			if n < 1 {
+				n = 1
+			}
+			m.captureDelete(true, func() {
+				for i := 0; i < n; i++ {
+					m.deleteLine()
+				}
+			})
 		case "w", "e":
 			m.captureDelete(false, func() {
 				m.send2(tea.KeyMsg{Type: tea.KeyDelete, Alt: true}) // dw -> delete word
@@ -471,15 +556,15 @@ func (m Model) runPending(op rune, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case 'y':
 		if key == "y" {
-			m.yankLine() // yy -> yank the current line
+			m.yankLines(max(1, m.pendingCount)) // yy / 3yy -> yank line(s)
 		}
 	case '<':
 		if key == "<" {
-			m.indentLine(-1) // << -> dedent the current line
+			m.indentLines(max(1, m.pendingCount), -1) // << / 3<< -> dedent line(s)
 		}
 	case '>':
 		if key == ">" {
-			m.indentLine(1) // >> -> indent the current line
+			m.indentLines(max(1, m.pendingCount), 1) // >> / 3>> -> indent line(s)
 		}
 	case 'r':
 		// Replace the character under the cursor with the typed rune.
@@ -512,8 +597,21 @@ func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		m.mode = modeNormal
 		m.cmd.Blur()
+		m.cmd.Prompt = ":"
+		m.searchMode = false
 		return m, nil
 	case tea.KeyEnter:
+		if m.searchMode {
+			m.mode = modeNormal
+			m.cmd.Blur()
+			m.cmd.Prompt = ":"
+			m.searchMode = false
+			m.lastSearch = m.cmd.Value()
+			if !m.search(m.lastSearch, 1) {
+				m.status = "pattern not found: " + m.lastSearch
+			}
+			return m, nil
+		}
 		return m.runCommand(m.cmd.Value())
 	}
 	var cmd tea.Cmd

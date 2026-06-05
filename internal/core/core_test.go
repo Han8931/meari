@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"meari/internal/config"
@@ -120,12 +121,38 @@ func TestEssayAndChatOffline(t *testing.T) {
 	if g.Score != 1 { // offline: any non-empty answer passes
 		t.Fatalf("offline essay score = %v", g.Score)
 	}
-	reply, err := s.Chat(context.Background(), []tutor.ChatTurn{{Role: "user", Content: "hi"}})
+	reply, err := s.Chat(context.Background(), "", []tutor.ChatTurn{{Role: "user", Content: "hi"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reply == "" {
 		t.Fatal("expected an offline chat reply")
+	}
+}
+
+func TestTrimTurnsAndClampContext(t *testing.T) {
+	long := make([]tutor.ChatTurn, 40)
+	for i := range long {
+		long[i] = tutor.ChatTurn{Role: "user", Content: "turn"}
+	}
+	if got := len(TrimTurns(long)); got != maxChatTurns {
+		t.Fatalf("trimmed to %d, want %d", got, maxChatTurns)
+	}
+	short := long[:3]
+	if got := len(TrimTurns(short)); got != 3 {
+		t.Fatalf("short history must pass through, got %d", got)
+	}
+
+	big := strings.Repeat("x", maxContextChars+500)
+	clamped := ClampContext(big)
+	if len([]rune(clamped)) > maxContextChars+50 {
+		t.Fatalf("context not clamped: %d runes", len([]rune(clamped)))
+	}
+	if !strings.HasSuffix(clamped, "(truncated)") {
+		t.Fatal("clamped context should be marked truncated")
+	}
+	if ClampContext("small") != "small" {
+		t.Fatal("small context must pass through")
 	}
 }
 

@@ -6,6 +6,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"meari/internal/config"
+	"meari/internal/core"
 	"meari/internal/curriculum"
 	"meari/internal/drafts"
 	"meari/internal/editor"
@@ -119,6 +121,10 @@ type Model struct {
 	chatKey   string                      // key of the active chat context
 	chatByKey map[string][]chatBlock      // saved transcripts
 	histByKey map[string][]tutor.ChatTurn // saved tutor conversations
+
+	// Streaming chat reply state: one reply at a time.
+	streaming bool
+	streamCh  chan streamChunkMsg
 
 	// Curriculum mode: the left pane is the guided learning path instead of the
 	// generated-challenge list. Lessons and challenges are pre-authored (no LLM).
@@ -320,15 +326,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: msg.text})
 		return m, nil
 
-	case chatReplyMsg:
-		m.pending--
-		m.chat.append(roleTutor, msg.text)
-		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: msg.text})
-		return m, nil
+	case streamChunkMsg:
+		return m.handleStreamChunk(msg)
 
 	case answerMsg:
 		m.pending--
 		m.chat.append(roleLesson, "Model answer\n\n"+msg.text)
+		// Join the conversation so follow-up questions can refer to it.
+		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: "Model answer:\n" + msg.text})
 		return m, nil
 
 	case runResultMsg:
@@ -1105,8 +1110,33 @@ func (m Model) forwardToFocus(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// submitChat sends the chat input as a question to the tutor.
+// chatContext describes what the learner is currently looking at — the lesson,
+// the challenge, and their in-progress code — so chat replies stay grounded in
+// the material instead of answering in a vacuum.
+func (m Model) chatContext() string {
+	var b strings.Builder
+	if m.curriculum {
+		if t, ok := m.topicByID[m.currentTopicID]; ok {
+			b.WriteString("Current lesson — " + t.Title + ":\n" + t.Lesson + "\n\n")
+		}
+	} else if m.topic != "" {
+		b.WriteString("Current topic: " + m.topic + "\n\n")
+	}
+	if m.current.ID != "" {
+		b.WriteString("Current challenge (" + challengeLang(m.current) + "): " + m.current.Prompt + "\n\n")
+		b.WriteString("Learner's current code:\n" + m.editor.Value() + "\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// submitChat sends the chat input as a question to the tutor, streaming the
+// reply into the transcript. The call carries the current lesson/challenge/code
+// as context so answers relate to what's on screen.
 func (m Model) submitChat() (tea.Model, tea.Cmd) {
+	if m.streaming {
+		m.chat.append(roleSystem, "the tutor is still replying — one question at a time")
+		return m, nil
+	}
 	text, ok := m.chat.submit()
 	if !ok {
 		return m, nil
@@ -1115,7 +1145,36 @@ func (m Model) submitChat() (tea.Model, tea.Cmd) {
 	m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "user", Content: text})
 	m.pending++
 	m.loadKind = "tutor thinking"
-	return m, chatCmd(m.deps.Tutor, m.chatHist)
+	m.streaming = true
+	m.chat.beginStream()
+
+	tut := m.deps.Tutor
+	ctxText := core.ClampContext(m.chatContext())
+	hist := core.TrimTurns(append([]tutor.ChatTurn(nil), m.chatHist...)) // copy: the goroutine outlives this Update
+	ch, cmd := startChatStream(func(onDelta func(string)) (string, error) {
+		return tut.ChatStream(context.Background(), ctxText, hist, onDelta)
+	})
+	m.streamCh = ch
+	return m, cmd
+}
+
+// handleStreamChunk advances a streaming tutor reply: grow the transcript on
+// each delta, finalize the conversation history when done.
+func (m Model) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.pending--
+		m.streaming = false
+		m.chat.failStream("⚠ chat failed: " + msg.err.Error())
+		return m, nil
+	}
+	if msg.done {
+		m.pending--
+		m.streaming = false
+		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: msg.full})
+		return m, nil
+	}
+	m.chat.appendStream(msg.delta)
+	return m, listenStream(m.streamCh)
 }
 
 // openSelected loads the highlighted sidebar item's challenge into the editor.

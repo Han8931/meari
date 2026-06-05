@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -170,19 +171,43 @@ func (s *Server) handleBacklinks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"backlinks": back})
 }
 
+// handleChat streams the tutor's reply as plain text chunks. The request may
+// name the open note (path) so the reply is grounded in what the learner is
+// currently reading.
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		History []tutor.ChatTurn `json:"history"`
+		Path    string           `json:"path"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	reply, err := s.svc.Chat(r.Context(), req.History)
-	if err != nil {
-		httpErr(w, err)
-		return
+
+	ctxText := ""
+	if req.Path != "" {
+		if n, err := s.svc.OpenNote(req.Path); err == nil {
+			ctxText = "Current note — " + n.Title + "\n\nNote content:\n" + n.Body
+		}
 	}
-	writeJSON(w, map[string]any{"reply": reply})
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Accel-Buffering", "no")
+	fl, _ := w.(http.Flusher)
+	wrote := false
+	_, err := s.svc.ChatStream(r.Context(), ctxText, req.History, func(d string) {
+		_, _ = io.WriteString(w, d)
+		wrote = true
+		if fl != nil {
+			fl.Flush()
+		}
+	})
+	if err != nil {
+		if !wrote {
+			httpErr(w, err)
+			return
+		}
+		_, _ = io.WriteString(w, "\n⚠ "+err.Error())
+	}
 }
 
 func (s *Server) handleEssay(w http.ResponseWriter, r *http.Request) {

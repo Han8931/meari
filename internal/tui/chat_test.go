@@ -275,6 +275,60 @@ func TestPasteCommandFocusesChat(t *testing.T) {
 	}
 }
 
+func TestChatInputHistory(t *testing.T) {
+	c := newChat()
+	c.setSize(60, 12)
+	up := tea.KeyMsg{Type: tea.KeyUp}
+	down := tea.KeyMsg{Type: tea.KeyDown}
+
+	c.input.SetValue("one")
+	c.submit()
+	c.input.SetValue("two")
+	c.submit()
+
+	// Empty input: up recalls the latest, then the one before.
+	c.histKey(up)
+	if got := c.input.Value(); got != "two" {
+		t.Fatalf("after up: %q", got)
+	}
+	c.histKey(up)
+	if got := c.input.Value(); got != "one" {
+		t.Fatalf("after up up: %q", got)
+	}
+	// Down walks back toward the (empty) live draft.
+	c.histKey(down)
+	if got := c.input.Value(); got != "two" {
+		t.Fatalf("after down: %q", got)
+	}
+	c.histKey(down)
+	if got := c.input.Value(); got != "" {
+		t.Fatalf("back to live draft: %q", got)
+	}
+
+	// A typed draft is preserved across a recall round-trip.
+	c.input.SetValue("")
+	c.draft = ""
+	c.histPos = len(c.inputHist)
+	c.input.SetValue("") // empty -> navigable
+	c.histKey(up)        // "two"
+	c.histKey(down)      // live again
+	if got := c.input.Value(); got != "" {
+		t.Fatalf("draft restore: %q", got)
+	}
+
+	// While composing (non-empty, not a recalled entry), arrows are NOT history.
+	c.input.SetValue("half-typed question")
+	if c.histKey(up) {
+		t.Fatal("up while composing must remain a cursor movement")
+	}
+	// Submitting dedupes consecutive repeats.
+	c.input.SetValue("two")
+	c.submit()
+	if n := len(c.inputHist); n != 2 {
+		t.Fatalf("consecutive duplicate should not be re-added: %v", c.inputHist)
+	}
+}
+
 func TestLastFence(t *testing.T) {
 	if _, ok := lastFence("no code here"); ok {
 		t.Fatal("prose has no fence")

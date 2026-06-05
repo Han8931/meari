@@ -122,6 +122,11 @@ type a question and press `Enter` to ask the tutor.
   AI works, and the input area is **three rows tall** so longer questions wrap visibly.
 - The transcript is **per-topic**: switching topics/notes gives you a clean pane for the
   new one, and returning to a previous topic restores its chat and study history.
+- Replies **stream in live**, and every question carries the **current context** — the
+  lesson, the challenge, and your in-progress code (or the open note and your essay
+  draft) — so answers relate to what's on screen. Long conversations send only the most
+  recent turns to the model.
+- **↑/↓ recall your previous questions** (when the input is empty), readline-style.
 - **Copy a reply:** with the chat focused, `Option-O` (macOS) / `Alt-O` (Linux) copies the
   tutor's last reply to the clipboard; `:copy code` grabs just its last code block and
   `:copy all` the whole transcript. Copying uses the native clipboard *and* OSC 52, so it
@@ -208,6 +213,10 @@ A modal, Vim-style editor (configurable). Set `editor.keybindings` to `"vim"` or
 **Vim mode — Normal**
 - Move: `h j k l` · `w` next word · `b` previous word · `e` end-of-word ·
   `0`/`^` line start · `$` line end · `gg`/`G` top/bottom of file
+- **Counts:** a numeric prefix repeats motions and edits — `3w`, `5x`, `2dd`, `3yy`, `2>>`, `2J`
+- **Char find:** `f`/`F` to a character (forward/back), `t`/`T` till before it; `;`/`,` repeat
+- **Search:** `/pattern` then Enter; `n`/`N` next/previous match (wraps)
+- `J` joins lines · `~` toggles case
 - Enter Insert: `i` `a` · `I`/`A` (line start/end) · `o`/`O` (open line below/above)
 - Edit: `x` · `r<char>` · `dd` · `dw` · `D` · `cc`/`cw`/`C` · `<<`/`>>` dedent/indent line
 - Register: deletes and `yy` (yank line) fill the unnamed register; `p`/`P` paste

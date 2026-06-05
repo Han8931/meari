@@ -189,6 +189,161 @@ func (m *Model) applyMotion(key string) bool {
 	return true
 }
 
+// --- counts, char-find, join, case, search ---
+
+// takeCount consumes the pending numeric prefix (e.g. the 3 in 3w), defaulting
+// to 1.
+func (m *Model) takeCount() int {
+	n := m.count
+	m.count = 0
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// findChar implements f/F/t/T on the current line: move to (or till before) the
+// n-th occurrence of ch forward (f/t) or backward (F/T) from the cursor.
+func (m *Model) findChar(op rune, ch rune, n int) bool {
+	lines := strings.Split(m.ta.Value(), "\n")
+	row, col := m.cursorPos()
+	if row < 0 || row >= len(lines) {
+		return false
+	}
+	line := []rune(lines[row])
+
+	step, till := 1, false
+	switch op {
+	case 'F':
+		step = -1
+	case 't':
+		till = true
+	case 'T':
+		step, till = -1, true
+	}
+
+	pos := col
+	for found := 0; found < n; {
+		pos += step
+		if pos < 0 || pos >= len(line) {
+			return false
+		}
+		if line[pos] == ch {
+			found++
+		}
+	}
+	if till {
+		pos -= step // stop one short of the target, Vim's t/T
+	}
+	if pos < 0 || pos >= len(line) {
+		return false
+	}
+	m.moveTo(row, pos)
+	m.lastFindOp, m.lastFindCh = op, ch
+	return true
+}
+
+// repeatFind implements ; (same direction) and , (reversed).
+func (m *Model) repeatFind(reverse bool, n int) {
+	if m.lastFindOp == 0 {
+		return
+	}
+	op := m.lastFindOp
+	if reverse {
+		switch op {
+		case 'f':
+			op = 'F'
+		case 'F':
+			op = 'f'
+		case 't':
+			op = 'T'
+		case 'T':
+			op = 't'
+		}
+	}
+	saveOp, saveCh := m.lastFindOp, m.lastFindCh
+	m.findChar(op, m.lastFindCh, n)
+	m.lastFindOp, m.lastFindCh = saveOp, saveCh // , must not flip the stored direction
+}
+
+// joinLines implements J: join the current line with the next, separated by a
+// single space (n times).
+func (m *Model) joinLines(n int) {
+	for ; n > 0; n-- {
+		lines := strings.Split(m.ta.Value(), "\n")
+		row, _ := m.cursorPos()
+		if row < 0 || row+1 >= len(lines) {
+			return
+		}
+		left := strings.TrimRight(lines[row], " \t")
+		right := strings.TrimLeft(lines[row+1], " \t")
+		joined := left + " " + right
+		if left == "" {
+			joined = right
+		}
+		out := append(append(append([]string{}, lines[:row]...), joined), lines[row+2:]...)
+		m.ta.SetValue(strings.Join(out, "\n"))
+		m.moveTo(row, len([]rune(left))) // cursor at the join point, as in Vim
+	}
+}
+
+// toggleCase implements ~: flip the case of the rune under the cursor and
+// advance, n times.
+func (m *Model) toggleCase(n int) {
+	for ; n > 0; n-- {
+		lines := strings.Split(m.ta.Value(), "\n")
+		row, col := m.cursorPos()
+		if row < 0 || row >= len(lines) {
+			return
+		}
+		line := []rune(lines[row])
+		if col < 0 || col >= len(line) {
+			return
+		}
+		r := line[col]
+		switch {
+		case unicode.IsLower(r):
+			line[col] = unicode.ToUpper(r)
+		case unicode.IsUpper(r):
+			line[col] = unicode.ToLower(r)
+		}
+		lines[row] = string(line)
+		m.ta.SetValue(strings.Join(lines, "\n"))
+		m.moveTo(row, col+1)
+	}
+}
+
+// search jumps to the next occurrence of query (wrapping), in direction dir
+// (+1 forward for / and n, -1 backward for N). Returns false when not found.
+func (m *Model) search(query string, dir int) bool {
+	if query == "" {
+		return false
+	}
+	text := []rune(m.ta.Value())
+	q := []rune(query)
+	row, col := m.cursorPos()
+	start := flatIndex(text, row, col)
+
+	at := func(i int) bool {
+		if i < 0 || i+len(q) > len(text) {
+			return false
+		}
+		return string(text[i:i+len(q)]) == query
+	}
+	n := len(text)
+	for step := 1; step <= n; step++ {
+		i := start + dir*step
+		// wrap around the buffer
+		i = ((i % n) + n) % n
+		if at(i) {
+			r, c := rowColOf(text, i)
+			m.moveTo(r, c)
+			return true
+		}
+	}
+	return false
+}
+
 // --- undo / redo ---
 
 // editState is one undo snapshot: the whole buffer plus the cursor.
@@ -471,22 +626,32 @@ func shiftLine(line string, delta int) string {
 
 // --- line indentation (Vim's << and >>) ---
 
-// indentLine shifts the current line one indent level: +1 prepends tabIndent
-// (>>), -1 removes up to one level of leading whitespace — a tab or up to
-// len(tabIndent) spaces (<<). The cursor stays on the same character.
-func (m *Model) indentLine(delta int) {
+// indentLines shifts n lines starting at the cursor one indent level: +1
+// prepends tabIndent (>>), -1 removes up to one level of leading whitespace —
+// a tab or up to len(tabIndent) spaces (<<). The cursor stays on the same
+// character of the current line.
+func (m *Model) indentLines(n, delta int) {
 	row, col := m.cursorPos()
 	lines := strings.Split(m.ta.Value(), "\n")
 	if row < 0 || row >= len(lines) {
 		return
 	}
-	old := lines[row]
-	lines[row] = shiftLine(old, delta)
-	d := len(lines[row]) - len(old) // indent chars are ASCII, so bytes == runes
-	if d == 0 {
+	changed := false
+	firstDelta := 0
+	for i := 0; i < n && row+i < len(lines); i++ {
+		old := lines[row+i]
+		lines[row+i] = shiftLine(old, delta)
+		if lines[row+i] != old {
+			changed = true
+			if i == 0 {
+				firstDelta = len(lines[row+i]) - len(old) // indent is ASCII: bytes == runes
+			}
+		}
+	}
+	if !changed {
 		return
 	}
-	if col += d; col < 0 {
+	if col += firstDelta; col < 0 {
 		col = 0
 	}
 	m.ta.SetValue(strings.Join(lines, "\n"))
@@ -704,25 +869,41 @@ func removedChunk(before, after string) (string, bool) {
 	return before[p : len(before)-s], true
 }
 
-// yankLine copies the current line into the register (Vim's yy).
-func (m *Model) yankLine() {
+// yankLines copies n lines starting at the cursor into the register (yy, 3yy).
+func (m *Model) yankLines(n int) {
 	lines := strings.Split(m.ta.Value(), "\n")
-	if r := m.ta.Line(); r >= 0 && r < len(lines) {
-		m.register = lines[r]
-		m.regLinewise = true
+	r := m.ta.Line()
+	if r < 0 || r >= len(lines) {
+		return
 	}
+	end := r + n
+	if end > len(lines) {
+		end = len(lines)
+	}
+	m.register = strings.Join(lines[r:end], "\n")
+	m.regLinewise = true
 }
 
-// paste inserts the register at the cursor (p pastes after, P before). With an
-// empty register it falls back to the system clipboard via the textarea's
-// paste command — propagating the returned tea.Cmd, which a bare synthetic
-// key-send would discard.
-func (m Model) paste(after bool) (tea.Model, tea.Cmd) {
+// pasteCmd handles p/P: paste the register (count times); with an empty
+// register it falls back to the system clipboard via the textarea's paste
+// command — propagating the returned tea.Cmd, which a bare synthetic key-send
+// would discard.
+func (m Model) pasteCmd(after bool) (tea.Model, tea.Cmd) {
+	m.pushUndo()
 	if m.register == "" {
+		m.count = 0
 		var cmd tea.Cmd
 		m.ta, cmd = m.ta.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
 		return m, cmd
 	}
+	for n := m.takeCount(); n > 0; n-- {
+		m.pasteRegister(after)
+	}
+	return m, nil
+}
+
+// pasteRegister inserts the register at the cursor (after = Vim's p, else P).
+func (m *Model) pasteRegister(after bool) {
 	if m.regLinewise {
 		if after {
 			m.ta.CursorEnd()
@@ -731,11 +912,10 @@ func (m Model) paste(after bool) (tea.Model, tea.Cmd) {
 			m.ta.CursorStart()
 			m.ta.InsertString(m.register + "\n")
 		}
-		return m, nil
+		return
 	}
 	if after {
 		m.arrow(tea.KeyRight)
 	}
 	m.ta.InsertString(m.register)
-	return m, nil
 }

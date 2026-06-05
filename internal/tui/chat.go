@@ -52,6 +52,13 @@ type chatModel struct {
 	// codeLang is the language assumed for UNLABELED ``` fences in tutor and
 	// lesson messages (labeled fences always win). Empty renders them plain.
 	codeLang string
+
+	// Input history, recalled with the arrow keys (readline-style). histPos ==
+	// len(inputHist) means "live" (composing a new message); draft stashes the
+	// live input while navigating.
+	inputHist []string
+	histPos   int
+	draft     string
 }
 
 // setCodeLang sets the default language for unlabeled code fences and
@@ -274,14 +281,58 @@ func (c *chatModel) blur() {
 }
 
 // submit returns the trimmed input value and clears the field. ok is false when
-// the input is empty/whitespace.
+// the input is empty/whitespace. Submitted text joins the input history.
 func (c *chatModel) submit() (text string, ok bool) {
 	v := strings.TrimSpace(c.input.Value())
 	c.input.Reset()
 	if v == "" {
 		return "", false
 	}
+	if n := len(c.inputHist); n == 0 || c.inputHist[n-1] != v {
+		c.inputHist = append(c.inputHist, v)
+	}
+	c.histPos = len(c.inputHist)
+	c.draft = ""
 	return v, true
+}
+
+// histKey recalls previous inputs with ↑/↓, readline-style, and reports whether
+// it consumed the key. To keep the arrows usable for editing multi-line input,
+// history navigation engages only while the input is empty or showing an
+// unmodified recalled entry.
+func (c *chatModel) histKey(msg tea.KeyMsg) bool {
+	key := msg.String()
+	if key != "up" && key != "down" {
+		return false
+	}
+	v := c.input.Value()
+	navigable := v == "" ||
+		(c.histPos < len(c.inputHist) && v == c.inputHist[c.histPos])
+	if !navigable {
+		return false
+	}
+	switch key {
+	case "up":
+		if c.histPos == 0 || len(c.inputHist) == 0 {
+			return c.histPos < len(c.inputHist) // consume while navigating; else let the cursor move
+		}
+		if c.histPos == len(c.inputHist) {
+			c.draft = v
+		}
+		c.histPos--
+		c.input.SetValue(c.inputHist[c.histPos])
+	case "down":
+		if c.histPos >= len(c.inputHist) {
+			return false
+		}
+		c.histPos++
+		if c.histPos == len(c.inputHist) {
+			c.input.SetValue(c.draft)
+		} else {
+			c.input.SetValue(c.inputHist[c.histPos])
+		}
+	}
+	return true
 }
 
 // Update routes input to the transcript or the input area. Scroll keys and mouse
@@ -296,6 +347,9 @@ func (c chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		return c, cmd
 	case tea.KeyMsg:
 		if c.scrollKey(msg) {
+			return c, nil
+		}
+		if c.histKey(msg) {
 			return c, nil
 		}
 	}
@@ -327,6 +381,38 @@ func (c *chatModel) scrollKey(msg tea.KeyMsg) bool {
 		return false
 	}
 	return true
+}
+
+// --- streaming replies ---
+
+// beginStream opens an empty tutor block that appendStream grows in place as
+// model output arrives.
+func (c *chatModel) beginStream() {
+	c.append(roleTutor, "")
+}
+
+// appendStream adds a streamed chunk to the block opened by beginStream,
+// following the tail only if the reader was already at the bottom.
+func (c *chatModel) appendStream(delta string) {
+	if len(c.blocks) == 0 {
+		return
+	}
+	follow := c.vp.AtBottom()
+	c.blocks[len(c.blocks)-1].text += delta
+	c.reflow()
+	if follow {
+		c.vp.GotoBottom()
+	}
+}
+
+// failStream replaces the in-progress streamed block with an error notice.
+func (c *chatModel) failStream(text string) {
+	if len(c.blocks) == 0 {
+		return
+	}
+	c.blocks[len(c.blocks)-1] = chatBlock{role: roleSystem, text: text}
+	c.reflow()
+	c.vp.GotoBottom()
 }
 
 // --- copying replies ---

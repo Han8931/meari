@@ -169,9 +169,42 @@ func (s *Service) Search(query string) ([]NoteMeta, error) {
 
 // --- tutor ---
 
-// Chat continues a free-form tutoring conversation.
-func (s *Service) Chat(ctx context.Context, history []tutor.ChatTurn) (string, error) {
-	return s.tutor.Chat(ctx, history)
+// maxChatTurns bounds how much conversation is SENT to the model (the visible
+// transcript keeps everything). Long sessions otherwise grow tokens without
+// bound and overflow small local models' context windows.
+const maxChatTurns = 24
+
+// maxContextChars bounds the study-context block sent with each chat call.
+const maxContextChars = 6000
+
+// TrimTurns bounds a conversation to the most recent turns (see maxChatTurns).
+func TrimTurns(history []tutor.ChatTurn) []tutor.ChatTurn {
+	if len(history) > maxChatTurns {
+		return history[len(history)-maxChatTurns:]
+	}
+	return history
+}
+
+// ClampContext bounds a study-context string to a model-friendly size.
+func ClampContext(s string) string {
+	r := []rune(s)
+	if len(r) <= maxContextChars {
+		return s
+	}
+	return string(r[:maxContextChars]) + "\n…(truncated)"
+}
+
+// Chat continues a free-form tutoring conversation. studyContext is what the
+// learner is currently looking at (note body, challenge, code) so replies stay
+// grounded; "" sends conversation only.
+func (s *Service) Chat(ctx context.Context, studyContext string, history []tutor.ChatTurn) (string, error) {
+	return s.ChatStream(ctx, studyContext, history, nil)
+}
+
+// ChatStream is Chat with incremental delivery: onDelta receives each reply
+// chunk as the model produces it; the assembled reply is returned at the end.
+func (s *Service) ChatStream(ctx context.Context, studyContext string, history []tutor.ChatTurn, onDelta func(string)) (string, error) {
+	return s.tutor.ChatStream(ctx, ClampContext(studyContext), TrimTurns(history), onDelta)
 }
 
 // GradeEssay grades a free-text answer to a study prompt.

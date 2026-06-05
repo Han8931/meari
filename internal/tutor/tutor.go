@@ -10,6 +10,7 @@
 package tutor
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -262,18 +263,108 @@ const chatSystemPrompt = "You are a supportive, concise programming tutor having
 // user/assistant turns; Chat prepends the tutor system prompt and returns the
 // assistant's next reply. Offline, it returns a canned message.
 func (t *Tutor) Chat(ctx context.Context, history []ChatTurn) (string, error) {
+	return t.ChatStream(ctx, "", history, nil)
+}
+
+// ChatStream continues the tutoring conversation, streaming the reply.
+// studyContext, when non-empty, is what the learner is currently looking at
+// (note body, challenge, their code) and is injected as a system message so
+// answers stay grounded in the current material. onDelta (optional) receives
+// each text chunk as it arrives; the full reply is returned at the end.
+func (t *Tutor) ChatStream(ctx context.Context, studyContext string, history []ChatTurn, onDelta func(string)) (string, error) {
 	if t.offline {
-		return "I'm offline right now (no AI provider configured), so I can't answer " +
+		s := "I'm offline right now (no AI provider configured), so I can't answer " +
 			"free-form questions. Try writing code and running the tests — you'll still " +
-			"get feedback from the built-in content.", nil
+			"get feedback from the built-in content."
+		if onDelta != nil {
+			onDelta(s)
+		}
+		return s, nil
 	}
 
-	msgs := make([]chatMessage, 0, len(history)+1)
+	msgs := make([]chatMessage, 0, len(history)+2)
 	msgs = append(msgs, chatMessage{Role: "system", Content: chatSystemPrompt})
+	if studyContext != "" {
+		msgs = append(msgs, chatMessage{Role: "system", Content: "Context — what the learner is " +
+			"currently studying. Ground your answers in this material and the conversation:\n\n" + studyContext})
+	}
 	for _, h := range history {
 		msgs = append(msgs, chatMessage{Role: h.Role, Content: h.Content})
 	}
-	return t.chatRaw(ctx, msgs)
+	if onDelta == nil {
+		return t.chatRaw(ctx, msgs)
+	}
+	return t.chatStreamRaw(ctx, msgs, onDelta)
+}
+
+// chatStreamRaw posts a streaming chat-completions request (SSE) and feeds each
+// content delta to onDelta, returning the assembled reply.
+func (t *Tutor) chatStreamRaw(ctx context.Context, messages []chatMessage, onDelta func(string)) (string, error) {
+	reqBody, err := json.Marshal(chatRequest{
+		Model:    t.model,
+		Messages: messages,
+		Stream:   true,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		t.baseURL+"/chat/completions", bytes.NewReader(reqBody))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if t.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	}
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ai request failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var full strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			break
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue // tolerate keep-alives / unknown event shapes
+		}
+		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+			full.WriteString(chunk.Choices[0].Delta.Content)
+			onDelta(chunk.Choices[0].Delta.Content)
+		}
+	}
+	if err := scanner.Err(); err != nil && full.Len() == 0 {
+		return "", err
+	}
+	if full.Len() == 0 {
+		return "", fmt.Errorf("ai returned no streamed content")
+	}
+	return full.String(), nil
 }
 
 // parseChallenge extracts a Challenge from a model response, tolerating

@@ -44,6 +44,10 @@ type VaultModel struct {
 	chatByNote map[string][]chatBlock
 	histByNote map[string][]tutor.ChatTurn
 
+	// Streaming chat reply state: one reply at a time.
+	streaming bool
+	streamCh  chan streamChunkMsg
+
 	// Essay study state. While studying, the editor holds the learner's answer
 	// (not the note), and autosave to the note is suspended.
 	studyMode   bool
@@ -152,11 +156,8 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh the list in case the title/subject changed; keep editing.
 		return m, vListCmd(m.svc)
 
-	case vChatMsg:
-		m.pending--
-		m.chat.append(roleTutor, msg.text)
-		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: msg.text})
-		return m, nil
+	case streamChunkMsg:
+		return m.handleStreamChunk(msg)
 
 	case vEssayMsg:
 		m.pending--
@@ -167,11 +168,15 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.chat.append(role, "Score: "+itoa(pct)+"%")
 		m.chat.append(roleTutor, msg.res.Feedback)
+		// Join the conversation so follow-up questions can refer to the feedback.
+		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant",
+			Content: "Essay feedback (score " + itoa(pct) + "%): " + msg.res.Feedback})
 		return m, nil
 
 	case vAnswerMsg:
 		m.pending--
 		m.chat.append(roleLesson, "Model answer\n\n"+msg.text)
+		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: "Model answer:\n" + msg.text})
 		return m, nil
 
 	case vErrMsg:
@@ -497,7 +502,34 @@ func (m *VaultModel) switchNoteChat(n core.Note) {
 	}
 }
 
+// chatContext describes what the learner is looking at — the open note (and,
+// during essay study, the prompt plus their draft answer) — so chat replies
+// stay grounded in the current material.
+func (m VaultModel) chatContext() string {
+	if m.current == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Current note — " + m.currentTitle + "\n")
+	if m.studyMode {
+		b.WriteString("\nEssay prompt: " + m.studyPrompt + "\n")
+		b.WriteString("Learner's draft answer:\n" + m.editor.Value() + "\n")
+		if n, err := m.svc.OpenNote(m.current); err == nil {
+			b.WriteString("\nNote content:\n" + n.Body)
+		}
+	} else {
+		b.WriteString("\nNote content (as in the learner's editor):\n" + m.editor.Value())
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// submitChat sends the chat input to the tutor, streaming the reply into the
+// transcript, grounded in the open note / study state.
 func (m VaultModel) submitChat() (tea.Model, tea.Cmd) {
+	if m.streaming {
+		m.chat.append(roleSystem, "the tutor is still replying — one question at a time")
+		return m, nil
+	}
 	text, ok := m.chat.submit()
 	if !ok {
 		return m, nil
@@ -506,7 +538,35 @@ func (m VaultModel) submitChat() (tea.Model, tea.Cmd) {
 	m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "user", Content: text})
 	m.pending++
 	m.loadKind = "tutor thinking"
-	return m, vChatCmd(m.svc, m.chatHist)
+	m.streaming = true
+	m.chat.beginStream()
+
+	svc := m.svc
+	ctxText := m.chatContext()
+	hist := append([]tutor.ChatTurn(nil), m.chatHist...) // copy: the goroutine outlives this Update
+	ch, cmd := startChatStream(func(onDelta func(string)) (string, error) {
+		return svc.ChatStream(context.Background(), ctxText, hist, onDelta)
+	})
+	m.streamCh = ch
+	return m, cmd
+}
+
+// handleStreamChunk advances a streaming tutor reply.
+func (m VaultModel) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.pending--
+		m.streaming = false
+		m.chat.failStream("⚠ chat failed: " + msg.err.Error())
+		return m, nil
+	}
+	if msg.done {
+		m.pending--
+		m.streaming = false
+		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: msg.full})
+		return m, nil
+	}
+	m.chat.appendStream(msg.delta)
+	return m, listenStream(m.streamCh)
 }
 
 func (m VaultModel) forwardToFocus(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -714,7 +774,6 @@ type (
 	vOpenedMsg    struct{ note core.Note }
 	vGeneratedMsg struct{ meta core.NoteMeta }
 	vSavedMsg     struct{ meta core.NoteMeta }
-	vChatMsg      struct{ text string }
 	vEssayMsg     struct{ res core.EssayResult }
 	vAnswerMsg    struct{ text string }
 	vErrMsg       struct {
@@ -774,16 +833,6 @@ func vSaveOpenCmd(svc *core.Service, path, body string) tea.Cmd {
 			return vErrMsg{kind: "open", err: err}
 		}
 		return vOpenedMsg{note: n}
-	}
-}
-
-func vChatCmd(svc *core.Service, history []tutor.ChatTurn) tea.Cmd {
-	return func() tea.Msg {
-		reply, err := svc.Chat(context.Background(), history)
-		if err != nil {
-			return vErrMsg{kind: "chat", err: err}
-		}
-		return vChatMsg{text: reply}
 	}
 }
 

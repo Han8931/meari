@@ -311,11 +311,30 @@ async function sendChat() {
   chatHist.push({ role: "user", content: text });
   $("#chatInput").value = ""; renderChat();
   setStatus("tutor thinking…");
+  // The reply streams as plain text chunks; grow a live assistant message.
+  // `path` grounds the reply in the currently open note.
+  chatHist.push({ role: "assistant", content: "" });
   try {
-    const r = await api("POST", "/api/chat", { history: chatHist });
-    chatHist.push({ role: "assistant", content: r.reply }); renderChat();
-  } catch (e) { toast("Chat failed: " + e.message); }
-  finally { setStatus(""); }
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ history: chatHist.slice(0, -1), path: current || "" }),
+    });
+    if (!res.ok) { throw new Error((await res.text()) || res.statusText); }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chatHist[chatHist.length - 1].content += dec.decode(value, { stream: true });
+      renderChat();
+    }
+    if (!chatHist[chatHist.length - 1].content) chatHist.pop();
+  } catch (e) {
+    chatHist.pop();
+    toast("Chat failed: " + e.message);
+  }
+  finally { setStatus(""); renderChat(); }
 }
 
 // ---- study: essay ----

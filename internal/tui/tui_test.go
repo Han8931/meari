@@ -454,9 +454,33 @@ func TestChatQuestionRoundTrip(t *testing.T) {
 	if len(m.chatHist) != 1 || m.chatHist[0].Role != "user" {
 		t.Fatalf("chat history not recording the user turn: %+v", m.chatHist)
 	}
-	reply := cmd()
-	if _, ok := reply.(chatReplyMsg); !ok {
-		t.Fatalf("chat cmd produced %T, want chatReplyMsg", reply)
+	if !m.streaming {
+		t.Fatal("submitChat should mark a stream in flight")
+	}
+
+	// Drive the stream to completion: deltas grow the transcript, done
+	// finalizes the conversation history. (Offline: one delta, then done.)
+	for i := 0; i < 10; i++ {
+		msg := cmd()
+		chunk, ok := msg.(streamChunkMsg)
+		if !ok {
+			t.Fatalf("stream produced %T, want streamChunkMsg", msg)
+		}
+		var tm2 tea.Model
+		tm2, cmd = m.Update(chunk)
+		m = tm2.(Model)
+		if chunk.done {
+			break
+		}
+	}
+	if m.streaming {
+		t.Fatal("stream should be finished")
+	}
+	if len(m.chatHist) != 2 || m.chatHist[1].Role != "assistant" || m.chatHist[1].Content == "" {
+		t.Fatalf("assistant turn not recorded: %+v", m.chatHist)
+	}
+	if !strings.Contains(m.chat.view(), "offline") {
+		t.Fatalf("streamed reply should be visible in the transcript:\n%s", m.chat.view())
 	}
 }
 

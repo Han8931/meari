@@ -16,7 +16,6 @@ type (
 	lessonMsg    struct{ text string }
 	challengeMsg struct{ ch tutor.Challenge }
 	feedbackMsg  struct{ text string }
-	chatReplyMsg struct{ text string }
 	answerMsg    struct{ text string }
 	runResultMsg struct {
 		res  executor.Result
@@ -81,15 +80,32 @@ func answerCmd(t *tutor.Tutor, ch tutor.Challenge) tea.Cmd {
 	}
 }
 
-// chatCmd continues the free-form conversation.
-func chatCmd(t *tutor.Tutor, history []tutor.ChatTurn) tea.Cmd {
-	return func() tea.Msg {
-		s, err := t.Chat(context.Background(), history)
-		if err != nil {
-			return errMsg{kind: "chat", err: err}
-		}
-		return chatReplyMsg{text: s}
-	}
+// --- streaming chat ---
+
+// streamChunkMsg carries one streamed chat fragment (or its terminal state)
+// from the worker goroutine into the Update loop.
+type streamChunkMsg struct {
+	delta string // one text fragment ("" on the final message)
+	full  string // the assembled reply, set when done
+	done  bool
+	err   error
+}
+
+// startChatStream runs fn (a streaming chat call) on a goroutine, forwarding
+// each delta through the returned channel, then a final done/err message. The
+// returned cmd delivers the first message; the Update loop re-arms with
+// listenStream until done.
+func startChatStream(fn func(onDelta func(string)) (string, error)) (chan streamChunkMsg, tea.Cmd) {
+	ch := make(chan streamChunkMsg, 64)
+	go func() {
+		full, err := fn(func(d string) { ch <- streamChunkMsg{delta: d} })
+		ch <- streamChunkMsg{done: true, full: full, err: err}
+	}()
+	return ch, listenStream(ch)
+}
+
+func listenStream(ch chan streamChunkMsg) tea.Cmd {
+	return func() tea.Msg { return <-ch }
 }
 
 // runCmd executes the learner's code against the challenge's tests in the given
