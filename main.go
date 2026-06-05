@@ -150,6 +150,11 @@ func runCheck(args []string) error {
 	fmt.Printf("  provider:  %s\n", cfg.AI.Provider)
 	fmt.Printf("  base url:  %s\n", info.BaseURL)
 	fmt.Printf("  model:     %s\n", info.Model)
+	if cfg.AI.Provider == "compatible" && cfg.AI.BaseURL == "" {
+		fmt.Println("  ⚠ provider is \"compatible\" but base_url is NOT set — defaulting to the")
+		fmt.Println("    official OpenAI endpoint, which is probably not your gateway. Set")
+		fmt.Println("    base_url = \"https://your-gateway/v1\" (the /v1 path usually matters).")
+	}
 	keyState := "not set"
 	switch {
 	case cfg.AI.APIKeyEnv != "" && os.Getenv(cfg.AI.APIKeyEnv) != "":

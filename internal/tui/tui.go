@@ -1398,8 +1398,9 @@ func (m *Model) openConfig() tea.Cmd {
 	})
 }
 
-// applyConfigReload re-reads the config after editing and live-applies the
-// settings that can change mid-session (currently the layout).
+// applyConfigReload re-reads the config after editing and live-applies what can
+// change mid-session: the layout AND the AI provider — the tutor is rebuilt so
+// a new key/model/base URL works immediately, without restarting the app.
 func (m *Model) applyConfigReload(msg configReloadMsg) {
 	if msg.err != nil {
 		m.chat.append(roleSystem, "⚠ Config editor exited with an error: "+msg.err.Error())
@@ -1413,8 +1414,18 @@ func (m *Model) applyConfigReload(msg configReloadMsg) {
 	m.deps.Cfg = cfg
 	m.horizontal = cfg.Horizontal()
 	m.layout() // re-flow the panes for the (possibly new) layout
-	m.chat.append(roleSystem, "✓ Config reloaded — layout is now "+cfg.UI.Layout+
-		". (Editor keybindings and AI settings apply on next launch.)")
+
+	// Rebuild the AI client from the new [ai] section, keeping the learner's level.
+	m.deps.Tutor = tutor.New(cfg.AI)
+	if m.level != "" {
+		m.deps.Tutor.SetLevel(m.level)
+	}
+	ai := "AI: " + cfg.AI.Model + " @ " + cfg.AI.ResolveBaseURL()
+	if m.deps.Tutor.Offline() {
+		ai = "AI: OFFLINE — an API key is required for this endpoint but none was found (try `meari check`)"
+	}
+	m.chat.append(roleSystem, "✓ Config reloaded — layout is now "+cfg.UI.Layout+"; "+ai+
+		". (Editor keybindings apply on next launch.)")
 }
 
 // --- focus & ordering helpers ---

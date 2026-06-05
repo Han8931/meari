@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"os"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"meari/internal/config"
 	"meari/internal/drafts"
 	"meari/internal/tutor"
 )
@@ -111,6 +113,41 @@ func TestClassicClickFocusesPane(t *testing.T) {
 	})
 	if m.focus != paneSidebar {
 		t.Fatalf("wheel should not change focus, got %v", m.focus)
+	}
+}
+
+func TestConfigReloadRebuildsTutor(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := dir + "/config.toml"
+	mustWrite := func(s string) {
+		if err := os.WriteFile(cfgPath, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Start pointed at OpenAI with no key: offline.
+	mustWrite("[ai]\nprovider = \"openai\"\nmodel = \"m\"\n")
+	cfg, err := config.Load(cfgPath, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{
+		deps: Deps{Tutor: tutor.New(cfg.AI), Cfg: cfg, ConfigPath: cfgPath, BaseDir: dir},
+		chat: newChat(),
+	}
+	m.chat.setSize(60, 12)
+	if !m.deps.Tutor.Offline() {
+		t.Fatal("setup: tutor should start offline")
+	}
+
+	// Edit the config to a local compatible provider and reload: the tutor must
+	// be rebuilt and come online without restarting the app.
+	mustWrite("[ai]\nprovider = \"compatible\"\nbase_url = \"http://localhost:9999/v1\"\nmodel = \"m\"\n")
+	m.applyConfigReload(configReloadMsg{})
+	if m.deps.Tutor.Offline() {
+		t.Fatal("reload must rebuild the tutor from the new [ai] section")
+	}
+	if got := m.deps.Tutor.Info().BaseURL; got != "http://localhost:9999/v1" {
+		t.Fatalf("tutor base URL after reload = %q", got)
 	}
 }
 
