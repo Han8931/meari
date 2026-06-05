@@ -151,16 +151,22 @@ func runCheck(args []string) error {
 	fmt.Printf("  base url:  %s\n", info.BaseURL)
 	fmt.Printf("  model:     %s\n", info.Model)
 	keyState := "not set"
-	if info.KeySet {
-		keyState = "set (" + cfg.AI.APIKeyEnv + ")"
-	} else if cfg.AI.APIKeyEnv != "" {
-		keyState = "not set (looked in $" + cfg.AI.APIKeyEnv + ")"
+	switch {
+	case cfg.AI.APIKeyEnv != "" && os.Getenv(cfg.AI.APIKeyEnv) != "":
+		keyState = "set (from $" + cfg.AI.APIKeyEnv + ")"
+	case info.KeySet:
+		keyState = "set (from api_key in config.toml)"
+	case cfg.AI.APIKeyEnv != "":
+		keyState = "not set (looked in $" + cfg.AI.APIKeyEnv + " and config api_key)" +
+			"\n             note: api_key_env is the NAME of an env var, not the key itself"
 	}
 	fmt.Printf("  api key:   %s\n", keyState)
 
 	if info.Offline {
 		fmt.Println("\n✗ OFFLINE: this endpoint requires an API key and none is set.")
-		fmt.Println("  Export the key (e.g. `export " + cfg.AI.APIKeyEnv + "=...`) or point [ai] at a local provider.")
+		fmt.Println("  Either `export " + cfg.AI.APIKeyEnv + "=sk-...` in the shell you run meari from,")
+		fmt.Println("  or put `api_key = \"sk-...\"` under [ai] in config.toml,")
+		fmt.Println("  or point [ai] at a local provider (Ollama).")
 		return nil
 	}
 

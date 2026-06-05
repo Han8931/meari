@@ -151,10 +151,11 @@ code path works for all — only the base URL / model / key differ. Configure in
 [ai]
 provider = "openai"
 model = "gpt-4o-mini"
-api_key_env = "OPENAI_API_KEY"
+api_key_env = "OPENAI_API_KEY"   # the NAME of the env var holding your key…
+# api_key = "sk-..."             # …or paste the key itself (env var wins)
 ```
 ```bash
-export OPENAI_API_KEY=sk-...
+export OPENAI_API_KEY=sk-...     # in the same shell you run meari from
 ```
 
 **Ollama (local, no key needed)**

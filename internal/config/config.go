@@ -39,6 +39,10 @@ type AIConfig struct {
 	// APIKeyEnv names the environment variable holding the API key. Ollama
 	// needs no key, so this may be empty for local use.
 	APIKeyEnv string `toml:"api_key_env"`
+	// APIKey is the key itself, pasted directly into the config. The
+	// environment variable (api_key_env) wins when both are set. Prefer the
+	// env var on shared machines — config files are easy to leak.
+	APIKey string `toml:"api_key"`
 	// TimeoutSeconds bounds each model request. 0 means the default (120s —
 	// local models can be slow to load and generate long lessons).
 	TimeoutSeconds int `toml:"timeout_seconds"`
@@ -137,7 +141,12 @@ const defaultConfigTOML = `# Meari configuration. All fields are optional; defau
 provider = "openai"
 # base_url = "http://localhost:11434/v1"   # uncomment for Ollama
 model = "gpt-4o-mini"
+# api_key_env names the ENVIRONMENT VARIABLE holding your key (not the key
+# itself): run  export OPENAI_API_KEY=sk-...  in your shell. Alternatively,
+# paste the key directly with api_key (the env var wins if both are set).
 api_key_env = "OPENAI_API_KEY"
+# api_key = "sk-..."
+# timeout_seconds = 120   # raise for big/slow local models
 
 [editor]
 # keybindings: "vim" | "default"

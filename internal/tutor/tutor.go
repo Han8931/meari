@@ -72,13 +72,17 @@ const openAIBaseURL = "https://api.openai.com/v1"
 // Local models can take tens of seconds to load and to generate a full lesson.
 const defaultTimeout = 120 * time.Second
 
-// New builds a Tutor from config. It reads the API key from the configured
-// environment variable. It runs offline only when a key is required (the
-// official OpenAI endpoint) but none is set.
+// New builds a Tutor from config. The API key comes from the configured
+// environment variable, falling back to a key pasted directly in the config
+// (api_key). It runs offline only when a key is required (the official OpenAI
+// endpoint) but none is set.
 func New(cfg config.AIConfig) *Tutor {
 	key := ""
 	if cfg.APIKeyEnv != "" {
 		key = os.Getenv(cfg.APIKeyEnv)
+	}
+	if key == "" {
+		key = strings.TrimSpace(cfg.APIKey)
 	}
 	baseURL := strings.TrimRight(cfg.ResolveBaseURL(), "/")
 	offline := key == "" && baseURL == openAIBaseURL

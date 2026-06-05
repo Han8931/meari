@@ -37,6 +37,25 @@ func TestOfflineHeuristic(t *testing.T) {
 			t.Fatal("with a key set, the tutor must be online")
 		}
 	})
+
+	t.Run("openai with literal api_key in config", func(t *testing.T) {
+		cfg := config.AIConfig{Provider: "openai", APIKeyEnv: "MEARI_TEST_KEY", APIKey: "sk-direct"}
+		tut := New(cfg)
+		if tut.Offline() {
+			t.Fatal("a literal api_key must count as a key")
+		}
+		if tut.apiKey != "sk-direct" {
+			t.Fatalf("apiKey = %q, want the config literal", tut.apiKey)
+		}
+	})
+
+	t.Run("env var wins over literal", func(t *testing.T) {
+		t.Setenv("MEARI_TEST_KEY3", "sk-from-env")
+		cfg := config.AIConfig{Provider: "openai", APIKeyEnv: "MEARI_TEST_KEY3", APIKey: "sk-direct"}
+		if got := New(cfg).apiKey; got != "sk-from-env" {
+			t.Fatalf("apiKey = %q, want the env value", got)
+		}
+	})
 }
 
 func TestTimeoutConfigurable(t *testing.T) {
