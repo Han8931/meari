@@ -1322,6 +1322,7 @@ func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
 
 	code, stale := m.loadStarterOrDraft(ch)
 	m.editor.SetValue(code)
+	m.layout() // the pinned prompt header's height depends on the new prompt
 	m.rebuildSidebar()
 	// Each topic keeps its own chat: show the lesson only on the first visit —
 	// revisits restore the prior transcript (which already contains it). The
@@ -1351,6 +1352,7 @@ func (m *Model) loadChallenge(ch tutor.Challenge) tea.Cmd {
 
 	code, stale := m.loadStarterOrDraft(ch)
 	m.editor.SetValue(code)
+	m.layout() // the pinned prompt header's height depends on the new prompt
 	m.rebuildSidebar()
 	m.switchChatContext("challenge:" + ch.ID)
 	if stale {
@@ -1663,7 +1665,7 @@ func (m *Model) layout() {
 
 		m.sidebar.setSize(m.sidebarW, m.contentH)
 		m.chat.setSize(m.rightW, m.chatH)
-		m.editor.SetSize(m.rightW, max(1, m.editorH-1))
+		m.editor.SetSize(m.rightW, max(1, m.editorH-1-len(m.promptHeaderLines(m.rightW))))
 		return
 	}
 
@@ -1690,7 +1692,7 @@ func (m *Model) layout() {
 	}
 
 	m.sidebar.setSize(m.sidebarW, m.contentH)
-	m.editor.SetSize(m.editorW, max(1, m.contentH-1))
+	m.editor.SetSize(m.editorW, max(1, m.contentH-1-len(m.promptHeaderLines(m.editorW))))
 	m.chat.setSize(m.chatW, m.contentH)
 }
 
@@ -1817,7 +1819,11 @@ func (m Model) box(p pane, w, h int, content string) string {
 }
 
 func (m Model) editorPaneView(w int) string {
-	return m.challengeHeader(w) + "\n" + m.editor.View()
+	out := m.challengeHeader(w)
+	for _, ln := range m.promptHeaderLines(w) {
+		out += "\n" + promptHeaderStyle.MaxWidth(w).Render(ln)
+	}
+	return out + "\n" + m.editor.View()
 }
 
 // challengeHeader labels the editor pane with the language and a SHORT title.
@@ -1948,12 +1954,13 @@ func draftMatches(ch tutor.Challenge, draft string) bool {
 }
 
 // loadStarterOrDraft picks the editor contents for ch: its saved draft when one
-// exists and still matches the challenge, else the fresh starter topped with
-// the problem statement as a comment — so the challenge stays readable in the
-// editor even when the chat history grows long. stale is true when a draft
-// existed but belonged to an older version of the challenge.
+// exists and still matches the challenge, else the fresh starter. The problem
+// statement is NOT embedded in the buffer — it renders as a pinned header above
+// the editor (see promptHeaderLines), wrapped to the live pane width, so it can
+// never scramble the textarea's own wrapping or line numbers. stale is true
+// when a draft existed but belonged to an older version of the challenge.
 func (m *Model) loadStarterOrDraft(ch tutor.Challenge) (code string, stale bool) {
-	code = promptComment(ch) + ch.StarterCode
+	code = ch.StarterCode
 	d, ok := m.deps.Store.Load(ch.ID)
 	if !ok {
 		return code, false
@@ -1961,42 +1968,38 @@ func (m *Model) loadStarterOrDraft(ch tutor.Challenge) (code string, stale bool)
 	if !draftMatches(ch, d) {
 		return code, true
 	}
-	// Drafts saved before the in-editor prompt existed (or where it was
-	// deleted) get it back, so the problem statement is always at the top.
-	if first := firstPromptLine(ch); first != "" && !strings.Contains(d, first) {
-		d = promptComment(ch) + d
-	}
 	return d, false
 }
 
-// firstPromptLine is the first rendered line of the prompt comment, used to
-// detect whether a draft already carries it.
-func firstPromptLine(ch tutor.Challenge) string {
-	c := promptComment(ch)
-	if i := strings.IndexByte(c, '\n'); i > 0 {
-		return c[:i]
-	}
-	return strings.TrimRight(c, "\n")
-}
+// maxPromptHeaderLines caps how much pane height the pinned statement may take.
+const maxPromptHeaderLines = 6
 
-// promptComment renders the challenge prompt as comment lines in the
-// challenge's language ("# " for Python, "// " for Go, bare for prose).
-func promptComment(ch tutor.Challenge) string {
-	prefix := "# "
-	switch strings.ToLower(challengeLang(ch)) {
+// promptHeaderLines wraps the current challenge's statement to the pane width
+// as comment-styled lines ("// " for Go, "# " for Python, bare for prose).
+func (m Model) promptHeaderLines(w int) []string {
+	if m.current.ID == "" || strings.TrimSpace(m.current.Prompt) == "" {
+		return nil
+	}
+	marker := "# "
+	switch strings.ToLower(challengeLang(m.current)) {
 	case "go", "golang":
-		prefix = "// "
+		marker = "// "
 	case "physics", "plain", "text":
-		prefix = ""
+		marker = ""
 	}
-	var b strings.Builder
-	for _, ln := range wrapWords(ch.Prompt, 68) {
-		b.WriteString(prefix)
-		b.WriteString(ln)
-		b.WriteString("\n")
+	avail := w - len(marker)
+	if avail < 8 {
+		avail = 8
 	}
-	b.WriteString("\n")
-	return b.String()
+	lines := wrapWords(m.current.Prompt, avail)
+	if len(lines) > maxPromptHeaderLines {
+		lines = lines[:maxPromptHeaderLines]
+		lines[maxPromptHeaderLines-1] += " …"
+	}
+	for i := range lines {
+		lines[i] = marker + lines[i]
+	}
+	return lines
 }
 
 // wrapWords greedily wraps s into lines of at most width characters.

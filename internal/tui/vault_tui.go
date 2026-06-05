@@ -498,9 +498,8 @@ func (m VaultModel) startEssay(prompt string) (tea.Model, tea.Cmd) {
 	m.studyMode = true
 	m.studyPrompt = prompt
 	*m.curPath = "" // suspend note autosave while answering
-	// Seed the answer buffer with the prompt as a blockquote header, so the
-	// question stays visible while writing (grading strips it back out).
-	m.editor.SetValue("> Essay: " + prompt + "\n\n")
+	m.editor.SetValue("")
+	m.layout() // the pinned prompt header's height depends on the prompt
 	m.chat.append(roleSystem, "— essay study started — write your answer under the prompt in the editor, then :grade (or Ctrl-S); :answer reveals a model answer —")
 	return m, m.setFocus(paneEditor)
 }
@@ -510,7 +509,7 @@ func (m VaultModel) gradeEssay() (tea.Model, tea.Cmd) {
 		m.flash("not studying — :essay to start")
 		return m, nil
 	}
-	answer := strings.TrimSpace(stripEssayHeader(m.editor.Value()))
+	answer := strings.TrimSpace(m.editor.Value())
 	if answer == "" {
 		m.flash("write an answer first")
 		return m, nil
@@ -736,7 +735,7 @@ func (m *VaultModel) layout() {
 	}
 
 	m.sidebar.setSize(m.sidebarW, m.contentH)
-	m.editor.SetSize(m.editorW, max(1, m.contentH-1))
+	m.editor.SetSize(m.editorW, max(1, m.contentH-1-len(m.essayHeaderLines(m.editorW))))
 	m.chat.setSize(m.chatW, m.contentH)
 }
 
@@ -767,9 +766,29 @@ func (m VaultModel) box(p pane, w, h int, content string) string {
 		Render(content)
 }
 
+// essayHeaderLines wraps the active essay prompt to the pane width as pinned
+// "> " lines shown above the answer buffer.
+func (m VaultModel) essayHeaderLines(w int) []string {
+	if !m.studyMode || strings.TrimSpace(m.studyPrompt) == "" {
+		return nil
+	}
+	avail := w - 2
+	if avail < 8 {
+		avail = 8
+	}
+	lines := wrapWords("Essay: "+m.studyPrompt, avail)
+	if len(lines) > maxPromptHeaderLines {
+		lines = lines[:maxPromptHeaderLines]
+		lines[maxPromptHeaderLines-1] += " …"
+	}
+	for i := range lines {
+		lines[i] = "> " + lines[i]
+	}
+	return lines
+}
+
 func (m VaultModel) editorPaneView(w int) string {
-	// Short titles only — the full essay prompt is in the chat pane, and a
-	// truncated long sentence here would be unreadable.
+	// Short titles only — the full essay prompt renders as pinned lines below.
 	label := "No note open"
 	if m.studyMode {
 		label = "ESSAY · " + m.currentTitle
@@ -779,7 +798,11 @@ func (m VaultModel) editorPaneView(w int) string {
 	if w > 0 && lipgloss.Width(label) > w-2 {
 		label = truncate(label, max(1, w-2))
 	}
-	return editorHeader.Width(w).Render(label) + "\n" + m.editor.View()
+	out := editorHeader.Width(w).Render(label)
+	for _, ln := range m.essayHeaderLines(w) {
+		out += "\n" + promptHeaderStyle.MaxWidth(w).Render(ln)
+	}
+	return out + "\n" + m.editor.View()
 }
 
 func (m VaultModel) titleView() string {
@@ -825,20 +848,6 @@ func (m VaultModel) focusName() string {
 		return "chat"
 	}
 	return ""
-}
-
-// stripEssayHeader removes the leading "> Essay: …" blockquote (and blank
-// lines) that startEssay seeds, so only the learner's own words are graded.
-func stripEssayHeader(s string) string {
-	lines := strings.Split(s, "\n")
-	i := 0
-	for i < len(lines) && (strings.HasPrefix(lines[i], ">") || strings.TrimSpace(lines[i]) == "") {
-		if strings.TrimSpace(lines[i]) == "" && i > 0 && !strings.HasPrefix(lines[i-1], ">") {
-			break
-		}
-		i++
-	}
-	return strings.Join(lines[i:], "\n")
 }
 
 // vChatTurn builds a one-element tutor history slice (test/readability helper).

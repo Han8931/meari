@@ -77,9 +77,13 @@ var (
 
 	// noticeStyle renders transient command feedback in the status bar (copy
 	// confirmations, resize/fold notices, unknown commands…).
-	noticeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
-	chatOkStyle   = lipgloss.NewStyle().Foreground(doneColor).Bold(true)             // match the sidebar "done" green
-	chatFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("210")).Bold(true) // soft red, easier on the eyes than 203
+	noticeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
+
+	// promptHeaderStyle renders the pinned challenge/essay statement above the
+	// editor, styled like a code comment.
+	promptHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
+	chatOkStyle       = lipgloss.NewStyle().Foreground(doneColor).Bold(true)             // match the sidebar "done" green
+	chatFailStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("210")).Bold(true) // soft red, easier on the eyes than 203
 )
 
 // borderStyle returns the focused or blurred border depending on whether the

@@ -233,9 +233,9 @@ func TestLoadStarterOrDraftStale(t *testing.T) {
 		StarterCode: "func FizzBuzz(n int) []string {\n\treturn nil\n}\n",
 	}
 
-	// No draft: the starter, topped with the prompt as a comment.
+	// No draft: the starter (the prompt renders as a pinned header, not buffer text).
 	code, stale := m.loadStarterOrDraft(ch)
-	if stale || code != promptComment(ch)+ch.StarterCode {
+	if stale || code != ch.StarterCode {
 		t.Fatalf("no-draft case wrong: stale=%v code=%q", stale, code)
 	}
 
@@ -247,7 +247,7 @@ func TestLoadStarterOrDraftStale(t *testing.T) {
 	if !stale {
 		t.Fatal("a mismatched draft must be flagged stale")
 	}
-	if code != promptComment(ch)+ch.StarterCode {
+	if code != ch.StarterCode {
 		t.Fatalf("stale draft must not shadow the starter, got %q", code)
 	}
 
@@ -298,50 +298,66 @@ func TestSidebarFoldedFromConfig(t *testing.T) {
 	}
 }
 
-func TestPromptCommentLanguages(t *testing.T) {
-	goCh := tutor.Challenge{Lang: "go", Prompt: "Write SumTo(n int) int returning the sum."}
-	if got := promptComment(goCh); !strings.HasPrefix(got, "// Write SumTo") {
-		t.Fatalf("go comment = %q", got)
+func TestPromptHeaderLines(t *testing.T) {
+	m := Model{current: tutor.Challenge{
+		ID:   "x",
+		Lang: "go",
+		Prompt: "Write SumTo(n int) int returning the sum of one to n computed " +
+			"with a for loop, returning zero for any n below one.",
+	}}
+	lines := m.promptHeaderLines(40)
+	if len(lines) < 2 {
+		t.Fatalf("long prompt should wrap to the pane width, got %v", lines)
 	}
-	pyCh := tutor.Challenge{Prompt: "Write sum_to(n) returning the sum."}
-	if got := promptComment(pyCh); !strings.HasPrefix(got, "# Write sum_to") {
-		t.Fatalf("python comment = %q", got)
+	for i, ln := range lines {
+		if !strings.HasPrefix(ln, "// ") {
+			t.Fatalf("line %d missing go comment marker: %q", i, ln)
+		}
+		if len(ln) > 40 {
+			t.Fatalf("line %d exceeds the pane width: %q", i, ln)
+		}
 	}
-	prose := tutor.Challenge{Lang: "physics", Prompt: "Explain the energy transfer."}
-	if got := promptComment(prose); !strings.HasPrefix(got, "Explain the energy") {
-		t.Fatalf("prose header = %q", got)
+	// Python marker.
+	m.current.Lang = ""
+	if got := m.promptHeaderLines(60)[0]; !strings.HasPrefix(got, "# ") {
+		t.Fatalf("python marker missing: %q", got)
 	}
-	// Long prompts wrap into multiple comment lines.
-	long := tutor.Challenge{Lang: "go", Prompt: strings.Repeat("word ", 40)}
-	if lines := strings.Count(promptComment(long), "// "); lines < 2 {
-		t.Fatalf("long prompt should wrap, got %d comment lines", lines)
+	// Very long prompts are capped.
+	m.current.Prompt = strings.Repeat("word ", 200)
+	if got := m.promptHeaderLines(30); len(got) > maxPromptHeaderLines {
+		t.Fatalf("header not capped: %d lines", len(got))
+	}
+	// No challenge: no header.
+	if got := (Model{}).promptHeaderLines(40); got != nil {
+		t.Fatalf("empty model should have no header, got %v", got)
 	}
 }
 
-func TestEssayHeaderSeededAndStripped(t *testing.T) {
+func TestEssayPromptPinnedAboveEditor(t *testing.T) {
 	m := newTestVaultModel(t)
 	opened := vSaveOpenCmd(m.svc, "x/N.md", "# N\n\nbody\n")().(vOpenedMsg)
 	tm, _ := m.Update(opened)
 	m = tm.(VaultModel)
-	tm, _ = m.startEssay("Explain N.")
+	tm, _ = m.startEssay("Explain N in your own words.")
 	m = tm.(VaultModel)
 
-	if !strings.HasPrefix(m.editor.Value(), "> Essay: Explain N.") {
-		t.Fatalf("answer buffer should open with the prompt header: %q", m.editor.Value())
+	// The answer buffer starts EMPTY; the prompt renders as a pinned header.
+	if m.editor.Value() != "" {
+		t.Fatalf("answer buffer should be empty, got %q", m.editor.Value())
 	}
-	// Header alone is not an answer.
+	pane := m.editorPaneView(m.editorW)
+	if !strings.Contains(pane, "Explain N in your own words.") {
+		t.Fatalf("essay prompt should be pinned above the editor:\n%s", pane)
+	}
+	// An empty answer is refused.
 	tm, cmd := m.gradeEssay()
-	m = tm.(VaultModel)
 	if cmd != nil {
-		t.Fatal("grading with only the header should be refused")
+		t.Fatal("grading an empty answer should be refused")
 	}
-	// The header is stripped from what gets graded.
-	if got := stripEssayHeader("> Essay: Explain N.\n\nmy actual answer"); strings.TrimSpace(got) != "my actual answer" {
-		t.Fatalf("stripEssayHeader = %q", got)
-	}
+	_ = tm
 }
 
-func TestPromptCommentAlwaysAtTopOfDrafts(t *testing.T) {
+func TestDraftsStayCleanOfPromptText(t *testing.T) {
 	store, err := drafts.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -353,29 +369,15 @@ func TestPromptCommentAlwaysAtTopOfDrafts(t *testing.T) {
 		Prompt:      "Write SumTo(n int) int returning the sum.",
 		StarterCode: "func SumTo(n int) int {\n\treturn 0\n}\n",
 	}
-
-	// An old draft saved before the in-editor prompt existed: the comment is
-	// prepended so the problem statement is never invisible.
-	old := "func SumTo(n int) int {\n\ttotal := 0\n\treturn total\n}"
-	if err := store.Save(ch.ID, old); err != nil {
+	// A matching draft loads verbatim — the prompt lives in the pinned header,
+	// never in the buffer.
+	draft := "func SumTo(n int) int {\n\ttotal := 0\n\treturn total\n}"
+	if err := store.Save(ch.ID, draft); err != nil {
 		t.Fatal(err)
 	}
 	code, stale := m.loadStarterOrDraft(ch)
-	if stale {
-		t.Fatal("matching draft must not be stale")
-	}
-	if code != promptComment(ch)+old {
-		t.Fatalf("old draft should gain the prompt comment:\n%q", code)
-	}
-
-	// A draft that already carries the comment is left untouched.
-	withComment := promptComment(ch) + old
-	if err := store.Save(ch.ID, withComment); err != nil {
-		t.Fatal(err)
-	}
-	code, _ = m.loadStarterOrDraft(ch)
-	if code != withComment {
-		t.Fatalf("draft with comment must not be doubled:\n%q", code)
+	if stale || code != draft {
+		t.Fatalf("draft should load verbatim: stale=%v code=%q", stale, code)
 	}
 }
 
@@ -393,7 +395,10 @@ func TestChallengePromptNotEchoedInChat(t *testing.T) {
 	if strings.Contains(m.chat.view(), "Write Foo") {
 		t.Fatalf("the prompt must not be echoed into the chat:\n%s", m.chat.view())
 	}
-	if !strings.Contains(m.editor.Value(), "// Write Foo(n int) int") {
-		t.Fatalf("the prompt should be a comment in the editor:\n%s", m.editor.Value())
+	if strings.Contains(m.editor.Value(), "Write Foo") {
+		t.Fatalf("the prompt must not pollute the buffer:\n%s", m.editor.Value())
+	}
+	if !strings.Contains(m.editorPaneView(m.editorW), "Write Foo(n int) int") {
+		t.Fatalf("the prompt should be pinned above the editor:\n%s", m.editorPaneView(m.editorW))
 	}
 }
