@@ -310,17 +310,20 @@ func TestPromptHeaderLines(t *testing.T) {
 		t.Fatalf("long prompt should wrap to the pane width, got %v", lines)
 	}
 	for i, ln := range lines {
-		if !strings.HasPrefix(ln, "// ") {
-			t.Fatalf("line %d missing go comment marker: %q", i, ln)
+		if i == 0 && !strings.HasPrefix(ln, "Challenge: ") {
+			t.Fatalf("first line missing challenge label: %q", ln)
+		}
+		if i > 0 && !strings.HasPrefix(ln, "           ") {
+			t.Fatalf("wrapped line %d should align under challenge text: %q", i, ln)
 		}
 		if len(ln) > 40 {
 			t.Fatalf("line %d exceeds the pane width: %q", i, ln)
 		}
 	}
-	// Python marker.
+	// Python uses the same description block; it must not look like source.
 	m.current.Lang = ""
-	if got := m.promptHeaderLines(60)[0]; !strings.HasPrefix(got, "# ") {
-		t.Fatalf("python marker missing: %q", got)
+	if got := m.promptHeaderLines(60)[0]; !strings.HasPrefix(got, "Challenge: ") || strings.HasPrefix(got, "# ") {
+		t.Fatalf("python prompt should render as a description header: %q", got)
 	}
 	// Very long prompts are capped.
 	m.current.Prompt = strings.Repeat("word ", 200)

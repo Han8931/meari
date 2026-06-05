@@ -1976,18 +1976,12 @@ func (m *Model) loadStarterOrDraft(ch tutor.Challenge) (code string, stale bool)
 const maxPromptHeaderLines = 6
 
 // promptHeaderLines wraps the current challenge's statement to the pane width
-// as comment-styled lines ("// " for Go, "# " for Python, bare for prose).
+// as a pinned description block above the numbered editor buffer.
 func (m Model) promptHeaderLines(w int) []string {
 	if m.current.ID == "" || strings.TrimSpace(m.current.Prompt) == "" {
 		return nil
 	}
-	marker := "# "
-	switch strings.ToLower(challengeLang(m.current)) {
-	case "go", "golang":
-		marker = "// "
-	case "physics", "plain", "text":
-		marker = ""
-	}
+	marker := "Challenge: "
 	avail := w - len(marker)
 	if avail < 8 {
 		avail = 8
@@ -1998,7 +1992,11 @@ func (m Model) promptHeaderLines(w int) []string {
 		lines[maxPromptHeaderLines-1] += " …"
 	}
 	for i := range lines {
-		lines[i] = marker + lines[i]
+		if i == 0 {
+			lines[i] = marker + lines[i]
+			continue
+		}
+		lines[i] = strings.Repeat(" ", len(marker)) + lines[i]
 	}
 	return lines
 }

@@ -256,10 +256,10 @@ live, in both TUIs).
 
 Transient command feedback (copy confirmations, resize/fold notices, unknown
 commands…) appears briefly in the **bottom status bar**, keeping the chat transcript
-for actual conversation. The editor pins the **challenge statement above the code** as comment-styled
-lines, wrapped to the pane width — so the problem stays readable however long the chat
-gets, without polluting your buffer (essay study pins the prompt as a `>` header the
-same way).
+for actual conversation. The editor pins the **challenge statement above the code** as
+a labeled description block, wrapped to the pane width — so the problem stays readable
+however long the chat gets, without polluting your buffer (essay study pins the prompt
+as a `>` header the same way).
 
 The `:` command line (and the editor's `:` / `/` prompts) recall **previous commands
 with ↑/↓**, with separate histories for commands and searches.
