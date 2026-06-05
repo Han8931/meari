@@ -501,7 +501,7 @@ func (m VaultModel) startEssay(prompt string) (tea.Model, tea.Cmd) {
 	// Seed the answer buffer with the prompt as a blockquote header, so the
 	// question stays visible while writing (grading strips it back out).
 	m.editor.SetValue("> Essay: " + prompt + "\n\n")
-	m.chat.append(roleLesson, "Essay study — "+prompt+"\n\nWrite your answer in the editor, then :grade (or Ctrl-S).")
+	m.chat.append(roleSystem, "— essay study started — write your answer under the prompt in the editor, then :grade (or Ctrl-S); :answer reveals a model answer —")
 	return m, m.setFocus(paneEditor)
 }
 

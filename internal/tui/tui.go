@@ -1324,10 +1324,11 @@ func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
 	m.editor.SetValue(code)
 	m.rebuildSidebar()
 	// Each topic keeps its own chat: show the lesson only on the first visit —
-	// revisits restore the prior transcript (which already contains it).
+	// revisits restore the prior transcript (which already contains it). The
+	// challenge statement is NOT echoed here: it lives at the top of the editor
+	// as a comment, where it stays visible regardless of chat length.
 	if m.switchChatContext("topic:" + t.ID) {
 		m.chat.append(roleLesson, t.Title+"\n\n"+t.Lesson)
-		m.chat.append(roleSystem, "📝 Challenge: "+ch.Prompt)
 	}
 	if stale {
 		m.chat.append(roleSystem, staleDraftNotice)
@@ -1351,9 +1352,7 @@ func (m *Model) loadChallenge(ch tutor.Challenge) tea.Cmd {
 	code, stale := m.loadStarterOrDraft(ch)
 	m.editor.SetValue(code)
 	m.rebuildSidebar()
-	if m.switchChatContext("challenge:" + ch.ID) {
-		m.chat.append(roleSystem, "📝 Challenge: "+ch.Prompt)
-	}
+	m.switchChatContext("challenge:" + ch.ID)
 	if stale {
 		m.chat.append(roleSystem, staleDraftNotice)
 	}
@@ -1822,7 +1821,7 @@ func (m Model) editorPaneView(w int) string {
 }
 
 // challengeHeader labels the editor pane with the language and a SHORT title.
-// The full problem statement lives in the chat pane ("📝 Challenge: …") — a
+// The full problem statement lives at the top of the editor as a comment — a
 // long prompt squeezed onto one truncated line here told the learner nothing.
 func (m Model) challengeHeader(w int) string {
 	label := "No challenge selected"
@@ -1962,7 +1961,22 @@ func (m *Model) loadStarterOrDraft(ch tutor.Challenge) (code string, stale bool)
 	if !draftMatches(ch, d) {
 		return code, true
 	}
+	// Drafts saved before the in-editor prompt existed (or where it was
+	// deleted) get it back, so the problem statement is always at the top.
+	if first := firstPromptLine(ch); first != "" && !strings.Contains(d, first) {
+		d = promptComment(ch) + d
+	}
 	return d, false
+}
+
+// firstPromptLine is the first rendered line of the prompt comment, used to
+// detect whether a draft already carries it.
+func firstPromptLine(ch tutor.Challenge) string {
+	c := promptComment(ch)
+	if i := strings.IndexByte(c, '\n'); i > 0 {
+		return c[:i]
+	}
+	return strings.TrimRight(c, "\n")
 }
 
 // promptComment renders the challenge prompt as comment lines in the

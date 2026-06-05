@@ -340,3 +340,60 @@ func TestEssayHeaderSeededAndStripped(t *testing.T) {
 		t.Fatalf("stripEssayHeader = %q", got)
 	}
 }
+
+func TestPromptCommentAlwaysAtTopOfDrafts(t *testing.T) {
+	store, err := drafts.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{deps: Deps{Store: store}}
+	ch := tutor.Challenge{
+		ID:          "go-b-loops",
+		Lang:        "go",
+		Prompt:      "Write SumTo(n int) int returning the sum.",
+		StarterCode: "func SumTo(n int) int {\n\treturn 0\n}\n",
+	}
+
+	// An old draft saved before the in-editor prompt existed: the comment is
+	// prepended so the problem statement is never invisible.
+	old := "func SumTo(n int) int {\n\ttotal := 0\n\treturn total\n}"
+	if err := store.Save(ch.ID, old); err != nil {
+		t.Fatal(err)
+	}
+	code, stale := m.loadStarterOrDraft(ch)
+	if stale {
+		t.Fatal("matching draft must not be stale")
+	}
+	if code != promptComment(ch)+old {
+		t.Fatalf("old draft should gain the prompt comment:\n%q", code)
+	}
+
+	// A draft that already carries the comment is left untouched.
+	withComment := promptComment(ch) + old
+	if err := store.Save(ch.ID, withComment); err != nil {
+		t.Fatal(err)
+	}
+	code, _ = m.loadStarterOrDraft(ch)
+	if code != withComment {
+		t.Fatalf("draft with comment must not be doubled:\n%q", code)
+	}
+}
+
+func TestChallengePromptNotEchoedInChat(t *testing.T) {
+	m := newModel(testDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+	cmd := m.loadChallenge(tutor.Challenge{
+		ID:          "x-challenge",
+		Lang:        "go",
+		Prompt:      "Write Foo(n int) int doing the thing.",
+		StarterCode: "func Foo(n int) int {\n\treturn 0\n}\n",
+	})
+	_ = cmd
+	if strings.Contains(m.chat.view(), "Write Foo") {
+		t.Fatalf("the prompt must not be echoed into the chat:\n%s", m.chat.view())
+	}
+	if !strings.Contains(m.editor.Value(), "// Write Foo(n int) int") {
+		t.Fatalf("the prompt should be a comment in the editor:\n%s", m.editor.Value())
+	}
+}
