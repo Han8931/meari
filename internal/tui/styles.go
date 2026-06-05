@@ -1,6 +1,13 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+// noticeTTL is how long a status-bar notice stays visible.
+const noticeTTL = 5 * time.Second
 
 // Pane border styles. The focused pane gets a bright border; others are dim.
 // We switch only BorderForeground (not the border runes) so box widths stay
@@ -67,8 +74,12 @@ var (
 	chatCodeGutter = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	chatSystemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
-	chatOkStyle     = lipgloss.NewStyle().Foreground(doneColor).Bold(true)             // match the sidebar "done" green
-	chatFailStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("210")).Bold(true) // soft red, easier on the eyes than 203
+
+	// noticeStyle renders transient command feedback in the status bar (copy
+	// confirmations, resize/fold notices, unknown commands…).
+	noticeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
+	chatOkStyle   = lipgloss.NewStyle().Foreground(doneColor).Bold(true)             // match the sidebar "done" green
+	chatFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("210")).Bold(true) // soft red, easier on the eyes than 203
 )
 
 // borderStyle returns the focused or blurred border depending on whether the

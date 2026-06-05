@@ -192,12 +192,12 @@ func TestCopyChatLastReply(t *testing.T) {
 	c.append(roleTutor, "second answer")
 	c.append(roleSystem, "some notice") // must be skipped
 
-	copyChat(&c, "")
+	notice := copyChat(&c, "")
 	if *got != "second answer" {
 		t.Fatalf("copied %q, want the last tutor reply", *got)
 	}
-	if !strings.Contains(c.view(), "✓ copied last reply") {
-		t.Fatalf("feedback missing:\n%s", c.view())
+	if !strings.Contains(notice, "✓ copied last reply") {
+		t.Fatalf("feedback notice = %q", notice)
 	}
 }
 
@@ -218,12 +218,12 @@ func TestCopyChatAllAndEmpty(t *testing.T) {
 	c := newChat()
 	c.setSize(60, 12)
 
-	copyChat(&c, "") // nothing yet
+	notice := copyChat(&c, "") // nothing yet
 	if *got != "" {
 		t.Fatalf("nothing should be copied from an empty chat, got %q", *got)
 	}
-	if !strings.Contains(c.view(), "nothing to copy") {
-		t.Fatalf("empty-chat feedback missing:\n%s", c.view())
+	if !strings.Contains(notice, "nothing to copy") {
+		t.Fatalf("empty-chat notice = %q", notice)
 	}
 
 	c.append(roleUser, "hello")
@@ -241,7 +241,9 @@ func TestPasteIntoChatInput(t *testing.T) {
 
 	c := newChat()
 	c.setSize(60, 12)
-	pasteChat(&c)
+	if notice := pasteChat(&c); notice != "" {
+		t.Fatalf("successful paste should be silent, got %q", notice)
+	}
 	if got := c.input.Value(); got != "pasted question" {
 		t.Fatalf("input after paste = %q", got)
 	}
@@ -250,12 +252,12 @@ func TestPasteIntoChatInput(t *testing.T) {
 	pasteFromClipboard = func() (string, error) { return "  ", nil }
 	c2 := newChat()
 	c2.setSize(60, 12)
-	pasteChat(&c2)
+	notice := pasteChat(&c2)
 	if c2.input.Value() != "" {
 		t.Fatalf("empty clipboard must not modify the input")
 	}
-	if !strings.Contains(c2.view(), "clipboard is empty") {
-		t.Fatalf("empty-clipboard notice missing:\n%s", c2.view())
+	if !strings.Contains(notice, "clipboard is empty") {
+		t.Fatalf("empty-clipboard notice = %q", notice)
 	}
 }
 

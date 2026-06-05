@@ -491,8 +491,8 @@ func (c chatModel) transcript() (string, bool) {
 
 // copyChat copies part of the transcript to the system clipboard — what is ""
 // (last tutor/lesson reply), "code" (last fenced block), or "all" (the whole
-// conversation) — and reports the outcome as a system line in the transcript.
-func copyChat(c *chatModel, what string) {
+// conversation) — and returns a status notice describing the outcome.
+func copyChat(c *chatModel, what string) string {
 	var (
 		text  string
 		ok    bool
@@ -510,36 +510,33 @@ func copyChat(c *chatModel, what string) {
 		label = "last reply"
 	}
 	if !ok {
-		msg := "nothing to copy yet — ask the tutor something first"
 		if what == "code" {
-			msg = "no code block found in the tutor's replies"
+			return "no code block found in the tutor's replies"
 		}
-		c.append(roleSystem, msg)
-		return
+		return "nothing to copy yet — ask the tutor something first"
 	}
 	if err := copyToClipboard(text); err != nil {
 		// The native clipboard failed (e.g. headless/SSH) but the OSC 52 escape
 		// was still sent; supporting terminals will have copied it.
-		c.append(roleSystem, "✓ sent "+label+" to the terminal clipboard (OSC 52) — native clipboard unavailable: "+err.Error())
-		return
+		return "✓ sent " + label + " to the terminal clipboard (OSC 52) — native clipboard unavailable: " + err.Error()
 	}
-	c.append(roleSystem, "✓ copied "+label+" ("+itoa(len([]rune(text)))+" chars)")
+	return "✓ copied " + label + " (" + itoa(len([]rune(text))) + " chars)"
 }
 
 // pasteChat inserts the system clipboard into the chat input (":paste"), so a
 // question can be composed from text copied elsewhere. (Ctrl-V in the input
-// also pastes, via the textarea's own binding.)
-func pasteChat(c *chatModel) {
+// also pastes, via the textarea's own binding.) Returns a status notice, or ""
+// on a silent success.
+func pasteChat(c *chatModel) string {
 	text, err := pasteFromClipboard()
 	if err != nil {
-		c.append(roleSystem, "⚠ could not read the clipboard: "+err.Error())
-		return
+		return "⚠ could not read the clipboard: " + err.Error()
 	}
 	if strings.TrimSpace(text) == "" {
-		c.append(roleSystem, "clipboard is empty")
-		return
+		return "clipboard is empty"
 	}
 	c.input.InsertString(text)
+	return ""
 }
 
 func (c chatModel) view() string {

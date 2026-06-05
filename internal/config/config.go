@@ -71,6 +71,9 @@ type UIConfig struct {
 	// adjust the split live from this base.
 	SidebarPercent int `toml:"sidebar_percent"`
 	ChatPercent    int `toml:"chat_percent"`
+	// SidebarFolded starts the left pane folded away (the ":fold" state), so
+	// the editor and chat get the full width. Toggle live with :fold.
+	SidebarFolded bool `toml:"sidebar_folded"`
 }
 
 // Default returns the built-in configuration used when no file is present.
@@ -205,6 +208,8 @@ layout = "vertical"
 # Unset keeps the built-in defaults; :compact / :wide still adjust live.
 # sidebar_percent = 22
 # chat_percent = 30
+# Start with the left pane folded away (toggle live with :fold).
+# sidebar_folded = false
 `
 
 // EnsureFile writes the default config template to path if it does not yet

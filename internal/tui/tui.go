@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -168,6 +169,11 @@ type Model struct {
 	spin     spinner.Model
 	err      error
 
+	// notice is transient command feedback shown in the status bar (instead of
+	// cluttering the chat transcript); it fades after noticeTTL.
+	notice   string
+	noticeAt time.Time
+
 	// cached layout dims (content sizes inside borders)
 	sidebarW int
 	editorW  int
@@ -206,18 +212,19 @@ func newModel(d Deps) Model {
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	m := Model{
-		deps:       d,
-		horizontal: d.Cfg.Horizontal(),
-		sidebar:    newSidebar(),
-		editor:     editor.New("", d.Cfg.VimEditor(), save),
-		chat:       newChat(),
-		topicInput: ti,
-		cmdLine:    cl,
-		curID:      curID,
-		challenges: map[string]tutor.Challenge{},
-		chatByKey:  map[string][]chatBlock{},
-		histByKey:  map[string][]tutor.ChatTurn{},
-		spin:       sp,
+		deps:             d,
+		horizontal:       d.Cfg.Horizontal(),
+		sidebarCollapsed: d.Cfg.UI.SidebarFolded,
+		sidebar:          newSidebar(),
+		editor:           editor.New("", d.Cfg.VimEditor(), save),
+		chat:             newChat(),
+		topicInput:       ti,
+		cmdLine:          cl,
+		curID:            curID,
+		challenges:       map[string]tutor.Challenge{},
+		chatByKey:        map[string][]chatBlock{},
+		histByKey:        map[string][]tutor.ChatTurn{},
+		spin:             sp,
 	}
 	m.seedOrder()
 
@@ -444,7 +451,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// which arrives as "ø"/"Ø" unless the terminal sends Option as Meta.
 		// (Cmd+O never reaches a terminal app; the emulator consumes it.)
 		case "alt+o", "ø", "Ø":
-			copyChat(&m.chat, "")
+			m.flash(copyChat(&m.chat, ""))
 			return m, nil
 		}
 		if msg.Type == tea.KeyEnter {
@@ -455,6 +462,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// flash shows transient feedback in the status bar for a few seconds.
+func (m *Model) flash(s string) {
+	if s == "" {
+		return
+	}
+	m.notice = s
+	m.noticeAt = time.Now()
 }
 
 // handleMouse routes wheel events to the pane under the cursor, like ranger/lf:
@@ -606,10 +622,10 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		if len(fields) > 1 {
 			what = fields[1]
 		}
-		copyChat(&m.chat, what)
+		m.flash(copyChat(&m.chat, what))
 		return m, nil
 	case "paste":
-		pasteChat(&m.chat)
+		m.flash(pasteChat(&m.chat))
 		return m, m.setFocus(paneChat) // land where the pasted text is
 	case "progress":
 		m.overlay = overlayProgress
@@ -620,10 +636,10 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 	case "config":
 		return m, m.openConfig()
 	case "learn", "essay", "grade":
-		m.chat.append(roleSystem, ":"+fields[0]+" lives in the learning vault — quit and run `meari notes` (or `meari serve` for the browser).")
+		m.flash(":" + fields[0] + " lives in the learning vault — quit and run `meari notes` (or `meari serve`)")
 		return m, nil
 	default:
-		m.chat.append(roleSystem, "unknown command: :"+raw+"  (try :help)")
+		m.flash("unknown command: :" + raw + "  (try :help)")
 		return m, nil
 	}
 }
@@ -642,7 +658,7 @@ func (m Model) cmdTopic(args []string) (tea.Model, tea.Cmd) {
 // (defaulting to beginner), or reports an error if there's no such course.
 func (m Model) switchCourse(course string) (tea.Model, tea.Cmd) {
 	if !curriculum.HasCurriculum(course) {
-		m.chat.append(roleSystem, "no course \""+course+"\" — try: "+strings.Join(curriculum.Languages(), ", "))
+		m.flash("no course \"" + course + "\" — try: " + strings.Join(curriculum.Languages(), ", "))
 		return m, nil
 	}
 	level := m.level
@@ -657,7 +673,7 @@ func (m Model) switchCourse(course string) (tea.Model, tea.Cmd) {
 // explicitly asked, so revealing is fine — unlike run feedback, which never does.
 func (m Model) cmdAnswer() (tea.Model, tea.Cmd) {
 	if m.current.ID == "" {
-		m.chat.append(roleSystem, "no challenge open — pick one on the left first")
+		m.flash("no challenge open — pick one on the left first")
 		return m, nil
 	}
 	m.pending++
@@ -700,7 +716,7 @@ func (m Model) cmdFold() (tea.Model, tea.Cmd) {
 	}
 	m.layout()
 	if m.sidebarCollapsed {
-		m.chat.append(roleSystem, "Sidebar folded — :fold to bring it back.")
+		m.flash("Sidebar folded — :fold to bring it back")
 	}
 	return m, cmd
 }
@@ -725,17 +741,17 @@ func (m Model) cmdResizeEditor(delta int) (tea.Model, tea.Cmd) {
 		if delta < 0 {
 			edge = "narrowest"
 		}
-		m.chat.append(roleSystem, "Editor already at its "+edge+" — chat can't go further.")
+		m.flash("Editor already at its " + edge + " — chat can't go further")
 		return m, nil
 	}
 	m.layout()
 	switch {
 	case m.editorBias < 0:
-		m.chat.append(roleSystem, "Editor narrowed — more room for chat. (:wide to grow it back)")
+		m.flash("Editor narrowed — more room for chat (:wide to grow it back)")
 	case m.editorBias > 0:
-		m.chat.append(roleSystem, "Editor widened. (:compact to give chat more room)")
+		m.flash("Editor widened (:compact to give chat more room)")
 	default:
-		m.chat.append(roleSystem, "Editor/chat split reset to default.")
+		m.flash("Editor/chat split reset to default")
 	}
 	return m, nil
 }
@@ -745,16 +761,16 @@ func (m Model) runConfirm() (tea.Model, tea.Cmd) {
 	switch m.confirmKind {
 	case confirmClearProgress:
 		if err := m.deps.Progress.Reset(); err != nil {
-			m.chat.append(roleSystem, "⚠ couldn't clear progress: "+err.Error())
+			m.flash("⚠ couldn't clear progress: " + err.Error())
 		} else {
-			m.chat.append(roleSystem, "✓ learning progress cleared.")
+			m.flash("✓ learning progress cleared")
 			m.rebuildSidebar()
 		}
 	case confirmClearDrafts:
 		if err := m.deps.Store.ClearAll(); err != nil {
-			m.chat.append(roleSystem, "⚠ couldn't clear drafts: "+err.Error())
+			m.flash("⚠ couldn't clear drafts: " + err.Error())
 		} else {
-			m.chat.append(roleSystem, "✓ saved drafts cleared.")
+			m.flash("✓ saved drafts cleared")
 		}
 	}
 	m.overlay = overlayNone
@@ -1149,7 +1165,7 @@ func (m Model) chatContext() string {
 // as context so answers relate to what's on screen.
 func (m Model) submitChat() (tea.Model, tea.Cmd) {
 	if m.streaming {
-		m.chat.append(roleSystem, "the tutor is still replying — one question at a time")
+		m.flash("the tutor is still replying — one question at a time")
 		return m, nil
 	}
 	text, ok := m.chat.submit()
@@ -1209,7 +1225,7 @@ func (m *Model) openSelected() tea.Cmd {
 	}
 	// A draft/progress id from a previous session — we don't have its tests this
 	// session, so it can't be run. Tell the learner.
-	m.chat.append(roleSystem, "No challenge data for \""+it.id+"\" this session — press Ctrl-N to generate a new one.")
+	m.flash("No challenge data for \"" + it.id + "\" this session — Ctrl-N generates a new one")
 	return nil
 }
 
@@ -1516,10 +1532,9 @@ func (m *Model) applyConfigReload(msg configReloadMsg) {
 	}
 	ai := "AI: " + cfg.AI.Model + " @ " + cfg.AI.ResolveBaseURL()
 	if m.deps.Tutor.Offline() {
-		ai = "AI: OFFLINE — an API key is required for this endpoint but none was found (try `meari check`)"
+		ai = "AI: OFFLINE — key required but not found (try `meari check`)"
 	}
-	m.chat.append(roleSystem, "✓ Config reloaded — layout is now "+cfg.UI.Layout+"; "+ai+
-		". (Editor keybindings apply on next launch.)")
+	m.flash("✓ Config reloaded — layout " + cfg.UI.Layout + "; " + ai)
 }
 
 // --- focus & ordering helpers ---
@@ -1864,6 +1879,9 @@ func (m Model) statusView() string {
 	} else if m.err != nil {
 		left += " " + errStyle.Render("error: "+m.err.Error())
 	}
+	if m.notice != "" && time.Since(m.noticeAt) < noticeTTL {
+		return statusBar.Width(m.width).Render(left + "   " + noticeStyle.Render(m.notice))
+	}
 	hints := "⌃w h·l focus · : cmds (:help) · ⌃s/:submit run · u/⌃r undo/redo · ⌃c quit"
 	switch {
 	case m.pendingWindow:
@@ -1931,10 +1949,12 @@ func draftMatches(ch tutor.Challenge, draft string) bool {
 }
 
 // loadStarterOrDraft picks the editor contents for ch: its saved draft when one
-// exists and still matches the challenge, else the fresh starter. stale is true
-// when a draft existed but belonged to an older version of the challenge.
+// exists and still matches the challenge, else the fresh starter topped with
+// the problem statement as a comment — so the challenge stays readable in the
+// editor even when the chat history grows long. stale is true when a draft
+// existed but belonged to an older version of the challenge.
 func (m *Model) loadStarterOrDraft(ch tutor.Challenge) (code string, stale bool) {
-	code = ch.StarterCode
+	code = promptComment(ch) + ch.StarterCode
 	d, ok := m.deps.Store.Load(ch.ID)
 	if !ok {
 		return code, false
@@ -1943,6 +1963,45 @@ func (m *Model) loadStarterOrDraft(ch tutor.Challenge) (code string, stale bool)
 		return code, true
 	}
 	return d, false
+}
+
+// promptComment renders the challenge prompt as comment lines in the
+// challenge's language ("# " for Python, "// " for Go, bare for prose).
+func promptComment(ch tutor.Challenge) string {
+	prefix := "# "
+	switch strings.ToLower(challengeLang(ch)) {
+	case "go", "golang":
+		prefix = "// "
+	case "physics", "plain", "text":
+		prefix = ""
+	}
+	var b strings.Builder
+	for _, ln := range wrapWords(ch.Prompt, 68) {
+		b.WriteString(prefix)
+		b.WriteString(ln)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// wrapWords greedily wraps s into lines of at most width characters.
+func wrapWords(s string, width int) []string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return nil
+	}
+	var lines []string
+	cur := words[0]
+	for _, w := range words[1:] {
+		if len(cur)+1+len(w) > width {
+			lines = append(lines, cur)
+			cur = w
+		} else {
+			cur += " " + w
+		}
+	}
+	return append(lines, cur)
 }
 
 const staleDraftNotice = "⚠ Your saved draft was for an older version of this challenge, " +

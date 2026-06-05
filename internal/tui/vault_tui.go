@@ -11,6 +11,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -63,6 +64,9 @@ type VaultModel struct {
 	// ":compact" grows the chat), sharing the classic TUI's step/clamp.
 	editorBias int
 
+	// sidebarCollapsed hides the notes pane (":fold"); starts from config.
+	sidebarCollapsed bool
+
 	// cfg supplies the configured pane ratios and editor keybindings.
 	cfg config.Config
 
@@ -70,6 +74,10 @@ type VaultModel struct {
 	loadKind string
 	spin     spinner.Model
 	err      error
+
+	// notice is transient command feedback shown in the status bar.
+	notice   string
+	noticeAt time.Time
 
 	sidebarW, editorW, chatW, contentH int
 }
@@ -86,14 +94,15 @@ func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
 	vim := cfg.VimEditor()
 	curPath := new(string)
 	m := VaultModel{
-		svc:        svc,
-		cfg:        cfg,
-		curPath:    curPath,
-		sidebar:    newSidebar(),
-		chat:       newChat(),
-		chatByNote: map[string][]chatBlock{},
-		histByNote: map[string][]tutor.ChatTurn{},
-		spin:       spinner.New(spinner.WithSpinner(spinner.Dot)),
+		svc:              svc,
+		cfg:              cfg,
+		curPath:          curPath,
+		sidebarCollapsed: cfg.UI.SidebarFolded,
+		sidebar:          newSidebar(),
+		chat:             newChat(),
+		chatByNote:       map[string][]chatBlock{},
+		histByNote:       map[string][]tutor.ChatTurn{},
+		spin:             spinner.New(spinner.WithSpinner(spinner.Dot)),
 	}
 	// The editor's save closure persists the open note — but never while the
 	// learner is writing an essay answer (curPath is blanked during study).
@@ -111,8 +120,12 @@ func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
 	cl.Prompt = ":"
 	m.cmdLine = cl
 
-	m.focus = paneSidebar
-	m.sidebar.focused = true
+	if m.sidebarCollapsed {
+		m.focus = paneEditor
+	} else {
+		m.focus = paneSidebar
+		m.sidebar.focused = true
+	}
 	return m
 }
 
@@ -221,8 +234,12 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "ctrl+w":
-		// Cycle focus notes -> editor -> chat -> notes.
-		return m, m.setFocus(pane((int(m.focus) + 1) % 3))
+		// Cycle focus notes -> editor -> chat -> notes (skipping a folded pane).
+		next := pane((int(m.focus) + 1) % 3)
+		if m.sidebarCollapsed && next == paneSidebar {
+			next = paneEditor
+		}
+		return m, m.setFocus(next)
 	}
 
 	switch m.focus {
@@ -250,7 +267,7 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Copy the tutor's last reply: Alt+O (Linux) / Option+O (macOS, which
 		// arrives as "ø"/"Ø" unless the terminal sends Option as Meta).
 		case "alt+o", "ø", "Ø":
-			copyChat(&m.chat, "")
+			m.flash(copyChat(&m.chat, ""))
 			return m, nil
 		}
 		if msg.Type == tea.KeyEnter {
@@ -308,10 +325,14 @@ func (m VaultModel) paneAt(x, y int) (pane, bool) {
 	if y < 1 || y > m.height-2 {
 		return 0, false
 	}
+	sidebarSpan := m.sidebarW + 2
+	if m.sidebarCollapsed {
+		sidebarSpan = 0
+	}
 	switch {
-	case x < m.sidebarW+2:
+	case x < sidebarSpan:
 		return paneSidebar, true
-	case x < m.sidebarW+2+m.editorW+2:
+	case x < sidebarSpan+m.editorW+2:
 		return paneEditor, true
 	default:
 		return paneChat, true
@@ -363,7 +384,7 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 	switch fields[0] {
 	case "learn", "gen", "lesson":
 		if args == "" {
-			m.chat.append(roleSystem, "usage: :learn <what you want to learn>")
+			m.flash("usage: :learn <what you want to learn>")
 			return m, nil
 		}
 		m.pending++
@@ -372,11 +393,13 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, vGenCmd(m.svc, args)
 	case "new":
 		if args == "" {
-			m.chat.append(roleSystem, "usage: :new <note title>")
+			m.flash("usage: :new <note title>")
 			return m, nil
 		}
 		path := args + ".md"
 		return m, vSaveOpenCmd(m.svc, path, "# "+args+"\n\n")
+	case "fold", "sidebar":
+		return m.cmdFold()
 	case "compact":
 		return m.cmdResizeEditor(-editorBiasStep)
 	case "wide":
@@ -392,20 +415,35 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		if len(fields) > 1 {
 			what = fields[1]
 		}
-		copyChat(&m.chat, what)
+		m.flash(copyChat(&m.chat, what))
 		return m, nil
 	case "paste":
-		pasteChat(&m.chat)
+		m.flash(pasteChat(&m.chat))
 		return m, m.setFocus(paneChat) // land where the pasted text is
 	case "done":
 		return m.endEssay()
 	case "q", "quit":
 		return m, tea.Quit
 	default:
-		m.chat.append(roleSystem, "unknown command: :"+raw+
-			"  (try :learn · :new · :essay · :grade · :answer · :done · :compact · :wide · :q)")
+		m.flash("unknown command: :" + raw +
+			"  (try :learn · :new · :essay · :grade · :answer · :done · :fold · :compact · :wide · :q)")
 		return m, nil
 	}
+}
+
+// cmdFold toggles the notes pane. Folding the focused pane moves focus to the
+// editor so keys never vanish into a hidden pane.
+func (m VaultModel) cmdFold() (tea.Model, tea.Cmd) {
+	m.sidebarCollapsed = !m.sidebarCollapsed
+	var cmd tea.Cmd
+	if m.sidebarCollapsed && m.focus == paneSidebar {
+		cmd = m.setFocus(paneEditor)
+	}
+	m.layout()
+	if m.sidebarCollapsed {
+		m.flash("Notes pane folded — :fold to bring it back")
+	}
+	return m, cmd
 }
 
 // cmdResizeEditor nudges the editor/chat split by delta percentage points
@@ -418,17 +456,17 @@ func (m VaultModel) cmdResizeEditor(delta int) (tea.Model, tea.Cmd) {
 		if delta < 0 {
 			edge = "narrowest"
 		}
-		m.chat.append(roleSystem, "Editor already at its "+edge+" — chat can't go further.")
+		m.flash("Editor already at its " + edge + " — chat can't go further")
 		return m, nil
 	}
 	m.layout()
 	switch {
 	case m.editorBias < 0:
-		m.chat.append(roleSystem, "Editor narrowed — more room for chat. (:wide to grow it back)")
+		m.flash("Editor narrowed — more room for chat (:wide to grow it back)")
 	case m.editorBias > 0:
-		m.chat.append(roleSystem, "Editor widened. (:compact to give chat more room)")
+		m.flash("Editor widened (:compact to give chat more room)")
 	default:
-		m.chat.append(roleSystem, "Editor/chat split reset to default.")
+		m.flash("Editor/chat split reset to default")
 	}
 	return m, nil
 }
@@ -449,7 +487,7 @@ func (m VaultModel) submitEditor() (tea.Model, tea.Cmd) {
 // hold the learner's answer; autosave to the note is suspended.
 func (m VaultModel) startEssay(prompt string) (tea.Model, tea.Cmd) {
 	if m.current == "" {
-		m.chat.append(roleSystem, "open a note first, then :essay to study it")
+		m.flash("open a note first, then :essay to study it")
 		return m, nil
 	}
 	// Persist any edits to the note before repurposing the editor.
@@ -460,19 +498,21 @@ func (m VaultModel) startEssay(prompt string) (tea.Model, tea.Cmd) {
 	m.studyMode = true
 	m.studyPrompt = prompt
 	*m.curPath = "" // suspend note autosave while answering
-	m.editor.SetValue("")
+	// Seed the answer buffer with the prompt as a blockquote header, so the
+	// question stays visible while writing (grading strips it back out).
+	m.editor.SetValue("> Essay: " + prompt + "\n\n")
 	m.chat.append(roleLesson, "Essay study — "+prompt+"\n\nWrite your answer in the editor, then :grade (or Ctrl-S).")
 	return m, m.setFocus(paneEditor)
 }
 
 func (m VaultModel) gradeEssay() (tea.Model, tea.Cmd) {
 	if !m.studyMode {
-		m.chat.append(roleSystem, "not studying — :essay to start")
+		m.flash("not studying — :essay to start")
 		return m, nil
 	}
-	answer := strings.TrimSpace(m.editor.Value())
+	answer := strings.TrimSpace(stripEssayHeader(m.editor.Value()))
 	if answer == "" {
-		m.chat.append(roleSystem, "write an answer first")
+		m.flash("write an answer first")
 		return m, nil
 	}
 	m.pending++
@@ -484,7 +524,7 @@ func (m VaultModel) gradeEssay() (tea.Model, tea.Cmd) {
 // explicitly asked, so revealing is fine — unlike grading feedback).
 func (m VaultModel) revealAnswer() (tea.Model, tea.Cmd) {
 	if !m.studyMode {
-		m.chat.append(roleSystem, "not studying — :essay to start, then :answer to see a model answer")
+		m.flash("not studying — :essay to start, then :answer to see a model answer")
 		return m, nil
 	}
 	m.pending++
@@ -502,6 +542,15 @@ func (m VaultModel) endEssay() (tea.Model, tea.Cmd) {
 		return m, vOpenCmd(m.svc, m.current)
 	}
 	return m, nil
+}
+
+// flash shows transient feedback in the status bar for a few seconds.
+func (m *VaultModel) flash(s string) {
+	if s == "" {
+		return
+	}
+	m.notice = s
+	m.noticeAt = time.Now()
 }
 
 // switchNoteChat swaps the chat pane to the opened note's own transcript and
@@ -548,7 +597,7 @@ func (m VaultModel) chatContext() string {
 // transcript, grounded in the open note / study state.
 func (m VaultModel) submitChat() (tea.Model, tea.Cmd) {
 	if m.streaming {
-		m.chat.append(roleSystem, "the tutor is still replying — one question at a time")
+		m.flash("the tutor is still replying — one question at a time")
 		return m, nil
 	}
 	text, ok := m.chat.submit()
@@ -666,15 +715,25 @@ func (m *VaultModel) layout() {
 	if m.contentH < 1 {
 		m.contentH = 1
 	}
-	contentW := m.width - 6 // three boxes, 2 border columns each
+	borders := 6 // three bordered boxes, 2 columns each
+	if m.sidebarCollapsed {
+		borders = 4
+	}
+	contentW := m.width - borders
 	if contentW < 3 {
 		contentW = 3
 	}
 	// The configured split is the base; :compact / :wide shift it live.
 	chatPct := clampRange(m.cfg.ChatPct(32)-m.editorBias, 15, 75)
-	m.sidebarW = clampMin(contentW*m.cfg.SidebarPct(22)/100, 12)
-	m.chatW = clampMin(contentW*chatPct/100, 16)
-	m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
+	if m.sidebarCollapsed {
+		m.sidebarW = 0
+		m.chatW = clampMin(contentW*chatPct/100, 16)
+		m.editorW = clampMin(contentW-m.chatW, 10)
+	} else {
+		m.sidebarW = clampMin(contentW*m.cfg.SidebarPct(22)/100, 12)
+		m.chatW = clampMin(contentW*chatPct/100, 16)
+		m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
+	}
 
 	m.sidebar.setSize(m.sidebarW, m.contentH)
 	m.editor.SetSize(m.editorW, max(1, m.contentH-1))
@@ -688,10 +747,15 @@ func (m VaultModel) View() string {
 	if m.width < 60 || m.height < 16 {
 		return "Terminal too small — please enlarge to at least 60×16."
 	}
-	sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
 	ed := m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW))
 	ch := m.box(paneChat, m.chatW, m.contentH, m.chat.view())
-	row := lipgloss.JoinHorizontal(lipgloss.Top, sb, ed, ch)
+	var row string
+	if m.sidebarCollapsed {
+		row = lipgloss.JoinHorizontal(lipgloss.Top, ed, ch)
+	} else {
+		sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
+		row = lipgloss.JoinHorizontal(lipgloss.Top, sb, ed, ch)
+	}
 	frame := lipgloss.JoinVertical(lipgloss.Left, m.titleView(), row, m.statusView())
 	return lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(frame)
 }
@@ -736,6 +800,9 @@ func (m VaultModel) statusView() string {
 	} else if m.err != nil {
 		left += " " + errStyle.Render("error: "+m.err.Error())
 	}
+	if m.notice != "" && time.Since(m.noticeAt) < noticeTTL {
+		return statusBar.Width(m.width).Render(left + "   " + noticeStyle.Render(m.notice))
+	}
 	hints := "⌃w focus · : cmds · :learn <topic> · enter open · ⌃s save · ⌃c quit"
 	if m.studyMode {
 		hints = ":grade check answer · :answer see a model answer · :done finish"
@@ -758,6 +825,20 @@ func (m VaultModel) focusName() string {
 		return "chat"
 	}
 	return ""
+}
+
+// stripEssayHeader removes the leading "> Essay: …" blockquote (and blank
+// lines) that startEssay seeds, so only the learner's own words are graded.
+func stripEssayHeader(s string) string {
+	lines := strings.Split(s, "\n")
+	i := 0
+	for i < len(lines) && (strings.HasPrefix(lines[i], ">") || strings.TrimSpace(lines[i]) == "") {
+		if strings.TrimSpace(lines[i]) == "" && i > 0 && !strings.HasPrefix(lines[i-1], ">") {
+			break
+		}
+		i++
+	}
+	return strings.Join(lines[i:], "\n")
 }
 
 // vChatTurn builds a one-element tutor history slice (test/readability helper).

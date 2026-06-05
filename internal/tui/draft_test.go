@@ -2,13 +2,16 @@ package tui
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"meari/internal/config"
+	"meari/internal/core"
 	"meari/internal/drafts"
 	"meari/internal/tutor"
+	"meari/internal/vault"
 )
 
 func TestDraftMatches(t *testing.T) {
@@ -230,9 +233,9 @@ func TestLoadStarterOrDraftStale(t *testing.T) {
 		StarterCode: "func FizzBuzz(n int) []string {\n\treturn nil\n}\n",
 	}
 
-	// No draft: starter.
+	// No draft: the starter, topped with the prompt as a comment.
 	code, stale := m.loadStarterOrDraft(ch)
-	if stale || code != ch.StarterCode {
+	if stale || code != promptComment(ch)+ch.StarterCode {
 		t.Fatalf("no-draft case wrong: stale=%v code=%q", stale, code)
 	}
 
@@ -244,7 +247,7 @@ func TestLoadStarterOrDraftStale(t *testing.T) {
 	if !stale {
 		t.Fatal("a mismatched draft must be flagged stale")
 	}
-	if code != ch.StarterCode {
+	if code != promptComment(ch)+ch.StarterCode {
 		t.Fatalf("stale draft must not shadow the starter, got %q", code)
 	}
 
@@ -256,5 +259,84 @@ func TestLoadStarterOrDraftStale(t *testing.T) {
 	code, stale = m.loadStarterOrDraft(ch)
 	if stale || code != want {
 		t.Fatalf("matching draft case wrong: stale=%v code=%q", stale, code)
+	}
+}
+
+func TestSidebarFoldedFromConfig(t *testing.T) {
+	// Classic TUI starts folded when configured.
+	d := testDeps(t)
+	d.Cfg.UI.SidebarFolded = true
+	m := newModel(d)
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+	if !m.sidebarCollapsed {
+		t.Fatal("classic TUI should start folded")
+	}
+	if m.sidebarW != 0 {
+		t.Fatalf("folded sidebar width = %d, want 0", m.sidebarW)
+	}
+
+	// Vault TUI: starts folded, focus on the editor, :fold brings it back.
+	v, err := vault.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tut := tutor.New(config.AIConfig{Provider: "openai"})
+	vm := newVaultModel(core.New(v, tut), config.Config{UI: config.UIConfig{SidebarFolded: true}})
+	tm, _ := vm.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	vm = tm.(VaultModel)
+	if !vm.sidebarCollapsed || vm.sidebarW != 0 {
+		t.Fatalf("vault should start folded (collapsed=%v w=%d)", vm.sidebarCollapsed, vm.sidebarW)
+	}
+	if vm.focus != paneEditor {
+		t.Fatalf("folded start should focus the editor, got %v", vm.focus)
+	}
+	tm, _ = vm.runEx("fold")
+	vm = tm.(VaultModel)
+	if vm.sidebarCollapsed || vm.sidebarW == 0 {
+		t.Fatal(":fold should unfold the vault sidebar")
+	}
+}
+
+func TestPromptCommentLanguages(t *testing.T) {
+	goCh := tutor.Challenge{Lang: "go", Prompt: "Write SumTo(n int) int returning the sum."}
+	if got := promptComment(goCh); !strings.HasPrefix(got, "// Write SumTo") {
+		t.Fatalf("go comment = %q", got)
+	}
+	pyCh := tutor.Challenge{Prompt: "Write sum_to(n) returning the sum."}
+	if got := promptComment(pyCh); !strings.HasPrefix(got, "# Write sum_to") {
+		t.Fatalf("python comment = %q", got)
+	}
+	prose := tutor.Challenge{Lang: "physics", Prompt: "Explain the energy transfer."}
+	if got := promptComment(prose); !strings.HasPrefix(got, "Explain the energy") {
+		t.Fatalf("prose header = %q", got)
+	}
+	// Long prompts wrap into multiple comment lines.
+	long := tutor.Challenge{Lang: "go", Prompt: strings.Repeat("word ", 40)}
+	if lines := strings.Count(promptComment(long), "// "); lines < 2 {
+		t.Fatalf("long prompt should wrap, got %d comment lines", lines)
+	}
+}
+
+func TestEssayHeaderSeededAndStripped(t *testing.T) {
+	m := newTestVaultModel(t)
+	opened := vSaveOpenCmd(m.svc, "x/N.md", "# N\n\nbody\n")().(vOpenedMsg)
+	tm, _ := m.Update(opened)
+	m = tm.(VaultModel)
+	tm, _ = m.startEssay("Explain N.")
+	m = tm.(VaultModel)
+
+	if !strings.HasPrefix(m.editor.Value(), "> Essay: Explain N.") {
+		t.Fatalf("answer buffer should open with the prompt header: %q", m.editor.Value())
+	}
+	// Header alone is not an answer.
+	tm, cmd := m.gradeEssay()
+	m = tm.(VaultModel)
+	if cmd != nil {
+		t.Fatal("grading with only the header should be refused")
+	}
+	// The header is stripped from what gets graded.
+	if got := stripEssayHeader("> Essay: Explain N.\n\nmy actual answer"); strings.TrimSpace(got) != "my actual answer" {
+		t.Fatalf("stripEssayHeader = %q", got)
 	}
 }
