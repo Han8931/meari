@@ -205,6 +205,9 @@ func (m *Model) SetLanguage(lang string) {
 	m.lang = lang
 }
 
+// SetShowLineNumbers toggles the textarea's number gutter.
+func (m *Model) SetShowLineNumbers(on bool) { m.ta.ShowLineNumbers = on }
+
 // Focus gives the editor's textarea keyboard focus; the returned cmd blinks the cursor.
 func (m *Model) Focus() tea.Cmd { return m.ta.Focus() }
 

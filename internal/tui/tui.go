@@ -226,6 +226,7 @@ func newModel(d Deps) Model {
 		histByKey:        map[string][]tutor.ChatTurn{},
 		spin:             sp,
 	}
+	m.editor.SetShowLineNumbers(d.Cfg.LineNumbers())
 	m.seedOrder()
 
 	// Decide the starting screen.

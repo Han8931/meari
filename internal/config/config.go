@@ -51,6 +51,10 @@ type AIConfig struct {
 type EditorConfig struct {
 	// Keybindings selects the in-app editor style: "vim" or "default".
 	Keybindings string `toml:"keybindings"`
+	// LineNumbers toggles the editor's number gutter (default on). Turning it
+	// off frees four columns and removes the blank-gutter rows that soft-wrapped
+	// long code lines produce.
+	LineNumbers *bool `toml:"line_numbers"`
 }
 
 type NavigationConfig struct {
@@ -173,6 +177,11 @@ func (c Config) ChatPct(def int) int {
 // VimEditor reports whether the in-app editor should use Vim bindings.
 func (c Config) VimEditor() bool { return c.Editor.Keybindings == "vim" }
 
+// LineNumbers reports whether the editor shows its number gutter (default true).
+func (c Config) LineNumbers() bool {
+	return c.Editor.LineNumbers == nil || *c.Editor.LineNumbers
+}
+
 // Horizontal reports whether the stacked (content-over-input) layout is selected.
 func (c Config) Horizontal() bool { return c.UI.Layout == "horizontal" }
 
@@ -195,6 +204,7 @@ api_key_env = "OPENAI_API_KEY"
 [editor]
 # keybindings: "vim" | "default"
 keybindings = "vim"
+# line_numbers = true   # false hides the gutter (cleaner soft-wrapped lines)
 
 [navigation]
 keybindings = "vim"

@@ -115,6 +115,7 @@ func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
 	}
 	m.editor = editor.New("", vim, save)
 	m.editor.SetLanguage("markdown")
+	m.editor.SetShowLineNumbers(cfg.LineNumbers())
 
 	cl := textinput.New()
 	cl.Prompt = ":"

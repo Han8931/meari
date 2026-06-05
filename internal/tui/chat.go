@@ -218,24 +218,21 @@ func (c chatModel) renderRichBody(text string) string {
 			prose = nil
 		}
 	}
-	flushCode := func() {
-		if len(code) == 0 {
-			return
-		}
-		l := lang
+	// renderCodeRows hard-wraps highlighted code to the pane (ANSI-aware) so no
+	// code is ever clipped or word-wrapped mid-identifier; every visual row
+	// keeps the gutter bar.
+	renderCodeRows := func(src []string, l string) {
 		if l == "" {
 			l = c.codeLang
 		}
 		if l == "" {
 			l = "plain"
 		}
-		// Hard-wrap each highlighted line to the pane (ANSI-aware) so no code is
-		// ever clipped out of view; every visual row keeps the gutter bar.
 		width := c.w - 2 // room for the "│ " gutter
 		if width < 4 {
 			width = 4
 		}
-		hl := editor.Highlight(l, strings.Join(code, "\n"))
+		hl := editor.Highlight(l, strings.Join(src, "\n"))
 		var rows []string
 		for _, row := range strings.Split(hl, "\n") {
 			for _, wr := range strings.Split(ansi.Hardwrap(row, width, true), "\n") {
@@ -243,12 +240,27 @@ func (c chatModel) renderRichBody(text string) string {
 			}
 		}
 		out = append(out, strings.Join(rows, "\n"))
+	}
+	flushCode := func() {
+		if len(code) == 0 {
+			return
+		}
+		renderCodeRows(code, lang)
 		code = nil
+	}
+	var indented []string
+	flushIndented := func() {
+		if len(indented) == 0 {
+			return
+		}
+		renderCodeRows(indented, "")
+		indented = nil
 	}
 
 	for _, ln := range lines {
 		trimmed := strings.TrimSpace(ln)
 		if strings.HasPrefix(trimmed, "```") {
+			flushIndented()
 			if inCode {
 				flushCode()
 				inCode = false
@@ -261,11 +273,21 @@ func (c chatModel) renderRichBody(text string) string {
 		}
 		if inCode {
 			code = append(code, ln)
-		} else {
-			prose = append(prose, ln)
+			continue
 		}
+		// Markdown's other code idiom: 4-space-indented lines (lessons use it a
+		// lot). Word-wrapping them as prose breaks identifiers mid-word, so they
+		// render through the code path instead.
+		if strings.HasPrefix(ln, "    ") && trimmed != "" {
+			flushProse()
+			indented = append(indented, strings.TrimPrefix(ln, "    "))
+			continue
+		}
+		flushIndented()
+		prose = append(prose, ln)
 	}
 	flushProse()
+	flushIndented()
 	flushCode() // tolerate an unterminated fence
 	return strings.Join(out, "\n")
 }

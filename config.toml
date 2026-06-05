@@ -12,6 +12,9 @@ api_key_env = "OPENAI_API_KEY"
 [editor]
 # keybindings: "vim" | "default"
 keybindings = "vim"
+# line_numbers = false hides the number gutter — long code lines then wrap
+# cleanly without blank-gutter rows (and the editor gains four columns).
+line_numbers = true
 
 [navigation]
 keybindings = "vim"
