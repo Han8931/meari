@@ -63,18 +63,34 @@ func (t *Tutor) levelClause() string {
 	return ""
 }
 
+// openAIBaseURL is the one endpoint that genuinely requires an API key. Local
+// servers (Ollama, LM Studio, llama.cpp) and many gateways accept unauthenticated
+// requests, so a missing key must not force them offline.
+const openAIBaseURL = "https://api.openai.com/v1"
+
+// defaultTimeout bounds each model request when the config doesn't set one.
+// Local models can take tens of seconds to load and to generate a full lesson.
+const defaultTimeout = 120 * time.Second
+
 // New builds a Tutor from config. It reads the API key from the configured
-// environment variable. With no key and a non-local provider, it runs offline.
+// environment variable. It runs offline only when a key is required (the
+// official OpenAI endpoint) but none is set.
 func New(cfg config.AIConfig) *Tutor {
 	key := ""
 	if cfg.APIKeyEnv != "" {
 		key = os.Getenv(cfg.APIKeyEnv)
 	}
-	offline := key == "" && cfg.Provider != "ollama"
+	baseURL := strings.TrimRight(cfg.ResolveBaseURL(), "/")
+	offline := key == "" && baseURL == openAIBaseURL
+
+	timeout := defaultTimeout
+	if cfg.TimeoutSeconds > 0 {
+		timeout = time.Duration(cfg.TimeoutSeconds) * time.Second
+	}
 
 	return &Tutor{
-		client:  &http.Client{Timeout: 60 * time.Second},
-		baseURL: strings.TrimRight(cfg.ResolveBaseURL(), "/"),
+		client:  &http.Client{Timeout: timeout},
+		baseURL: baseURL,
 		model:   cfg.Model,
 		apiKey:  key,
 		offline: offline,

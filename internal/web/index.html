@@ -140,8 +140,12 @@
         <div class="muted" style="color:var(--muted)">Essay — write a free-text answer; the tutor grades it.</div>
         <input id="essayPrompt" placeholder="Prompt (e.g. Explain X in your own words)">
         <textarea id="essayAnswer" placeholder="Your answer…"></textarea>
-        <button class="primary" id="essaySubmit">Submit for feedback</button>
+        <div class="row">
+          <button class="primary" id="essaySubmit">Check answer</button>
+          <button id="essayReveal" title="Reveal a model answer for the prompt">Show answer</button>
+        </div>
         <div class="grade" id="essayGrade" style="display:none"></div>
+        <div class="grade" id="essayModel" style="display:none"></div>
       </div>
     </div>
   </section>
@@ -327,6 +331,17 @@ async function submitEssay() {
   } catch (e) { toast("Grade failed: " + e.message); }
   finally { setStatus(""); $("#essaySubmit").disabled = false; }
 }
+async function revealAnswer() {
+  const prompt = $("#essayPrompt").value.trim();
+  if (!prompt) { toast("Type the prompt first"); return; }
+  setStatus("writing model answer…"); $("#essayReveal").disabled = true;
+  try {
+    const r = await api("POST", "/api/study/answer", { prompt });
+    const el = $("#essayModel"); el.style.display = "block";
+    el.textContent = "Model answer\n\n" + r.answer;
+  } catch (e) { toast("Answer failed: " + e.message); }
+  finally { setStatus(""); $("#essayReveal").disabled = false; }
+}
 
 // ---- wiring ----
 $("#genBtn").onclick = generate;
@@ -340,6 +355,7 @@ $("#chatInput").addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
 });
 $("#essaySubmit").onclick = submitEssay;
+$("#essayReveal").onclick = revealAnswer;
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
   document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
   document.querySelectorAll(".tabpane").forEach(x => x.classList.remove("active"));

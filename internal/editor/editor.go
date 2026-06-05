@@ -42,6 +42,7 @@ const (
 	modeNormal mode = iota
 	modeInsert
 	modeCommand
+	modeVisual
 )
 
 // Result is returned to the caller after the editor closes.
@@ -87,8 +88,26 @@ type Model struct {
 	standalone bool
 
 	// pending holds the first key of a two-key Normal-mode command (operator or
-	// prefix): 'd' (delete), 'c' (change), 'g' (goto), 'r' (replace). 0 = none.
+	// prefix): 'd' (delete), 'c' (change), 'g' (goto), 'r' (replace),
+	// 'y' (yank), '<'/'>' (dedent/indent). 0 = none.
 	pending rune
+
+	// register is Vim's unnamed register: the text captured by the latest
+	// delete/yank, pasted by p/P. regLinewise marks whole-line content (dd/yy),
+	// which p pastes on its own line instead of inline.
+	register    string
+	regLinewise bool
+
+	// Visual-mode selection: the anchor is the position where v/V was pressed;
+	// the selection spans anchor..cursor. visualLine marks linewise mode (V).
+	anchorRow, anchorCol int
+	visualLine           bool
+
+	// undo/redo snapshots ('u' and Ctrl-R in Normal mode). One snapshot is
+	// taken before each mutating command, and once on Insert entry so a whole
+	// typing session is a single undo unit.
+	undoStack []editState
+	redoStack []editState
 
 	action Action
 	done   bool
@@ -141,10 +160,13 @@ func (m *Model) SetSize(w, h int) {
 }
 
 // SetValue replaces the editor's contents (e.g. when switching challenges) and
-// moves the cursor to the top, as if opening the file fresh. The textarea
-// ignores keys while blurred, so focus is momentarily restored for the move.
+// moves the cursor to the top, as if opening the file fresh. The undo history
+// belongs to the previous buffer, so it is dropped — undo must never resurrect
+// another note/challenge's text. The textarea ignores keys while blurred, so
+// focus is momentarily restored for the move.
 func (m *Model) SetValue(s string) {
 	m.ta.SetValue(s)
+	m.clearHistory()
 	wasFocused := m.ta.Focused()
 	m.ta.Focus()
 	m.send(tea.KeyCtrlHome)
@@ -237,6 +259,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.finish(ActionSubmit)
 			case "ctrl+q":
 				return m.finish(ActionQuit)
+			case "tab":
+				// KeyTab is not a rune key, so the textarea ignores it; indent here.
+				m.ta.InsertString(tabIndent)
+				return m, nil
 			}
 			var cmd tea.Cmd
 			m.ta, cmd = m.ta.Update(msg)
@@ -271,9 +297,16 @@ func (m Model) updateVim(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeNormal:
 		return m.updateNormal(msg)
+	case modeVisual:
+		return m.updateVisual(msg)
 	case modeInsert:
-		if msg.Type == tea.KeyEsc {
+		switch msg.Type {
+		case tea.KeyEsc:
 			m.mode = modeNormal
+			return m, nil
+		case tea.KeyTab:
+			// KeyTab is not a rune key, so the textarea ignores it; indent here.
+			m.ta.InsertString(tabIndent)
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -300,64 +333,83 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.runPending(op, msg)
 	}
 
-	switch msg.String() {
-	// --- motions ---
-	case "h", "left":
-		m.arrow(tea.KeyLeft)
-	case "l", "right":
-		m.arrow(tea.KeyRight)
-	case "j", "down":
-		m.arrow(tea.KeyDown)
-	case "k", "up":
-		m.arrow(tea.KeyUp)
-	case "w", "W", "e":
-		m.wordForward()
-	case "b", "B":
-		m.wordBackward()
-	case "0":
-		m.ta.CursorStart()
-	case "^", "_":
-		m.ta.CursorStart()
-	case "$":
-		m.ta.CursorEnd()
-	case "G":
-		m.send(tea.KeyCtrlEnd) // jump to end of buffer
+	// Motions are shared with Visual mode (the cursor moves the same way; only
+	// what happens afterwards differs).
+	if m.applyMotion(msg.String()) {
+		return m, nil
+	}
 
-	// --- enter Insert ---
+	switch msg.String() {
+	// --- undo / redo ---
+	case "u":
+		m.undo()
+	case "ctrl+r":
+		m.redo()
+
+	// --- enter Visual ---
+	case "v":
+		m.enterVisual(false)
+	case "V":
+		m.enterVisual(true)
+
+	// --- enter Insert (one undo unit per session) ---
 	case "i":
+		m.pushUndo()
 		m.mode = modeInsert
 	case "I":
+		m.pushUndo()
 		m.ta.CursorStart()
 		m.mode = modeInsert
 	case "a":
+		m.pushUndo()
 		m.arrow(tea.KeyRight)
 		m.mode = modeInsert
 	case "A":
+		m.pushUndo()
 		m.ta.CursorEnd()
 		m.mode = modeInsert
 	case "o":
+		// Open below at the current line's indentation, Vim autoindent-style.
+		m.pushUndo()
+		indent := m.lineIndent()
 		m.ta.CursorEnd()
 		m.send(tea.KeyEnter)
+		if indent != "" {
+			m.ta.InsertString(indent)
+		}
 		m.mode = modeInsert
 	case "O":
+		// Open above at the current line's indentation.
+		m.pushUndo()
+		indent := m.lineIndent()
 		m.ta.CursorStart()
 		m.send(tea.KeyEnter)
 		m.arrow(tea.KeyUp)
+		if indent != "" {
+			m.ta.InsertString(indent)
+		}
 		m.mode = modeInsert
 
 	// --- edits ---
 	case "x":
-		m.send(tea.KeyDelete)
+		m.pushUndo()
+		m.captureDelete(false, func() { m.send(tea.KeyDelete) })
 	case "D":
-		m.send(tea.KeyCtrlK) // delete to end of line
+		m.pushUndo()
+		m.captureDelete(false, func() { m.send(tea.KeyCtrlK) }) // delete to end of line
 	case "C":
-		m.send(tea.KeyCtrlK)
+		m.pushUndo()
+		m.captureDelete(false, func() { m.send(tea.KeyCtrlK) })
 		m.mode = modeInsert
 	case "p":
-		m.send(tea.KeyCtrlV) // paste from the system clipboard
+		m.pushUndo()
+		return m.paste(true) // register first; system clipboard as fallback
+	case "P":
+		m.pushUndo()
+		return m.paste(false)
 
 	// --- prefixes / operators ---
-	case "d", "c", "g", "r":
+	case "d", "c", "g", "r", "y", "<", ">":
 		m.pending = []rune(msg.String())[0]
 		return m, nil
 
@@ -376,6 +428,12 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // Vim.
 func (m Model) runPending(op rune, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	// Mutating operators snapshot first; undo skips no-op snapshots, so invalid
+	// combinations (silently ignored below) leave history untouched.
+	switch op {
+	case 'd', 'c', 'r', '<', '>':
+		m.pushUndo()
+	}
 	switch op {
 	case 'g':
 		if key == "g" {
@@ -384,26 +442,44 @@ func (m Model) runPending(op rune, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case 'd':
 		switch key {
 		case "d":
-			m.deleteLine()
+			m.captureDelete(true, m.deleteLine)
 		case "w", "e":
-			m.send2(tea.KeyMsg{Type: tea.KeyDelete, Alt: true}) // dw -> delete word
+			m.captureDelete(false, func() {
+				m.send2(tea.KeyMsg{Type: tea.KeyDelete, Alt: true}) // dw -> delete word
+			})
 		case "$":
-			m.send(tea.KeyCtrlK)
+			m.captureDelete(false, func() { m.send(tea.KeyCtrlK) })
 		case "0", "^":
-			m.send(tea.KeyCtrlU) // delete to line start
+			m.captureDelete(false, func() { m.send(tea.KeyCtrlU) }) // delete to line start
 		}
 	case 'c':
 		switch key {
 		case "c":
-			m.ta.CursorStart()
-			m.send(tea.KeyCtrlK)
+			m.captureDelete(true, func() {
+				m.ta.CursorStart()
+				m.send(tea.KeyCtrlK)
+			})
 			m.mode = modeInsert
 		case "w", "e":
-			m.send2(tea.KeyMsg{Type: tea.KeyDelete, Alt: true})
+			m.captureDelete(false, func() {
+				m.send2(tea.KeyMsg{Type: tea.KeyDelete, Alt: true})
+			})
 			m.mode = modeInsert
 		case "$":
-			m.send(tea.KeyCtrlK)
+			m.captureDelete(false, func() { m.send(tea.KeyCtrlK) })
 			m.mode = modeInsert
+		}
+	case 'y':
+		if key == "y" {
+			m.yankLine() // yy -> yank the current line
+		}
+	case '<':
+		if key == "<" {
+			m.indentLine(-1) // << -> dedent the current line
+		}
+	case '>':
+		if key == ">" {
+			m.indentLine(1) // >> -> indent the current line
 		}
 	case 'r':
 		// Replace the character under the cursor with the typed rune.
@@ -423,9 +499,6 @@ func (m *Model) deleteLine() {
 	m.send(tea.KeyCtrlK)  // delete to end of line
 	m.send(tea.KeyDelete) // remove the trailing newline
 }
-
-func (m *Model) wordForward()  { m.send2(tea.KeyMsg{Type: tea.KeyRight, Alt: true}) }
-func (m *Model) wordBackward() { m.send2(tea.KeyMsg{Type: tea.KeyLeft, Alt: true}) }
 
 // send forwards a synthetic key (by type) to the textarea, reusing its editing
 // logic instead of reimplementing it.
@@ -485,6 +558,11 @@ func (m Model) runCommand(raw string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	// Visual mode draws its own buffer view: the textarea cannot render a
+	// selection, so the editor takes over while one is active.
+	if m.vim && m.mode == modeVisual {
+		return m.visualView() + "\n" + m.statusLine()
+	}
 	// Shape the cursor to the current mode so Normal vs Insert is visible at a
 	// glance (block vs underline). m is a copy, so this only affects this frame.
 	if m.vim && m.mode == modeNormal {
@@ -494,6 +572,11 @@ func (m Model) View() string {
 	}
 	return highlightSyntax(m.lang, m.ta.View()) + "\n" + m.statusLine()
 }
+
+// Highlight applies lang's syntax colors to plain source text. Exported so
+// other panes (e.g. the chat transcript's fenced code blocks) can reuse the
+// editor's highlighter. "plain"/"text" (and "physics") return s unchanged.
+func Highlight(lang, s string) string { return highlightSyntax(lang, s) }
 
 func highlightSyntax(lang, s string) string {
 	switch strings.ToLower(lang) {
@@ -763,18 +846,27 @@ func (m Model) statusLine() string {
 			left = normalBadge.Render("NORMAL")
 		case modeInsert:
 			left = insertBadge.Render("INSERT")
+		case modeVisual:
+			if m.visualLine {
+				left = visualBadge.Render("V-LINE")
+			} else {
+				left = visualBadge.Render("VISUAL")
+			}
 		}
 	} else {
 		left = editBadge.Render("EDIT")
 	}
 
 	var hint string
-	if m.vim {
+	switch {
+	case m.vim && m.mode == modeVisual:
+		hint = "  move to select · d/x delete · y yank · c change · </> indent · o swap · esc"
+	case m.vim:
 		hint = "  :submit  :w  :q  :topic  :progress"
 		if m.pending != 0 {
 			hint = "  " + string(m.pending) + "…" // operator pending, awaiting motion
 		}
-	} else {
+	default:
 		hint = "  Ctrl-S submit  Ctrl-Q quit"
 	}
 

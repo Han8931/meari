@@ -39,6 +39,9 @@ type AIConfig struct {
 	// APIKeyEnv names the environment variable holding the API key. Ollama
 	// needs no key, so this may be empty for local use.
 	APIKeyEnv string `toml:"api_key_env"`
+	// TimeoutSeconds bounds each model request. 0 means the default (120s —
+	// local models can be slow to load and generate long lessons).
+	TimeoutSeconds int `toml:"timeout_seconds"`
 }
 
 type EditorConfig struct {

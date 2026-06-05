@@ -32,24 +32,41 @@ are thin front-ends over the same vault and tutor, converging on one shared Go c
 
 ```bash
 go build -o meari .
-./meari                        # guided setup wizard (recommended)
-./meari -curriculum            # skip the wizard, start a built-in learning path
-./meari -topic "spanish subjunctive"  # skip the wizard, jump to a topic
+./meari notes                  # the learning vault, in the terminal
+./meari serve                  # the learning vault, in your browser
+./meari                        # coding tutor — guided setup wizard
+./meari -curriculum            # coding tutor — skip the wizard, built-in path
+./meari -topic "spanish subjunctive"  # coding tutor — jump to a topic
 ./meari -vim / -default        # force Vim / non-Vim editor keybindings
 ```
 
-### Web GUI
+The learning vault has two interchangeable front-ends — a **terminal app**
+(`meari notes`) and a **browser app** (`meari serve`) — both driven by the same core
+over the same `./vault`, so a note created in one shows up in the other.
+
+### Vault in the terminal — `meari notes`
+
+The 3-pane terminal vault: **notes** (left, grouped by subject) │ **editor** (center) │
+**chat / study** (right).
+
+- `Ctrl-W` cycle focus · `j`/`k` then `Enter` to open a note · `Ctrl-S` save · `Ctrl-C` quit
+- `:learn <topic>` — generate an AI lesson note (e.g. `:learn the french revolution`)
+- `:new <title>` — create a blank note
+- `:essay` — study the open note: write an answer in the editor, then `:grade` to check
+  it; `:answer` reveals a model answer; `:done` ends the study
+
+### Vault in the browser — `meari serve`
 
 ```bash
 ./meari serve                  # http://localhost:8765
 ./meari serve --addr :9000     # custom port
 ```
 
-Opens a 3-pane browser app over your vault: **notes** (left) with a "Generate lesson"
-box, a **markdown editor + live preview** (center) with `[[wikilink]]` navigation and
-backlinks, and a **chat / study** panel (right) with tutor chat and an Essay study mode.
-Runs offline with built-in content; configure an AI provider for generated lessons and
-grading. (Notes live in `./vault`.)
+A 3-pane browser app over your vault: **notes** (left) with a "Generate lesson" box, a
+**markdown editor + live preview** (center) with `[[wikilink]]` navigation and backlinks,
+and a **chat / study** panel (right) with tutor chat and an Essay study mode — write an
+answer and **Check answer** grades it; **Show answer** reveals a model answer. Runs offline
+with built-in content; configure an AI provider for generated lessons and grading.
 
 ### The three panes
 
@@ -92,8 +109,23 @@ The `-curriculum` and `-topic` flags skip the wizard for returning users.
 In the **left pane**, `j`/`k` move and `Enter` opens an item. In the **chat** pane,
 type a question and press `Enter` to ask the tutor.
 
+**The chat pane** (both TUIs):
+
+- Speaker **badges** (` you ` / ` tutor ` / ` lesson ` on colored backgrounds) make turns
+  easy to tell apart; fenced ``` code blocks in tutor/lesson messages are
+  **syntax-highlighted** behind a gutter bar.
+- Everything wraps to the pane — long words, URLs, and code lines included (code
+  hard-wraps under its gutter rather than being cut off). Need more room? `:compact`
+  repeatedly grows the chat pane up to ~60% of the width (`:wide` gives it back to the
+  editor) — in both TUIs.
+- An animated **progress line** ("⠹ tutor thinking…") shows inside the pane while the
+  AI works, and the input area is **three rows tall** so longer questions wrap visibly.
+- The transcript is **per-topic**: switching topics/notes gives you a clean pane for the
+  new one, and returning to a previous topic restores its chat and study history.
+
 **Scrolling the chat** (lessons and replies get long):
 
+- **Left click** — focuses the pane under the cursor.
 - **Mouse wheel** — scrolls whatever pane is under the cursor, without changing focus
   (like `ranger`/`lf`).
 - With the chat focused: `Ctrl-F`/`Ctrl-B` page, `Ctrl-D`/`Ctrl-U` half-page,
@@ -139,7 +171,24 @@ model = "llama3.1"
 provider = "compatible"
 base_url = "https://your-gateway/v1"
 model = "your-model"
-api_key_env = "YOUR_KEY_ENV"
+api_key_env = "YOUR_KEY_ENV"   # optional — no-auth local servers work without a key
+# timeout_seconds = 120        # raise for big/slow local models
+```
+
+**Diagnose your connection** with `meari check` — it prints the resolved
+provider/base URL/model/key status, verifies the model exists upstream, and sends
+a real test request:
+
+```
+$ meari check
+Meari AI connection check
+  provider:  ollama
+  base url:  http://localhost:11434/v1
+  model:     qwen3-coder-next:latest
+  api key:   not set (looked in $OPENAI_API_KEY)
+
+✓ provider reachable; model "qwen3-coder-next:latest" is available (7 models total)
+✓ chat round-trip OK in 252ms
 ```
 
 ## In-app editor (center pane)
@@ -149,11 +198,20 @@ A modal, Vim-style editor (configurable). Set `editor.keybindings` to `"vim"` or
 **blue `INSERT`** badge in the status line and a steady, color-coded cursor.
 
 **Vim mode — Normal**
-- Move: `h j k l` · `w`/`b` word fwd/back · `e` end-of-word · `0`/`^` line start ·
-  `$` line end · `gg`/`G` top/bottom of file
+- Move: `h j k l` · `w` next word · `b` previous word · `e` end-of-word ·
+  `0`/`^` line start · `$` line end · `gg`/`G` top/bottom of file
 - Enter Insert: `i` `a` · `I`/`A` (line start/end) · `o`/`O` (open line below/above)
-- Edit: `x` · `r<char>` · `dd` · `dw` · `D` · `cc`/`cw`/`C` · `p`
+- Edit: `x` · `r<char>` · `dd` · `dw` · `D` · `cc`/`cw`/`C` · `<<`/`>>` dedent/indent line
+- Register: deletes and `yy` (yank line) fill the unnamed register; `p`/`P` paste
+  after/before (falls back to the system clipboard when the register is empty)
+- **Undo/redo:** `u` undo · `Ctrl-R` redo (an Insert session is one undo unit; in the
+  coding TUI, run tests with `Ctrl-S`/`:submit` while the editor is focused)
+- `o`/`O` open a line below/above **at the current line's indentation**
+- **Visual mode:** `v` charwise · `V` linewise — motions extend the highlighted
+  selection; `d`/`x` delete · `y` yank · `c` change · `<`/`>` indent · `o` swap ends ·
+  `Esc` cancels
 - `Esc` returns to Normal (and cancels a half-typed operator like `d`)
+- **Insert mode:** `Tab` indents (4 spaces)
 
 **Command line (`:`)**
 - `:submit` — check the current item (same as `Ctrl-R`)
@@ -209,12 +267,11 @@ desktop build (Wails/Tauri) stays a thin later step.
 - **✅ Web GUI (first cut)** — `meari serve`: 3-pane browser UI with lesson generation,
   markdown editor + preview, wikilink navigation, backlinks, chat, and Essay study.
 - **✅ Core engine** — a headless `core.Service` owns the vault+tutor orchestration and
-  returns plain data; the web GUI drives it (no business logic in handlers). The TUI
-  adopts it next.
+  returns plain data; both front-ends drive it (no business logic in handlers).
+- **✅ TUI vault parity** — `meari notes` browses/edits vault notes, generates lessons,
+  and runs Essay study in the terminal, on the same core as the web GUI.
 - **▢ Index** — SQLite-backed search, backlinks, and the SRS/progress store (replaces the
   current in-memory backlink scan).
-- **▢ TUI vault parity** — browse/edit vault notes and run Essay study in the terminal too,
-  on the same core.
 - **▢ Spaced repetition** — flashcards with SM-2 scheduling and a review queue.
 - **▢ More study modes** — Quiz, and Code-with-tests restored as one optional mode.
 - **▢ Knowledge graph** — backlink panels and a visual link graph.
@@ -224,7 +281,13 @@ desktop build (Wails/Tauri) stays a thin later step.
 
 - The code-execution path runs Python via `python3` with a timeout. It is **not a
   sandbox** — fine for a single trusted local learner; don't run untrusted code.
-- Vim mode is "Vim-*style*" (motions, `d`/`c` operators, `r`, the command line), not
-  full Vim — no visual mode, counts, or undo.
+- Vim mode is "Vim-*style*" (motions, `d`/`c`/`y` operators, visual mode, registers,
+  `r`, the command line), not full Vim — no counts, marks, or undo yet.
 - `Tab` and `Ctrl-W` are reserved for pane navigation, so they can't be typed into the
   editor.
+
+## Todo
+
+- Vim keybinding erros (w / p ...)
+- LLM connection issue for compatible
+- Answer check button

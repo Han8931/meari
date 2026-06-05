@@ -23,7 +23,14 @@ Example:
     print(name, age)    # Ada 36
 
 You can combine values with operators: + adds numbers (or joins strings),
-* multiplies, and so on.`,
+* multiplies, and so on.
+
+How challenges work: the editor gives you a small function stub like
+    def rectangle_area(width, height):
+        pass
+Replace pass with your code and use return to hand back the answer — the
+tests call your function and check what it returns. (Functions get their own
+lesson soon; for now this pattern is all you need.)`,
 					Challenge: Challenge{
 						Prompt:      "Write rectangle_area(width, height) that returns the area of a rectangle.",
 						StarterCode: "def rectangle_area(width, height):\n    pass\n",

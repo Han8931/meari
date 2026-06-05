@@ -12,9 +12,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"meari/internal/config"
 	"meari/internal/core"
@@ -34,11 +37,18 @@ func main() {
 }
 
 func run() error {
-	// Subcommand dispatch: "meari serve" launches the web UI; anything else is
-	// the TUI. We peel the subcommand off os.Args before flag parsing so each
-	// mode owns its own flag set.
-	if len(os.Args) > 1 && os.Args[1] == "serve" {
-		return runServe(os.Args[2:])
+	// Subcommand dispatch: "serve" launches the web UI, "notes" the vault TUI;
+	// anything else is the classic coding TUI. We peel the subcommand off os.Args
+	// before flag parsing so each mode owns its own flag set.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "serve":
+			return runServe(os.Args[2:])
+		case "notes":
+			return runNotes(os.Args[2:])
+		case "check":
+			return runCheck(os.Args[2:])
+		}
 	}
 	return runTUI()
 }
@@ -120,4 +130,105 @@ func runServe(args []string) error {
 		fmt.Println("(offline — no AI provider configured; set OPENAI_API_KEY or use Ollama for generated lessons)")
 	}
 	return web.Serve(*addr, svc)
+}
+
+// runCheck diagnoses the AI provider connection: resolved settings, whether the
+// configured model exists upstream, and a real round-trip request.
+func runCheck(args []string) error {
+	fs := flag.NewFlagSet("check", flag.ExitOnError)
+	cfgPath := fs.String("config", "config.toml", "path to config file")
+	_ = fs.Parse(args)
+
+	cfg, _, err := loadConfig(*cfgPath)
+	if err != nil {
+		return err
+	}
+	tut := tutor.New(cfg.AI)
+	info := tut.Info()
+
+	fmt.Println("Meari AI connection check")
+	fmt.Printf("  provider:  %s\n", cfg.AI.Provider)
+	fmt.Printf("  base url:  %s\n", info.BaseURL)
+	fmt.Printf("  model:     %s\n", info.Model)
+	keyState := "not set"
+	if info.KeySet {
+		keyState = "set (" + cfg.AI.APIKeyEnv + ")"
+	} else if cfg.AI.APIKeyEnv != "" {
+		keyState = "not set (looked in $" + cfg.AI.APIKeyEnv + ")"
+	}
+	fmt.Printf("  api key:   %s\n", keyState)
+
+	if info.Offline {
+		fmt.Println("\n✗ OFFLINE: this endpoint requires an API key and none is set.")
+		fmt.Println("  Export the key (e.g. `export " + cfg.AI.APIKeyEnv + "=...`) or point [ai] at a local provider.")
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Does the configured model exist upstream?
+	models, err := tut.Models(ctx)
+	switch {
+	case err != nil:
+		fmt.Printf("\n✗ could not reach the provider: %v\n", err)
+		fmt.Println("  Is the server running and the base url correct?")
+		return nil
+	default:
+		found := false
+		for _, id := range models {
+			if id == info.Model {
+				found = true
+				break
+			}
+		}
+		if found {
+			fmt.Printf("\n✓ provider reachable; model %q is available (%d models total)\n", info.Model, len(models))
+		} else {
+			fmt.Printf("\n⚠ provider reachable, but model %q was NOT in its model list (%d models).\n", info.Model, len(models))
+			max := len(models)
+			if max > 8 {
+				max = 8
+			}
+			fmt.Printf("  available include: %s\n", strings.Join(models[:max], ", "))
+		}
+	}
+
+	// Real round trip through the same code path lessons/chat use.
+	fmt.Println("  sending a test request…")
+	dur, err := tut.Ping(ctx)
+	if err != nil {
+		fmt.Printf("✗ chat request failed: %v\n", err)
+		return nil
+	}
+	fmt.Printf("✓ chat round-trip OK in %s\n", dur.Round(time.Millisecond))
+	return nil
+}
+
+// runNotes starts the vault terminal UI over the same vault and tutor as the web
+// UI, sharing the core engine.
+func runNotes(args []string) error {
+	fs := flag.NewFlagSet("notes", flag.ExitOnError)
+	cfgPath := fs.String("config", "config.toml", "path to config file")
+	vimFlag := fs.Bool("vim", false, "force Vim keybindings in the editor")
+	defFlag := fs.Bool("default", false, "force default (non-Vim) keybindings")
+	_ = fs.Parse(args)
+
+	cfg, _, err := loadConfig(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if *vimFlag {
+		cfg.Editor.Keybindings = "vim"
+	}
+	if *defFlag {
+		cfg.Editor.Keybindings = "default"
+	}
+
+	v, err := vault.Open(cfg.VaultDir)
+	if err != nil {
+		return err
+	}
+	svc := core.New(v, tutor.New(cfg.AI))
+	return tui.RunVault(svc, cfg.VimEditor())
 }

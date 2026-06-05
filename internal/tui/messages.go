@@ -17,6 +17,7 @@ type (
 	challengeMsg struct{ ch tutor.Challenge }
 	feedbackMsg  struct{ text string }
 	chatReplyMsg struct{ text string }
+	answerMsg    struct{ text string }
 	runResultMsg struct {
 		res  executor.Result
 		ch   tutor.Challenge
@@ -58,6 +59,25 @@ func feedbackCmd(t *tutor.Tutor, ch tutor.Challenge, code, out string, passed bo
 			return errMsg{kind: "feedback", err: err}
 		}
 		return feedbackMsg{text: s}
+	}
+}
+
+// answerCmd asks the tutor for a model solution to the current challenge — the
+// learner explicitly asked to see it (":answer"), unlike feedback which never
+// reveals one.
+func answerCmd(t *tutor.Tutor, ch tutor.Challenge) tea.Cmd {
+	return func() tea.Msg {
+		lang := ch.Lang
+		if lang == "" {
+			lang = "python"
+		}
+		prompt := "Provide a model solution (code plus a 1-2 sentence explanation) for this " +
+			lang + " exercise:\n" + ch.Prompt
+		s, err := t.ModelAnswer(context.Background(), prompt)
+		if err != nil {
+			return errMsg{kind: "answer", err: err}
+		}
+		return answerMsg{text: s}
 	}
 }
 

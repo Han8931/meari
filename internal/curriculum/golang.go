@@ -29,7 +29,14 @@ error — Go keeps code clean.
 fmt.Println prints values separated by spaces; fmt.Printf uses format verbs:
     %v the value, %T its type, %d an integer, %s a string, %q a quoted string.
     fmt.Printf("%s is %d\n", name, age)   // Ada is 36
-fmt.Sprintf returns the formatted string instead of printing it.`,
+fmt.Sprintf returns the formatted string instead of printing it.
+
+How challenges work: the editor gives you a function stub like
+    func Describe(name string, age int) string {
+        return ""
+    }
+Fill in the body and return the result — the tests call your function and
+check its return value.`,
 					Challenge: Challenge{
 						Prompt:      "Write Describe(name string, age int) string returning e.g. \"Ada is 36 years old\". Use fmt.Sprintf.",
 						StarterCode: "func Describe(name string, age int) string {\n\treturn \"\"\n}\n",

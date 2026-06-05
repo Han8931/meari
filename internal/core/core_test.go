@@ -128,3 +128,14 @@ func TestEssayAndChatOffline(t *testing.T) {
 		t.Fatal("expected an offline chat reply")
 	}
 }
+
+func TestModelAnswerOffline(t *testing.T) {
+	s := newTestService(t)
+	ans, err := s.ModelAnswer(context.Background(), "explain X")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ans == "" {
+		t.Fatal("expected an offline model-answer fallback")
+	}
+}

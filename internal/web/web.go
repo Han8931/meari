@@ -57,6 +57,7 @@ func Serve(addr string, svc *core.Service) error {
 	mux.HandleFunc("GET /api/backlinks", s.handleBacklinks)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
 	mux.HandleFunc("POST /api/study/essay", s.handleEssay)
+	mux.HandleFunc("POST /api/study/answer", s.handleAnswer)
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -198,6 +199,25 @@ func (s *Server) handleEssay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, grade)
+}
+
+func (s *Server) handleAnswer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Prompt string `json:"prompt"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Prompt) == "" {
+		http.Error(w, "missing prompt", http.StatusBadRequest)
+		return
+	}
+	answer, err := s.svc.ModelAnswer(r.Context(), req.Prompt)
+	if err != nil {
+		httpErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"answer": answer})
 }
 
 // --- presentation helpers (web-owned) ---

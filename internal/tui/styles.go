@@ -49,15 +49,22 @@ var (
 	doneGlyph   = lipgloss.NewStyle().Foreground(doneColor)
 	wipGlyph    = lipgloss.NewStyle().Foreground(wipColor)
 
-	// Chat transcript styles. Speaker labels are short and saturated so the eye
-	// can find who's talking; the message body stays a calm, high-contrast
-	// neutral so long passages read comfortably (the old scheme tinted whole
-	// paragraphs in a low-contrast role color, which was hard to read).
+	// Chat transcript styles. Each speaker turn opens with a colored BADGE on
+	// its own line (" you " / " tutor " / " lesson " on a filled background) so
+	// who is talking is unmistakable even when skimming; the message body stays
+	// a calm, high-contrast neutral so long passages read comfortably.
 	chatBodyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 
-	chatUserLabel   = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)  // learner — cyan-blue
-	chatTutorLabel  = lipgloss.NewStyle().Foreground(lipgloss.Color("79")).Bold(true)  // tutor — teal
-	chatLessonLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("222")).Bold(true) // lesson — warm gold
+	chatUserBadge   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("81"))  // learner — cyan-blue
+	chatTutorBadge  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("79"))  // tutor — teal
+	chatLessonBadge = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("222")) // lesson — warm gold
+
+	// chatBusyStyle renders the in-pane "⠹ tutor thinking…" progress line.
+	chatBusyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("79")).Italic(true)
+
+	// chatCodeGutter is the "│ " bar marking syntax-highlighted code blocks in
+	// tutor/lesson messages.
+	chatCodeGutter = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	chatSystemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
 	chatOkStyle     = lipgloss.NewStyle().Foreground(doneColor).Bold(true)             // match the sidebar "done" green

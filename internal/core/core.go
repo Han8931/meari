@@ -183,6 +183,11 @@ func (s *Service) GradeEssay(ctx context.Context, prompt, answer string) (EssayR
 	return EssayResult{Score: g.Score, Feedback: g.Feedback}, nil
 }
 
+// ModelAnswer reveals a reference answer to a study prompt.
+func (s *Service) ModelAnswer(ctx context.Context, prompt string) (string, error) {
+	return s.tutor.ModelAnswer(ctx, prompt)
+}
+
 // --- helpers ---
 
 func metaOf(n vault.Note) NoteMeta {

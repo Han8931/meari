@@ -99,6 +99,21 @@ concrete way to improve. NEVER simply hand over the full model answer.` + t.leve
 	return g, nil
 }
 
+// ModelAnswer returns a reference answer to a study prompt, for when the
+// learner wants to compare their attempt (or is stuck). Unlike Feedback, this
+// deliberately reveals a full answer — the learner asked to see it.
+func (t *Tutor) ModelAnswer(ctx context.Context, prompt string) (string, error) {
+	if t.offline {
+		return "I'm offline (no AI provider configured), so I can't write a model answer. " +
+			"Re-read the note and compare it against your own answer instead.", nil
+	}
+	system := "You are a tutor writing a model answer to a study prompt, for a learner " +
+		"who has attempted it and asked to see a reference. Write a clear, complete but " +
+		"concise answer (1-2 short paragraphs, or a short list if the prompt calls for one). " +
+		"Plain text, no markdown headers." + t.levelClause()
+	return t.chat(ctx, system, "Provide a model answer to:\n"+prompt)
+}
+
 // --- parsing helpers ---
 
 func parseNoteContent(raw string) (NoteContent, error) {

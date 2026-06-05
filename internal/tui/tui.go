@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,6 +113,13 @@ type Model struct {
 	order      []string                   // sidebar order (stable across rebuilds)
 	chatHist   []tutor.ChatTurn           // turns sent to tutor.Chat
 
+	// Per-topic chat contexts: each topic/challenge keeps its own transcript and
+	// tutor conversation, restored when the learner returns to it, so the chat
+	// pane always shows only the current topic's activity.
+	chatKey     string                      // key of the active chat context
+	chatByKey   map[string][]chatBlock      // saved transcripts
+	histByKey   map[string][]tutor.ChatTurn // saved tutor conversations
+
 	// Curriculum mode: the left pane is the guided learning path instead of the
 	// generated-challenge list. Lessons and challenges are pre-authored (no LLM).
 	curriculum     bool
@@ -200,6 +208,8 @@ func newModel(d Deps) Model {
 		cmdLine:    cl,
 		curID:      curID,
 		challenges: map[string]tutor.Challenge{},
+		chatByKey:  map[string][]chatBlock{},
+		histByKey:  map[string][]tutor.ChatTurn{},
 		spin:       sp,
 	}
 	m.seedOrder()
@@ -284,6 +294,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
+		// Mirror in-flight work as an animated progress line inside the chat
+		// pane, where the eye already is — the status bar alone is easy to miss.
+		if m.pending > 0 {
+			m.chat.setBusy(m.loadKind)
+			m.chat.tickBusy()
+		} else {
+			m.chat.setBusy("")
+		}
 		return m, cmd
 
 	case lessonMsg:
@@ -306,6 +324,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pending--
 		m.chat.append(roleTutor, msg.text)
 		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: msg.text})
+		return m, nil
+
+	case answerMsg:
+		m.pending--
+		m.chat.append(roleLesson, "Model answer\n\n"+msg.text)
 		return m, nil
 
 	case runResultMsg:
@@ -383,7 +406,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingWindow = true
 		return m, nil
 	case "ctrl+r":
-		return m, m.startRun()
+		// In the editor, Ctrl-R is Vim redo; from any other pane it runs the
+		// tests (running is always available via Ctrl-S / :submit while editing).
+		if m.focus != paneEditor {
+			return m, m.startRun()
+		}
 	case "ctrl+n":
 		return m, m.nextChallenge()
 	}
@@ -417,34 +444,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleMouse routes wheel events to the pane under the cursor, like ranger/lf:
-// scrolling never changes focus, it just moves the hovered pane. Non-wheel mouse
-// events (clicks, motion) are ignored so the terminal keeps its own selection.
+// scrolling never changes focus, it just moves the hovered pane. A left click
+// focuses the pane under the cursor. Other mouse events (motion, other buttons)
+// are ignored.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.phase == phaseSetup || m.overlay != overlayNone || m.cmdMode || !tea.MouseEvent(msg).IsWheel() {
+	if m.phase == phaseSetup || m.overlay != overlayNone || m.cmdMode {
 		return m, nil
 	}
 	p, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
 		return m, nil
 	}
-	switch p {
-	case paneChat:
-		var cmd tea.Cmd
-		m.chat, cmd = m.chat.Update(msg) // the viewport scrolls on wheel events
-		return m, cmd
-	case paneSidebar:
-		// The sidebar has no viewport; move the selection instead (ranger-style).
-		switch msg.Button {
-		case tea.MouseButtonWheelDown:
-			m.sidebar.move(1)
-		case tea.MouseButtonWheelUp:
-			m.sidebar.move(-1)
+
+	if tea.MouseEvent(msg).IsWheel() {
+		switch p {
+		case paneChat:
+			var cmd tea.Cmd
+			m.chat, cmd = m.chat.Update(msg) // the viewport scrolls on wheel events
+			return m, cmd
+		case paneSidebar:
+			// The sidebar has no viewport; move the selection instead (ranger-style).
+			switch msg.Button {
+			case tea.MouseButtonWheelDown:
+				m.sidebar.move(1)
+			case tea.MouseButtonWheelUp:
+				m.sidebar.move(-1)
+			}
+			return m, nil
+		case paneEditor:
+			tm, cmd := m.editor.Update(msg)
+			m.editor = tm.(editor.Model)
+			return m, cmd
 		}
 		return m, nil
-	case paneEditor:
-		tm, cmd := m.editor.Update(msg)
-		m.editor = tm.(editor.Model)
-		return m, cmd
+	}
+
+	// Left click: focus the pane under the cursor.
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		return m, m.setFocus(p)
 	}
 	return m, nil
 }
@@ -534,6 +571,8 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdResizeEditor(-editorBiasStep)
 	case "wide":
 		return m.cmdResizeEditor(editorBiasStep)
+	case "answer":
+		return m.cmdAnswer()
 	case "progress":
 		m.overlay = overlayProgress
 		return m, nil
@@ -542,6 +581,9 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "config":
 		return m, m.openConfig()
+	case "learn", "essay", "grade":
+		m.chat.append(roleSystem, ":"+fields[0]+" lives in the learning vault — quit and run `meari notes` (or `meari serve` for the browser).")
+		return m, nil
 	default:
 		m.chat.append(roleSystem, "unknown command: :"+raw+"  (try :help)")
 		return m, nil
@@ -571,6 +613,18 @@ func (m Model) switchCourse(course string) (tea.Model, tea.Cmd) {
 	}
 	m.chat.append(roleSystem, "— now learning "+titleCase(course)+" ("+level+") —")
 	return m, m.loadCurriculum(course, level, "")
+}
+
+// cmdAnswer reveals a model solution for the current challenge. The learner
+// explicitly asked, so revealing is fine — unlike run feedback, which never does.
+func (m Model) cmdAnswer() (tea.Model, tea.Cmd) {
+	if m.current.ID == "" {
+		m.chat.append(roleSystem, "no challenge open — pick one on the left first")
+		return m, nil
+	}
+	m.pending++
+	m.loadKind = "writing model answer"
+	return m, answerCmd(m.deps.Tutor, m.current)
 }
 
 // cmdClear handles ":clear" (chat transcript), ":clear progress", and
@@ -614,10 +668,12 @@ func (m Model) cmdFold() (tea.Model, tea.Cmd) {
 }
 
 // editorBias bounds: one step per :compact / :wide, clamped so neither the
-// editor nor the chat can be squeezed past a usable share.
+// editor nor the chat can be squeezed past a usable share. The range is wide
+// enough that repeated :compact lets the chat take well over half the width
+// for reading long lessons and feedback.
 const (
 	editorBiasStep = 8
-	editorBiasMax  = 24
+	editorBiasMax  = 32
 )
 
 // cmdResizeEditor nudges the editor/chat split by delta percentage points
@@ -767,6 +823,7 @@ func helpView() string {
 		"  :subject <course>  alias for :topic",
 		"  :fold              fold/unfold the left tree pane",
 		"  :compact / :wide   shrink/grow the editor (frees chat space)",
+		"  :answer            reveal a model solution for the open challenge",
 		"  :progress          progress summary",
 		"  :clear             clear the chat transcript",
 		"  :clear progress    erase saved progress (asks first)",
@@ -776,7 +833,9 @@ func helpView() string {
 		bold("Keys"),
 		"  : (left pane)      open this command prompt",
 		"  ⌃w then h/l        move focus between panes",
-		"  ⌃r / ⌃n            run tests / next challenge",
+		"  mouse click        focus the pane under the cursor",
+		"  ⌃r / ⌃n            run tests / next challenge (in the editor, ⌃r is Vim redo;",
+		"                     run with ⌃s or :submit there)",
 		"  chat ⌃f ⌃b ⌃d ⌃u   page / half-page scroll",
 		"  mouse wheel        scroll the pane under the cursor",
 		"  ⌃c                 quit",
@@ -1101,6 +1160,32 @@ func (m *Model) firstIncompleteTopic() curriculum.Topic {
 	return curriculum.Topic{}
 }
 
+// switchChatContext swaps the chat pane to key's own transcript and tutor
+// conversation, saving the outgoing topic's first so it can be restored when
+// the learner comes back. It reports whether the new context is fresh (so the
+// caller knows to show the intro content once, not on every revisit).
+func (m *Model) switchChatContext(key string) (fresh bool) {
+	if key == m.chatKey {
+		return false
+	}
+	prev := m.chatKey
+	if prev != "" {
+		m.chatByKey[prev] = m.chat.snapshot()
+		m.histByKey[prev] = m.chatHist
+	}
+	m.chatKey = key
+	saved, visited := m.chatByKey[key]
+	if !visited && prev == "" {
+		// First topic of the session: inherit the startup transcript as-is (a
+		// custom topic's lesson may already have streamed in before its first
+		// challenge arrived).
+		return true
+	}
+	m.chat.restore(saved)
+	m.chatHist = m.histByKey[key]
+	return !visited
+}
+
 // startTopic switches the active curriculum topic, showing its pre-authored
 // lesson in chat and loading its challenge into the editor — no LLM call.
 func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
@@ -1123,15 +1208,20 @@ func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
 	m.current = ch
 	*m.curID = ch.ID
 	m.editor.SetLanguage(ch.Lang)
+	m.chat.setCodeLang(challengeLang(ch))
 
-	code := ch.StarterCode
-	if d, ok := m.deps.Store.Load(ch.ID); ok {
-		code = d
-	}
+	code, stale := m.loadStarterOrDraft(ch)
 	m.editor.SetValue(code)
 	m.rebuildSidebar()
-	m.chat.append(roleLesson, t.Title+"\n\n"+t.Lesson)
-	m.chat.append(roleSystem, "📝 Challenge: "+ch.Prompt)
+	// Each topic keeps its own chat: show the lesson only on the first visit —
+	// revisits restore the prior transcript (which already contains it).
+	if m.switchChatContext("topic:" + t.ID) {
+		m.chat.append(roleLesson, t.Title+"\n\n"+t.Lesson)
+		m.chat.append(roleSystem, "📝 Challenge: "+ch.Prompt)
+	}
+	if stale {
+		m.chat.append(roleSystem, staleDraftNotice)
+	}
 	return m.setFocus(paneEditor)
 }
 
@@ -1146,14 +1236,17 @@ func (m *Model) loadChallenge(ch tutor.Challenge) tea.Cmd {
 	m.current = ch
 	*m.curID = ch.ID
 	m.editor.SetLanguage(ch.Lang)
+	m.chat.setCodeLang(challengeLang(ch))
 
-	code := ch.StarterCode
-	if d, ok := m.deps.Store.Load(ch.ID); ok {
-		code = d
-	}
+	code, stale := m.loadStarterOrDraft(ch)
 	m.editor.SetValue(code)
 	m.rebuildSidebar()
-	m.chat.append(roleSystem, "📝 Challenge: "+ch.Prompt)
+	if m.switchChatContext("challenge:" + ch.ID) {
+		m.chat.append(roleSystem, "📝 Challenge: "+ch.Prompt)
+	}
+	if stale {
+		m.chat.append(roleSystem, staleDraftNotice)
+	}
 	return m.setFocus(paneEditor)
 }
 
@@ -1445,7 +1538,7 @@ func (m *Model) layout() {
 		}
 		// In this stacked layout the editor sits below the chat, so :compact /
 		// :wide trade height between them rather than width.
-		chatPct := clampRange(55-m.editorBias, 40, 75)
+		chatPct := clampRange(55-m.editorBias, 40, 82)
 		m.chatH = clampMin(rightContent*chatPct/100, 3)
 		m.editorH = clampMin(rightContent-m.chatH, 3)
 
@@ -1466,7 +1559,7 @@ func (m *Model) layout() {
 		contentW = 3
 	}
 	// :compact / :wide shift the chat's share of the width away from the default.
-	chatPct := clampRange(30-m.editorBias, 22, 50)
+	chatPct := clampRange(30-m.editorBias, 22, 62)
 	if m.sidebarCollapsed {
 		m.sidebarW = 0
 		m.chatW = clampMin(contentW*chatPct/100, 16)
@@ -1608,19 +1701,38 @@ func (m Model) editorPaneView(w int) string {
 	return m.challengeHeader(w) + "\n" + m.editor.View()
 }
 
+// challengeHeader labels the editor pane with the language and a SHORT title.
+// The full problem statement lives in the chat pane ("📝 Challenge: …") — a
+// long prompt squeezed onto one truncated line here told the learner nothing.
 func (m Model) challengeHeader(w int) string {
 	label := "No challenge selected"
 	if m.current.ID != "" {
-		prompt := firstLine(m.current.Prompt)
-		if prompt == "" {
-			prompt = m.topic
-		}
-		label = strings.ToUpper(m.current.Lang) + " · " + prompt
+		label = strings.ToUpper(challengeLang(m.current)) + " · " + m.shortTitle()
 	}
 	if w > 0 && lipgloss.Width(label) > w-2 {
 		label = truncate(label, max(1, w-2))
 	}
 	return editorHeader.Width(w).Render(label)
+}
+
+// shortTitle is a compact name for the current challenge: the curriculum
+// topic's title, or the challenge id prettified ("sum-list" -> "Sum list").
+func (m Model) shortTitle() string {
+	if m.curriculum {
+		if t, ok := m.topicByID[m.currentTopicID]; ok && t.Title != "" {
+			return t.Title
+		}
+	}
+	if title := prettyID(m.current.ID); title != "" {
+		return title
+	}
+	return m.topic
+}
+
+// prettyID turns a kebab/snake challenge id into a readable title.
+func prettyID(id string) string {
+	s := strings.NewReplacer("-", " ", "_", " ").Replace(id)
+	return titleCase(strings.TrimSpace(s))
 }
 
 func (m Model) titleView() string {
@@ -1647,7 +1759,7 @@ func (m Model) statusView() string {
 	} else if m.err != nil {
 		left += " " + errStyle.Render("error: "+m.err.Error())
 	}
-	hints := "⌃w h·l focus · : cmds (:help) · ⌃r run · ⌃n next · ⌃c quit"
+	hints := "⌃w h·l focus · : cmds (:help) · ⌃s/:submit run · u/⌃r undo/redo · ⌃c quit"
 	switch {
 	case m.pendingWindow:
 		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
@@ -1675,7 +1787,72 @@ func (m Model) focusName() string {
 	return ""
 }
 
+// --- draft staleness ---
+
+var (
+	pyDefNameRE = regexp.MustCompile(`(?m)^\s*def\s+([A-Za-z_]\w*)\s*\(`)
+	goDefNameRE = regexp.MustCompile(`(?m)^\s*(?:func\s+(?:\([^)]*\)\s*)?|type\s+)([A-Za-z_]\w*)`)
+)
+
+// starterNames extracts the function/type names a challenge's starter defines.
+func starterNames(ch tutor.Challenge) []string {
+	re := pyDefNameRE
+	if strings.EqualFold(ch.Lang, "go") || strings.EqualFold(ch.Lang, "golang") {
+		re = goDefNameRE
+	}
+	var names []string
+	for _, m := range re.FindAllStringSubmatch(ch.StarterCode, -1) {
+		names = append(names, m[1])
+	}
+	return names
+}
+
+// draftMatches reports whether a saved draft plausibly belongs to ch. Challenge
+// content can change between versions of the app while drafts (keyed only by
+// id) survive on disk; a draft that mentions none of the starter's function
+// names would silently shadow the real challenge with an unrelated problem.
+// Prose challenges (no extractable names) accept any draft.
+func draftMatches(ch tutor.Challenge, draft string) bool {
+	names := starterNames(ch)
+	if len(names) == 0 {
+		return true
+	}
+	for _, n := range names {
+		if strings.Contains(draft, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// loadStarterOrDraft picks the editor contents for ch: its saved draft when one
+// exists and still matches the challenge, else the fresh starter. stale is true
+// when a draft existed but belonged to an older version of the challenge.
+func (m *Model) loadStarterOrDraft(ch tutor.Challenge) (code string, stale bool) {
+	code = ch.StarterCode
+	d, ok := m.deps.Store.Load(ch.ID)
+	if !ok {
+		return code, false
+	}
+	if !draftMatches(ch, d) {
+		return code, true
+	}
+	return d, false
+}
+
+const staleDraftNotice = "⚠ Your saved draft was for an older version of this challenge, " +
+	"so the editor shows the fresh starter. (The old draft is replaced when you save.)"
+
 // --- small utilities ---
+
+// challengeLang is the language a challenge's unlabeled code fences should be
+// highlighted as ("" historically means Python).
+func challengeLang(ch tutor.Challenge) string {
+	if ch.Lang == "" {
+		return "python"
+	}
+	return ch.Lang
+}
 
 func firstLine(s string) string {
 	s = strings.TrimSpace(s)
