@@ -116,9 +116,9 @@ type Model struct {
 	// Per-topic chat contexts: each topic/challenge keeps its own transcript and
 	// tutor conversation, restored when the learner returns to it, so the chat
 	// pane always shows only the current topic's activity.
-	chatKey     string                      // key of the active chat context
-	chatByKey   map[string][]chatBlock      // saved transcripts
-	histByKey   map[string][]tutor.ChatTurn // saved tutor conversations
+	chatKey   string                      // key of the active chat context
+	chatByKey map[string][]chatBlock      // saved transcripts
+	histByKey map[string][]tutor.ChatTurn // saved tutor conversations
 
 	// Curriculum mode: the left pane is the guided learning path instead of the
 	// generated-challenge list. Lessons and challenges are pre-authored (no LLM).
@@ -152,7 +152,7 @@ type Model struct {
 
 	// Modal overlays drawn full-screen over the panes (like the setup wizard).
 	overlay       overlayKind
-	pickerCursor  int    // selection in the course picker
+	pickerCursor  int // selection in the course picker
 	confirmKind   confirmKind
 	confirmPrompt string // the question shown in the confirm modal
 
@@ -433,6 +433,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case paneChat:
+		switch msg.String() {
+		// Copy the tutor's last reply: Alt+O on Linux; on macOS, Option+O —
+		// which arrives as "ø"/"Ø" unless the terminal sends Option as Meta.
+		// (Cmd+O never reaches a terminal app; the emulator consumes it.)
+		case "alt+o", "ø", "Ø":
+			copyChat(&m.chat, "")
+			return m, nil
+		}
 		if msg.Type == tea.KeyEnter {
 			return m.submitChat()
 		}
@@ -573,6 +581,16 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdResizeEditor(editorBiasStep)
 	case "answer":
 		return m.cmdAnswer()
+	case "copy", "yank":
+		what := ""
+		if len(fields) > 1 {
+			what = fields[1]
+		}
+		copyChat(&m.chat, what)
+		return m, nil
+	case "paste":
+		pasteChat(&m.chat)
+		return m, m.setFocus(paneChat) // land where the pasted text is
 	case "progress":
 		m.overlay = overlayProgress
 		return m, nil
@@ -825,6 +843,8 @@ func helpView() string {
 		"  :compact / :wide   shrink/grow the editor (frees chat space)",
 		"  :answer            reveal a model solution for the open challenge",
 		"  :progress          progress summary",
+		"  :copy [code|all]   copy the tutor's last reply / its code / everything",
+		"  :paste             paste the clipboard into the chat input",
 		"  :clear             clear the chat transcript",
 		"  :clear progress    erase saved progress (asks first)",
 		"  :clear drafts      delete saved drafts (asks first)",
@@ -1775,7 +1795,7 @@ func (m Model) statusView() string {
 	case m.pendingWindow:
 		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
 	case m.focus == paneChat:
-		hints = "⌃f/⌃b page · ⌃d/⌃u half · ⇧↑/↓ line · wheel scrolls · enter send"
+		hints = "enter send · ⌥o/:copy copy reply · ⌃f/⌃b page · ⌃d/⌃u half · wheel scrolls"
 	case m.focus == paneSidebar:
 		hints = "j/k move · enter open · : cmds (:help) · ⌃r run · ⌃c quit"
 	}

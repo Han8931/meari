@@ -266,7 +266,7 @@ func ParseLinks(body string) []Link {
 // --- helpers ---
 
 var (
-	slugUnsafe   = regexp.MustCompile(`[^a-z0-9._-]+`)
+	slugUnsafe    = regexp.MustCompile(`[^a-z0-9._-]+`)
 	slugMultiDash = regexp.MustCompile(`-{2,}`)
 )
 

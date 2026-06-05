@@ -122,6 +122,13 @@ type a question and press `Enter` to ask the tutor.
   AI works, and the input area is **three rows tall** so longer questions wrap visibly.
 - The transcript is **per-topic**: switching topics/notes gives you a clean pane for the
   new one, and returning to a previous topic restores its chat and study history.
+- **Copy a reply:** with the chat focused, `Option-O` (macOS) / `Alt-O` (Linux) copies the
+  tutor's last reply to the clipboard; `:copy code` grabs just its last code block and
+  `:copy all` the whole transcript. Copying uses the native clipboard *and* OSC 52, so it
+  also works over SSH in supporting terminals. (On macOS, if your terminal sends Option
+  as Meta/Esc+, both modes work; `Cmd-O` can't reach a terminal app.)
+- **Paste a question:** `:paste` inserts the system clipboard into the chat input and
+  focuses it (`Ctrl-V` while typing in the input works too).
 
 **Scrolling the chat** (lessons and replies get long):
 

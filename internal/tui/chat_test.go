@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
@@ -164,6 +165,143 @@ func TestVaultPerNoteChat(t *testing.T) {
 	m = tm.(VaultModel)
 	if !strings.Contains(m.chat.view(), "question about A") {
 		t.Fatal("returning to note A should restore its chat history")
+	}
+}
+
+// stubClipboard replaces the real clipboard for a test and returns a pointer
+// to the last copied text.
+func stubClipboard(t *testing.T) *string {
+	t.Helper()
+	var got string
+	prev := copyToClipboard
+	copyToClipboard = func(text string) error {
+		got = text
+		return nil
+	}
+	t.Cleanup(func() { copyToClipboard = prev })
+	return &got
+}
+
+func TestCopyChatLastReply(t *testing.T) {
+	got := stubClipboard(t)
+	c := newChat()
+	c.setSize(60, 12)
+	c.append(roleUser, "q1")
+	c.append(roleTutor, "first answer")
+	c.append(roleUser, "q2")
+	c.append(roleTutor, "second answer")
+	c.append(roleSystem, "some notice") // must be skipped
+
+	copyChat(&c, "")
+	if *got != "second answer" {
+		t.Fatalf("copied %q, want the last tutor reply", *got)
+	}
+	if !strings.Contains(c.view(), "✓ copied last reply") {
+		t.Fatalf("feedback missing:\n%s", c.view())
+	}
+}
+
+func TestCopyChatCode(t *testing.T) {
+	got := stubClipboard(t)
+	c := newChat()
+	c.setSize(60, 12)
+	c.append(roleTutor, "Try this:\n```python\nx = 1\n```\nthen this:\n```python\ny = 2\n```")
+
+	copyChat(&c, "code")
+	if *got != "y = 2" {
+		t.Fatalf("copied %q, want the LAST fenced block", *got)
+	}
+}
+
+func TestCopyChatAllAndEmpty(t *testing.T) {
+	got := stubClipboard(t)
+	c := newChat()
+	c.setSize(60, 12)
+
+	copyChat(&c, "") // nothing yet
+	if *got != "" {
+		t.Fatalf("nothing should be copied from an empty chat, got %q", *got)
+	}
+	if !strings.Contains(c.view(), "nothing to copy") {
+		t.Fatalf("empty-chat feedback missing:\n%s", c.view())
+	}
+
+	c.append(roleUser, "hello")
+	c.append(roleTutor, "hi there")
+	copyChat(&c, "all")
+	if !strings.Contains(*got, "you: hello") || !strings.Contains(*got, "tutor: hi there") {
+		t.Fatalf("transcript copy wrong: %q", *got)
+	}
+}
+
+func TestPasteIntoChatInput(t *testing.T) {
+	prev := pasteFromClipboard
+	pasteFromClipboard = func() (string, error) { return "pasted question", nil }
+	t.Cleanup(func() { pasteFromClipboard = prev })
+
+	c := newChat()
+	c.setSize(60, 12)
+	pasteChat(&c)
+	if got := c.input.Value(); got != "pasted question" {
+		t.Fatalf("input after paste = %q", got)
+	}
+
+	// Empty clipboard: friendly notice, input untouched.
+	pasteFromClipboard = func() (string, error) { return "  ", nil }
+	c2 := newChat()
+	c2.setSize(60, 12)
+	pasteChat(&c2)
+	if c2.input.Value() != "" {
+		t.Fatalf("empty clipboard must not modify the input")
+	}
+	if !strings.Contains(c2.view(), "clipboard is empty") {
+		t.Fatalf("empty-clipboard notice missing:\n%s", c2.view())
+	}
+}
+
+func TestPasteCommandFocusesChat(t *testing.T) {
+	prev := pasteFromClipboard
+	pasteFromClipboard = func() (string, error) { return "from clipboard", nil }
+	t.Cleanup(func() { pasteFromClipboard = prev })
+
+	m := newTestVaultModel(t)
+	tm, _ := m.runEx("paste")
+	m = tm.(VaultModel)
+	if m.focus != paneChat {
+		t.Fatalf(":paste should focus the chat pane, got %v", m.focus)
+	}
+	if got := m.chat.input.Value(); got != "from clipboard" {
+		t.Fatalf("chat input = %q", got)
+	}
+}
+
+func TestLastFence(t *testing.T) {
+	if _, ok := lastFence("no code here"); ok {
+		t.Fatal("prose has no fence")
+	}
+	if code, ok := lastFence("```\nunterminated\nfence"); !ok || code != "unterminated\nfence" {
+		t.Fatalf("unterminated fence: %q ok=%v", code, ok)
+	}
+}
+
+func TestAltOCopiesInChatPane(t *testing.T) {
+	got := stubClipboard(t)
+	m := newTestVaultModel(t)
+	tm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")}) // noop key first
+	m = tm.(VaultModel)
+	m.setFocus(paneChat)
+	m.chat.append(roleTutor, "copy me")
+
+	for _, k := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("ø")},            // mac Option+O default
+		{Type: tea.KeyRunes, Runes: []rune("o"), Alt: true}, // alt+o
+	} {
+		*got = ""
+		tm, _ = m.Update(k)
+		m = tm.(VaultModel)
+		if *got != "copy me" {
+			t.Fatalf("key %q should copy the last reply, got %q", k.String(), *got)
+		}
 	}
 }
 

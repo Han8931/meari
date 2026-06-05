@@ -329,6 +329,133 @@ func (c *chatModel) scrollKey(msg tea.KeyMsg) bool {
 	return true
 }
 
+// --- copying replies ---
+
+// lastReply returns the most recent tutor or lesson message.
+func (c chatModel) lastReply() (string, bool) {
+	for i := len(c.blocks) - 1; i >= 0; i-- {
+		if r := c.blocks[i].role; r == roleTutor || r == roleLesson {
+			return c.blocks[i].text, true
+		}
+	}
+	return "", false
+}
+
+// lastCode returns the last fenced code block from the most recent tutor or
+// lesson message that contains one.
+func (c chatModel) lastCode() (string, bool) {
+	for i := len(c.blocks) - 1; i >= 0; i-- {
+		if r := c.blocks[i].role; r != roleTutor && r != roleLesson {
+			continue
+		}
+		if code, ok := lastFence(c.blocks[i].text); ok {
+			return code, true
+		}
+	}
+	return "", false
+}
+
+// lastFence extracts the contents of the LAST ``` fence in text.
+func lastFence(text string) (string, bool) {
+	var blocks []string
+	var cur []string
+	inCode := false
+	for _, ln := range strings.Split(text, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "```") {
+			if inCode {
+				blocks = append(blocks, strings.Join(cur, "\n"))
+				cur = nil
+			}
+			inCode = !inCode
+			continue
+		}
+		if inCode {
+			cur = append(cur, ln)
+		}
+	}
+	if inCode && len(cur) > 0 { // tolerate an unterminated fence
+		blocks = append(blocks, strings.Join(cur, "\n"))
+	}
+	if len(blocks) == 0 {
+		return "", false
+	}
+	return blocks[len(blocks)-1], true
+}
+
+// transcript renders the whole conversation as plain labeled text.
+func (c chatModel) transcript() (string, bool) {
+	if len(c.blocks) == 0 {
+		return "", false
+	}
+	parts := make([]string, 0, len(c.blocks))
+	for _, b := range c.blocks {
+		label := ""
+		switch b.role {
+		case roleUser:
+			label = "you: "
+		case roleTutor:
+			label = "tutor: "
+		case roleLesson:
+			label = "lesson: "
+		}
+		parts = append(parts, label+b.text)
+	}
+	return strings.Join(parts, "\n\n"), true
+}
+
+// copyChat copies part of the transcript to the system clipboard — what is ""
+// (last tutor/lesson reply), "code" (last fenced block), or "all" (the whole
+// conversation) — and reports the outcome as a system line in the transcript.
+func copyChat(c *chatModel, what string) {
+	var (
+		text  string
+		ok    bool
+		label string
+	)
+	switch what {
+	case "code":
+		text, ok = c.lastCode()
+		label = "last code block"
+	case "all":
+		text, ok = c.transcript()
+		label = "transcript"
+	default:
+		text, ok = c.lastReply()
+		label = "last reply"
+	}
+	if !ok {
+		msg := "nothing to copy yet — ask the tutor something first"
+		if what == "code" {
+			msg = "no code block found in the tutor's replies"
+		}
+		c.append(roleSystem, msg)
+		return
+	}
+	if err := copyToClipboard(text); err != nil {
+		// The native clipboard failed (e.g. headless/SSH) but the OSC 52 escape
+		// was still sent; supporting terminals will have copied it.
+		c.append(roleSystem, "✓ sent "+label+" to the terminal clipboard (OSC 52) — native clipboard unavailable: "+err.Error())
+		return
+	}
+	c.append(roleSystem, "✓ copied "+label+" ("+itoa(len([]rune(text)))+" chars)")
+}
+
+// pasteChat inserts the system clipboard into the chat input (":paste"), so a
+// question can be composed from text copied elsewhere. (Ctrl-V in the input
+// also pastes, via the textarea's own binding.)
+func pasteChat(c *chatModel) {
+	text, err := pasteFromClipboard()
+	if err != nil {
+		c.append(roleSystem, "⚠ could not read the clipboard: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(text) == "" {
+		c.append(roleSystem, "clipboard is empty")
+		return
+	}
+	c.input.InsertString(text)
+}
+
 func (c chatModel) view() string {
 	parts := make([]string, 0, 3)
 	parts = append(parts, c.vp.View())

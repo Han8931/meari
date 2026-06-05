@@ -39,7 +39,7 @@ Fill in the body and return the result — the tests call your function and
 check its return value.`,
 					Challenge: Challenge{
 						Prompt:      "Write Describe(name string, age int) string returning e.g. \"Ada is 36 years old\". Use fmt.Sprintf.",
-						StarterCode: "func Describe(name string, age int) string {\n\treturn \"\"\n}\n",
+						StarterCode: "import \"fmt\"\n\nfunc Describe(name string, age int) string {\n\treturn \"\"\n}\n",
 						Solution:    "import \"fmt\"\n\nfunc Describe(name string, age int) string {\n\treturn fmt.Sprintf(\"%s is %d years old\", name, age)\n}\n",
 						Tests: []string{
 							`if Describe("Ada", 36) != "Ada is 36 years old" { t.Fatalf("got %q", Describe("Ada", 36)) }`,
@@ -48,33 +48,144 @@ check its return value.`,
 					},
 				},
 				{
-					ID:    "go-b-loops",
-					Title: "Loops & branches",
-					Lesson: `Go has one loop keyword — for — covering every case:
-    for i := 0; i < n; i++ { ... }   // classic
-    for cond { ... }                 // like while
-    for { ... }                      // infinite (use break)
-    for i, v := range xs { ... }     // over a collection
+					ID:    "go-b-arith",
+					Title: "Arithmetic",
+					Lesson: `The numeric operators are + - * / and % (remainder). On integers, / TRUNCATES
+toward zero — the remainder is what % is for:
+    7 / 2    // 3   (not 3.5)
+    7 % 2    // 1
+    17 / 5   // 3
+    17 % 5   // 2
 
-Branching uses if/else (no parentheses, braces required). if can begin with a
-short statement scoped to the branch:
+Precedence works as in math (* / % before + -); use parentheses to be explicit:
+    (a + b) / 2
+
+Compound assignment updates a variable in place, and ++/-- add or subtract one
+(they are statements, not expressions):
+    total := 0
+    total += 5      // total = total + 5
+    total++         // 6
+
+Worked example — splitting minutes into hours and minutes:
+    minutes := 130
+    h := minutes / 60       // 2
+    m := minutes % 60       // 10`,
+					Challenge: Challenge{
+						Prompt:      "Write Average3(a, b, c int) int returning the integer average of the three values (the / operator truncates, which is fine here).",
+						StarterCode: "func Average3(a, b, c int) int {\n\treturn 0\n}\n",
+						Solution:    "func Average3(a, b, c int) int {\n\treturn (a + b + c) / 3\n}\n",
+						Tests: []string{
+							`if Average3(1, 2, 3) != 2 { t.Fatalf("got %d", Average3(1, 2, 3)) }`,
+							`if Average3(10, 10, 10) != 10 { t.Fatal("equal values") }`,
+							`if Average3(1, 1, 2) != 1 { t.Fatal("truncation: 4/3 = 1") }`,
+							`if Average3(-3, 0, 3) != 0 { t.Fatal("negatives") }`,
+						},
+					},
+				},
+				{
+					ID:    "go-b-bools",
+					Title: "Booleans & comparisons",
+					Lesson: `A bool is true or false. Comparisons produce bools:
+    ==  !=  <  <=  >  >=
+    age >= 18          // true or false
+    name == "Ada"      // strings compare with == too
+
+Combine bools with && (and), || (or), and ! (not):
+    age >= 13 && age <= 19      // a teenager
+    day == "Sat" || day == "Sun"
+    !done
+
+&& and || short-circuit: the right side is only evaluated when it can still
+change the answer. That makes guards safe and idiomatic:
+    n != 0 && total/n > 10      // never divides by zero
+
+Worked example — is a year a leap year?
+    leap := year%4 == 0 && (year%100 != 0 || year%400 == 0)`,
+					Challenge: Challenge{
+						Prompt:      "Write InRange(n, lo, hi int) bool reporting whether n is between lo and hi inclusive (use && with two comparisons).",
+						StarterCode: "func InRange(n, lo, hi int) bool {\n\treturn false\n}\n",
+						Solution:    "func InRange(n, lo, hi int) bool {\n\treturn lo <= n && n <= hi\n}\n",
+						Tests: []string{
+							`if !InRange(5, 1, 10) { t.Fatal("5 is in 1..10") }`,
+							`if !InRange(1, 1, 10) || !InRange(10, 1, 10) { t.Fatal("bounds are inclusive") }`,
+							`if InRange(0, 1, 10) || InRange(11, 1, 10) { t.Fatal("outside") }`,
+						},
+					},
+				},
+				{
+					ID:    "go-b-if",
+					Title: "Branches: if & switch",
+					Lesson: `Branching uses if/else — no parentheses around the condition, braces always
+required:
+    if score >= 50 {
+        result = "pass"
+    } else if score >= 40 {
+        result = "retry"
+    } else {
+        result = "fail"
+    }
+
+if can begin with a short statement whose variables exist only in the branch:
     if r := n % 2; r == 0 { ... }
 
-switch needs no break (no fall-through by default); a "switch true" with bare
-case conditions reads like an if/elif chain:
+switch is a cleaner if/else-if chain. Cases don't fall through (no break
+needed), and a bare "switch {" with condition cases reads top to bottom:
     switch {
-    case score >= 90: grade = "A"
-    case score >= 80: grade = "B"
-    default:          grade = "C"
+    case score >= 90:
+        grade = "A"
+    case score >= 80:
+        grade = "B"
+    default:
+        grade = "C"
+    }
+
+A switch can also match values directly: switch day { case "Sat", "Sun": ... }`,
+					Challenge: Challenge{
+						Prompt:      "Write Grade(score int) string returning \"A\" for 90+, \"B\" for 80+, \"C\" for 70+, and \"F\" below that (a condition switch works well).",
+						StarterCode: "func Grade(score int) string {\n\treturn \"\"\n}\n",
+						Solution:    "func Grade(score int) string {\n\tswitch {\n\tcase score >= 90:\n\t\treturn \"A\"\n\tcase score >= 80:\n\t\treturn \"B\"\n\tcase score >= 70:\n\t\treturn \"C\"\n\tdefault:\n\t\treturn \"F\"\n\t}\n}\n",
+						Tests: []string{
+							`if Grade(95) != "A" { t.Fatal("95") }`,
+							`if Grade(90) != "A" { t.Fatal("90 is an A") }`,
+							`if Grade(85) != "B" || Grade(71) != "C" { t.Fatal("middle grades") }`,
+							`if Grade(69) != "F" { t.Fatal("69") }`,
+						},
+					},
+				},
+				{
+					ID:    "go-b-loops",
+					Title: "Loops",
+					Lesson: `Go has one loop keyword — for — covering every case:
+    for i := 0; i < n; i++ { ... }   // classic counter
+    for cond { ... }                 // like while
+    for { ... }                      // infinite (use break to leave)
+(There is also "for ... range" for walking collections — you'll meet it when
+collections are introduced.)
+
+break leaves the loop; continue skips to the next iteration:
+    for i := 1; i <= 100; i++ {
+        if i%2 == 1 {
+            continue        // skip odd numbers
+        }
+        if i > 40 {
+            break           // stop entirely
+        }
+    }
+
+Worked example — multiplying the numbers 1..n:
+    fact := 1
+    for i := 2; i <= n; i++ {
+        fact *= i
     }`,
 					Challenge: Challenge{
-						Prompt:      "Write FizzBuzz(n int) []string for 1..n: \"Fizz\" if divisible by 3, \"Buzz\" by 5, \"FizzBuzz\" by both, otherwise the number as a string. Return an empty slice for n < 1.",
-						StarterCode: "func FizzBuzz(n int) []string {\n\treturn nil\n}\n",
-						Solution:    "import \"strconv\"\n\nfunc FizzBuzz(n int) []string {\n\tout := []string{}\n\tfor i := 1; i <= n; i++ {\n\t\tswitch {\n\t\tcase i%15 == 0:\n\t\t\tout = append(out, \"FizzBuzz\")\n\t\tcase i%3 == 0:\n\t\t\tout = append(out, \"Fizz\")\n\t\tcase i%5 == 0:\n\t\t\tout = append(out, \"Buzz\")\n\t\tdefault:\n\t\t\tout = append(out, strconv.Itoa(i))\n\t\t}\n\t}\n\treturn out\n}\n",
+						Prompt:      "Write SumTo(n int) int returning 1 + 2 + ... + n computed with a for loop (return 0 when n < 1).",
+						StarterCode: "func SumTo(n int) int {\n\treturn 0\n}\n",
+						Solution:    "func SumTo(n int) int {\n\ttotal := 0\n\tfor i := 1; i <= n; i++ {\n\t\ttotal += i\n\t}\n\treturn total\n}\n",
 						Tests: []string{
-							`got := FizzBuzz(5); if !reflect.DeepEqual(got, []string{"1", "2", "Fizz", "4", "Buzz"}) { t.Fatalf("got %v", got) }`,
-							`got := FizzBuzz(15); if got[14] != "FizzBuzz" { t.Fatalf("15 -> %q", got[14]) }`,
-							`if !reflect.DeepEqual(FizzBuzz(0), []string{}) { t.Fatal("n<1 should be empty") }`,
+							`if SumTo(5) != 15 { t.Fatalf("SumTo(5) -> %d", SumTo(5)) }`,
+							`if SumTo(1) != 1 { t.Fatal("SumTo(1)") }`,
+							`if SumTo(0) != 0 { t.Fatal("n < 1 should give 0") }`,
+							`if SumTo(100) != 5050 { t.Fatal("SumTo(100)") }`,
 						},
 					},
 				},
@@ -86,8 +197,8 @@ in nested blocks. Leaving the block ends its life. This keeps names local and
 state contained.
 
 A short statement in if/for/switch creates variables scoped to that construct:
-    if v, err := strconv.Atoi(s); err == nil {
-        use(v)        // v and err live only here
+    if r := n % 10; r != 0 {
+        fmt.Println(r)      // r lives only inside this if/else
     }
 
 Declaring a name in an inner block can shadow an outer one — a common source of
@@ -111,6 +222,36 @@ Prefer the smallest scope that works; it makes code easier to reason about.`,
 						},
 					},
 				},
+				{
+					ID:    "go-b-evens",
+					Title: "Practice: loops + branches",
+					Lesson: `Everything so far combines: a loop walks the numbers, a branch picks the ones
+that matter, a variable accumulates the answer. This shape — loop, test,
+accumulate — solves an enormous number of small problems.
+
+Worked example — counting multiples of 3 from 1 to n:
+    count := 0
+    for i := 1; i <= n; i++ {
+        if i%3 == 0 {
+            count++
+        }
+    }
+
+Variations on the same shape: sum instead of count, track the largest value
+seen so far, or stop early with break when something is found. Try re-writing
+the example as a sum in your head before doing the challenge.`,
+					Challenge: Challenge{
+						Prompt:      "Write CountEvens(from, to int) int counting the even numbers between from and to inclusive (return 0 when from > to).",
+						StarterCode: "func CountEvens(from, to int) int {\n\treturn 0\n}\n",
+						Solution:    "func CountEvens(from, to int) int {\n\tcount := 0\n\tfor i := from; i <= to; i++ {\n\t\tif i%2 == 0 {\n\t\t\tcount++\n\t\t}\n\t}\n\treturn count\n}\n",
+						Tests: []string{
+							`if CountEvens(1, 10) != 5 { t.Fatalf("1..10 -> %d", CountEvens(1, 10)) }`,
+							`if CountEvens(2, 2) != 1 { t.Fatal("2..2") }`,
+							`if CountEvens(3, 3) != 0 { t.Fatal("3..3") }`,
+							`if CountEvens(5, 1) != 0 { t.Fatal("from > to") }`,
+						},
+					},
+				},
 			},
 		},
 		{
@@ -130,14 +271,15 @@ tiny errors:
     fmt.Println(0.1+0.2 == 0.3)     // false
 
 Never compare floats with ==. Instead check that the absolute difference is
-within a small tolerance, using math.Abs:
+within a small tolerance, using math.Abs (add import "math" above your
+function to use it):
     math.Abs(a-b) < 1e-9
 
 Printf's %f verb controls formatting: %8.3f means width 8, 3 digits after the
 point.`,
 					Challenge: Challenge{
 						Prompt:      "Write NearlyEqual(a, b, tol float64) bool that reports whether a and b differ by at most tol (use math.Abs).",
-						StarterCode: "func NearlyEqual(a, b, tol float64) bool {\n\treturn false\n}\n",
+						StarterCode: "import \"math\"\n\nfunc NearlyEqual(a, b, tol float64) bool {\n\treturn false\n}\n",
 						Solution:    "import \"math\"\n\nfunc NearlyEqual(a, b, tol float64) bool {\n\treturn math.Abs(a-b) <= tol\n}\n",
 						Tests: []string{
 							`if !NearlyEqual(0.1+0.2, 0.3, 1e-9) { t.Fatal("0.1+0.2 should be ~0.3") }`,
@@ -158,9 +300,10 @@ erroring:
     var b uint8 = 255
     b++                 // 0  (uint8 holds 0..255)
 
-Types don't mix implicitly — you must convert explicitly:
+Types don't mix implicitly — you must convert explicitly with T(value):
     var i int = 300
     var b uint8 = uint8(i)   // 300 wraps to 44
+    var back int = int(b)    // 44
 
 Converting to a smaller type can silently lose information, so convert with
 care (or range-check first).`,
@@ -181,7 +324,8 @@ care (or range-check first).`,
 					Title: "Big numbers",
 					Lesson: `int64 maxes out near 9.2 x 10^18. For larger exact integers, use the
 math/big package, which grows until you run out of memory. big.Int values are
-built and mutated through methods.
+built and mutated through methods (calls written value.Method(...) — you'll
+study methods properly later; here just follow the pattern).
 
 Create them with big.NewInt(x) from an int64, or from a string for values too
 large to write as a literal:
@@ -195,7 +339,7 @@ allocates and initializes. The package also offers big.Rat (exact fractions)
 and big.Float (arbitrary precision).`,
 					Challenge: Challenge{
 						Prompt:      "Write Power(base, exp int64) string returning base raised to exp as a decimal string, using math/big so it works far beyond int64 (e.g. Power(2, 64)).",
-						StarterCode: "func Power(base, exp int64) string {\n\treturn \"\"\n}\n",
+						StarterCode: "import \"math/big\"\n\nfunc Power(base, exp int64) string {\n\treturn \"\"\n}\n",
 						Solution:    "import \"math/big\"\n\nfunc Power(base, exp int64) string {\n\tr := new(big.Int).Exp(big.NewInt(base), big.NewInt(exp), nil)\n\treturn r.String()\n}\n",
 						Tests: []string{
 							`if Power(2, 10) != "1024" { t.Fatalf("2^10 -> %s", Power(2, 10)) }`,
@@ -210,6 +354,43 @@ and big.Float (arbitrary precision).`,
 			Name: "Text",
 			Topics: []Topic{
 				{
+					ID:    "go-b-build",
+					Title: "Building strings",
+					Lesson: `Join strings with +, and grow one in a loop with +=. Strings compare with ==
+and order lexically with < and >.
+
+    greeting := "Hello, " + name + "!"
+
+    line := ""
+    for i := 0; i < 3; i++ {
+        line += "ab"
+    }
+    // line == "ababab"
+
+An empty string "" is the zero value — the natural starting point for an
+accumulator, just like 0 for a sum.
+
+Worked example — a separated list without a trailing separator:
+    out := ""
+    for i := 1; i <= 3; i++ {
+        if out != "" {
+            out += "-"
+        }
+        out += "x"
+    }
+    // out == "x-x-x"`,
+					Challenge: Challenge{
+						Prompt:      "Write Repeat(word string, n int) string returning word repeated n times using a loop (\"\" when n < 1).",
+						StarterCode: "func Repeat(word string, n int) string {\n\treturn \"\"\n}\n",
+						Solution:    "func Repeat(word string, n int) string {\n\tout := \"\"\n\tfor i := 0; i < n; i++ {\n\t\tout += word\n\t}\n\treturn out\n}\n",
+						Tests: []string{
+							`if Repeat("ha", 3) != "hahaha" { t.Fatalf("got %q", Repeat("ha", 3)) }`,
+							`if Repeat("x", 0) != "" { t.Fatal("n < 1") }`,
+							`if Repeat("ab", 1) != "ab" { t.Fatal("once") }`,
+						},
+					},
+				},
+				{
 					ID:    "go-b-strings",
 					Title: "Strings",
 					Lesson: `A string is an immutable sequence of bytes, usually UTF-8 text. You can read a
@@ -218,16 +399,25 @@ byte by index but never assign to one:
     fmt.Println(s[0])     // 115 (the byte 's')
     // s[0] = 'x'         // compile error: strings are immutable
 
-len(s) returns the number of BYTES, not characters. Join strings with +.
-Interpreted literals use double quotes and honor escapes (\n, \t); raw literals
-use back-quotes and take the bytes verbatim across multiple lines (handy for
-paths and templates).
+Slicing takes a substring by byte positions — s[i:j] is bytes i up to (not
+including) j; omit an end to mean "from the start" or "to the end":
+    s[0:3]   // "sha"
+    s[:1]    // "s"  (the first byte, as a string)
+    s[3:]    // "lom"
+
+len(s) returns the number of BYTES, not characters. Interpreted literals use
+double quotes and honor escapes (\n, \t); raw literals use back-quotes and
+take the bytes verbatim across multiple lines.
 
 The strings package has the everyday helpers: Fields (split on whitespace),
-Split, Join, ToUpper/ToLower, Contains, HasPrefix, ReplaceAll.`,
+Split, Join, ToUpper/ToLower, Contains, HasPrefix, ReplaceAll. Fields returns
+a collection you can walk with range:
+    for _, w := range strings.Fields("ada lovelace") {
+        fmt.Println(w)        // "ada", then "lovelace"
+    }`,
 					Challenge: Challenge{
-						Prompt:      "Write Initials(name string) string returning the uppercased first letter of each space-separated word (e.g. \"ada lovelace\" -> \"AL\"). Use the strings package.",
-						StarterCode: "func Initials(name string) string {\n\treturn \"\"\n}\n",
+						Prompt:      "Write Initials(name string) string returning the uppercased first letter of each space-separated word (e.g. \"ada lovelace\" -> \"AL\"). Use strings.Fields, slicing, and strings.ToUpper.",
+						StarterCode: "import \"strings\"\n\nfunc Initials(name string) string {\n\treturn \"\"\n}\n",
 						Solution:    "import \"strings\"\n\nfunc Initials(name string) string {\n\tout := \"\"\n\tfor _, w := range strings.Fields(name) {\n\t\tout += strings.ToUpper(w[:1])\n\t}\n\treturn out\n}\n",
 						Tests: []string{
 							`if Initials("ada lovelace") != "AL" { t.Fatalf("got %q", Initials("ada lovelace")) }`,
@@ -254,7 +444,7 @@ Indexing a string gives bytes. To work with characters, range over the string
     }`,
 					Challenge: Challenge{
 						Prompt:      "Write RuneCount(s string) int returning the number of Unicode characters (runes) in s — not the number of bytes.",
-						StarterCode: "func RuneCount(s string) int {\n\treturn 0\n}\n",
+						StarterCode: "import \"unicode/utf8\"\n\nfunc RuneCount(s string) int {\n\treturn 0\n}\n",
 						Solution:    "import \"unicode/utf8\"\n\nfunc RuneCount(s string) int {\n\treturn utf8.RuneCountInString(s)\n}\n",
 						Tests: []string{
 							`if RuneCount("Hello") != 5 { t.Fatal("ascii") }`,
@@ -271,22 +461,27 @@ you convert explicitly with T(value):
     var age int = 41
     var marsAge float64 = float64(age)
 
-Strings need the strconv package, not a plain conversion (string(65) gives the
-character "A", not "65"):
-    s := strconv.Itoa(10)            // "10"
-    n, err := strconv.Atoi("10")     // 10, nil  (err != nil if not a number)
+Numbers and strings need the strconv package, not a plain conversion
+(string(65) gives the character "A", not "65"):
+    s := strconv.Itoa(10)       // "10"
 
-Because parsing can fail, Atoi returns a value AND an error. The idiom is to
-check err immediately:
-    n, err := strconv.Atoi(s)
-    if err != nil { /* handle bad input */ }`,
+To use a package, import it above your functions:
+    import "strconv"
+
+(strconv.Atoi parses the other way, string to int — it returns a value AND an
+error, a two-result pattern you'll learn with functions later.)
+
+Worked example — labeling a count:
+    msg := "items: " + strconv.Itoa(count)`,
 					Challenge: Challenge{
-						Prompt:      "Write SafeAtoiSum(a, b string) (int, error) that parses both strings as integers and returns their sum, or a non-nil error if either fails to parse.",
-						StarterCode: "func SafeAtoiSum(a, b string) (int, error) {\n\treturn 0, nil\n}\n",
-						Solution:    "import \"strconv\"\n\nfunc SafeAtoiSum(a, b string) (int, error) {\n\tx, err := strconv.Atoi(a)\n\tif err != nil {\n\t\treturn 0, err\n\t}\n\ty, err := strconv.Atoi(b)\n\tif err != nil {\n\t\treturn 0, err\n\t}\n\treturn x + y, nil\n}\n",
+						Prompt:      "Write FizzBuzzAt(n int) string: \"Fizz\" if n is divisible by 3, \"Buzz\" by 5, \"FizzBuzz\" by both, otherwise n itself as a string (strconv.Itoa).",
+						StarterCode: "import \"strconv\"\n\nfunc FizzBuzzAt(n int) string {\n\treturn \"\"\n}\n",
+						Solution:    "import \"strconv\"\n\nfunc FizzBuzzAt(n int) string {\n\tswitch {\n\tcase n%15 == 0:\n\t\treturn \"FizzBuzz\"\n\tcase n%3 == 0:\n\t\treturn \"Fizz\"\n\tcase n%5 == 0:\n\t\treturn \"Buzz\"\n\tdefault:\n\t\treturn strconv.Itoa(n)\n\t}\n}\n",
 						Tests: []string{
-							`got, err := SafeAtoiSum("2", "3"); if err != nil || got != 5 { t.Fatalf("2+3: %d %v", got, err) }`,
-							`if _, err := SafeAtoiSum("x", "3"); err == nil { t.Fatal("expected a parse error") }`,
+							`if FizzBuzzAt(3) != "Fizz" { t.Fatal("3") }`,
+							`if FizzBuzzAt(5) != "Buzz" { t.Fatal("5") }`,
+							`if FizzBuzzAt(15) != "FizzBuzz" { t.Fatal("15") }`,
+							`if FizzBuzzAt(7) != "7" { t.Fatalf("7 -> %q", FizzBuzzAt(7)) }`,
 						},
 					},
 				},

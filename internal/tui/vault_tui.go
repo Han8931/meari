@@ -233,6 +233,13 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editor = tm.(editor.Model)
 		return m, cmd
 	case paneChat:
+		switch msg.String() {
+		// Copy the tutor's last reply: Alt+O (Linux) / Option+O (macOS, which
+		// arrives as "ø"/"Ø" unless the terminal sends Option as Meta).
+		case "alt+o", "ø", "Ø":
+			copyChat(&m.chat, "")
+			return m, nil
+		}
 		if msg.Type == tea.KeyEnter {
 			return m.submitChat()
 		}
@@ -354,6 +361,16 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.gradeEssay()
 	case "answer":
 		return m.revealAnswer()
+	case "copy", "yank":
+		what := ""
+		if len(fields) > 1 {
+			what = fields[1]
+		}
+		copyChat(&m.chat, what)
+		return m, nil
+	case "paste":
+		pasteChat(&m.chat)
+		return m, m.setFocus(paneChat) // land where the pasted text is
 	case "done":
 		return m.endEssay()
 	case "q", "quit":
@@ -642,7 +659,7 @@ func (m VaultModel) statusView() string {
 	if m.studyMode {
 		hints = ":grade check answer · :answer see a model answer · :done finish"
 	} else if m.focus == paneChat {
-		hints = "type a question · enter send · ⌃f/⌃b scroll"
+		hints = "enter send · ⌥o/:copy copy reply · ⌃f/⌃b scroll"
 	}
 	return statusBar.Width(m.width).Render(left + "   " + hintStyle.Render(hints))
 }

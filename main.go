@@ -23,8 +23,8 @@ import (
 	"meari/internal/core"
 	"meari/internal/drafts"
 	"meari/internal/progress"
-	"meari/internal/tutor"
 	"meari/internal/tui"
+	"meari/internal/tutor"
 	"meari/internal/vault"
 	"meari/internal/web"
 )
