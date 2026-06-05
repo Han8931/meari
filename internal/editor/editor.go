@@ -122,6 +122,10 @@ type Model struct {
 	searchMode bool
 	lastSearch string
 
+	// Command-line history (↑/↓ in the ":" and "/" prompts).
+	exHist     CmdHistory
+	searchHist CmdHistory
+
 	action Action
 	done   bool
 }
@@ -276,6 +280,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// KeyTab is not a rune key, so the textarea ignores it; indent here.
 				m.ta.InsertString(tabIndent)
 				return m, nil
+			case "enter":
+				m.insertNewlineIndented()
+				return m, nil
+			case "}":
+				m.electricClose()
 			}
 			var cmd tea.Cmd
 			m.ta, cmd = m.ta.Update(msg)
@@ -316,11 +325,22 @@ func (m Model) updateVim(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEsc:
 			m.mode = modeNormal
+			// Vim moves the cursor one left when leaving Insert, so it rests ON
+			// the last typed character (and never past the end of the line).
+			if _, col := m.cursorPos(); col > 0 {
+				m.ta.SetCursor(col - 1)
+			}
 			return m, nil
 		case tea.KeyTab:
 			// KeyTab is not a rune key, so the textarea ignores it; indent here.
 			m.ta.InsertString(tabIndent)
 			return m, nil
+		case tea.KeyEnter:
+			m.insertNewlineIndented()
+			return m, nil
+		}
+		if msg.String() == "}" {
+			m.electricClose() // dedent a bare-indent line before the brace lands
 		}
 		var cmd tea.Cmd
 		m.ta, cmd = m.ta.Update(msg)
@@ -399,6 +419,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cmd.Prompt = "/"
 		m.cmd.SetValue("")
 		m.cmd.Focus()
+		m.searchHist.Open()
 		return m, textinput.Blink
 	case "n":
 		if !m.search(m.lastSearch, 1) {
@@ -432,9 +453,14 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ta.CursorEnd()
 		m.mode = modeInsert
 	case "o":
-		// Open below at the current line's indentation, Vim autoindent-style.
+		// Open below with automatic indentation: the current line's depth, one
+		// level deeper when it ends with an opener ({, (, [, :).
 		m.pushUndo()
+		lines := strings.Split(m.ta.Value(), "\n")
 		indent := m.lineIndent()
+		if row, _ := m.cursorPos(); row >= 0 && row < len(lines) {
+			indent = autoIndentFor(lines[row])
+		}
 		m.ta.CursorEnd()
 		m.send(tea.KeyEnter)
 		if indent != "" {
@@ -455,13 +481,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// --- edits ---
 	case "x":
-		m.pushUndo()
-		n := m.takeCount()
-		m.captureDelete(false, func() {
-			for i := 0; i < n; i++ {
-				m.send(tea.KeyDelete)
-			}
-		})
+		m.deleteChars(m.takeCount())
 	case "D":
 		m.pushUndo()
 		m.captureDelete(false, func() { m.send(tea.KeyCtrlK) }) // delete to end of line
@@ -485,6 +505,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeCommand
 		m.cmd.SetValue("")
 		m.cmd.Focus()
+		m.exHist.Open()
 		return m, textinput.Blink
 	}
 	return m, nil
@@ -569,6 +590,7 @@ func (m Model) runPending(op rune, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case 'r':
 		// Replace the character under the cursor with the typed rune.
 		if len(msg.Runes) == 1 {
+			m.clampCharwise()
 			m.send(tea.KeyDelete)
 			m.ta, _ = m.ta.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: msg.Runes})
 			m.arrow(tea.KeyLeft)
@@ -592,8 +614,28 @@ func (m *Model) send(t tea.KeyType) { m.ta, _ = m.ta.Update(tea.KeyMsg{Type: t})
 // send2 forwards a fully-specified synthetic key (e.g. with Alt) to the textarea.
 func (m *Model) send2(k tea.KeyMsg) { m.ta, _ = m.ta.Update(k) }
 
+// cmdHist selects the history matching the active prompt (":" vs "/").
+func (m *Model) cmdHist() *CmdHistory {
+	if m.searchMode {
+		return &m.searchHist
+	}
+	return &m.exHist
+}
+
 func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
+	case tea.KeyUp:
+		if s, ok := m.cmdHist().Prev(m.cmd.Value()); ok {
+			m.cmd.SetValue(s)
+			m.cmd.CursorEnd()
+		}
+		return m, nil
+	case tea.KeyDown:
+		if s, ok := m.cmdHist().Next(); ok {
+			m.cmd.SetValue(s)
+			m.cmd.CursorEnd()
+		}
+		return m, nil
 	case tea.KeyEsc:
 		m.mode = modeNormal
 		m.cmd.Blur()
@@ -601,6 +643,7 @@ func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchMode = false
 		return m, nil
 	case tea.KeyEnter:
+		m.cmdHist().Record(m.cmd.Value())
 		if m.searchMode {
 			m.mode = modeNormal
 			m.cmd.Blur()

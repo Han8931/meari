@@ -64,6 +64,13 @@ type UIConfig struct {
 	// chat — good for coding) or "horizontal" (content on top, input on the
 	// bottom — good for reading/writing subjects).
 	Layout string `toml:"layout"`
+	// SidebarPercent and ChatPercent set the default pane split, as percentages
+	// of the available width (the editor takes the remainder). 0 keeps the
+	// built-in defaults (sidebar 22; chat 30 in the vertical layout, 55 as the
+	// stacked height share in the horizontal layout). :compact / :wide still
+	// adjust the split live from this base.
+	SidebarPercent int `toml:"sidebar_percent"`
+	ChatPercent    int `toml:"chat_percent"`
 }
 
 // Default returns the built-in configuration used when no file is present.
@@ -122,8 +129,42 @@ func Load(path, baseDir string) (Config, error) {
 	if cfg.UI.Layout != "vertical" && cfg.UI.Layout != "horizontal" {
 		cfg.UI.Layout = "vertical"
 	}
+	// Pane ratios: 0 means "use the built-in default"; set values are clamped
+	// to ranges that keep every pane usable.
+	if cfg.UI.SidebarPercent != 0 {
+		cfg.UI.SidebarPercent = clampInt(cfg.UI.SidebarPercent, 10, 40)
+	}
+	if cfg.UI.ChatPercent != 0 {
+		cfg.UI.ChatPercent = clampInt(cfg.UI.ChatPercent, 15, 70)
+	}
 
 	return cfg, nil
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// SidebarPct returns the configured sidebar width share, or def when unset.
+func (c Config) SidebarPct(def int) int {
+	if c.UI.SidebarPercent > 0 {
+		return c.UI.SidebarPercent
+	}
+	return def
+}
+
+// ChatPct returns the configured chat share, or def when unset.
+func (c Config) ChatPct(def int) int {
+	if c.UI.ChatPercent > 0 {
+		return c.UI.ChatPercent
+	}
+	return def
 }
 
 // VimEditor reports whether the in-app editor should use Vim bindings.
@@ -160,6 +201,10 @@ theme = "default"
 # layout: "vertical" (list | editor | chat) or "horizontal" (content on top,
 # input on the bottom — better for reading/writing subjects)
 layout = "vertical"
+# Default pane split, in percent of the width (the editor takes the rest).
+# Unset keeps the built-in defaults; :compact / :wide still adjust live.
+# sidebar_percent = 22
+# chat_percent = 30
 `
 
 // EnsureFile writes the default config template to path if it does not yet

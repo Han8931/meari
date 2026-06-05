@@ -228,7 +228,9 @@ A modal, Vim-style editor (configurable). Set `editor.keybindings` to `"vim"` or
   selection; `d`/`x` delete · `y` yank · `c` change · `<`/`>` indent · `o` swap ends ·
   `Esc` cancels
 - `Esc` returns to Normal (and cancels a half-typed operator like `d`)
-- **Insert mode:** `Tab` indents (4 spaces)
+- **Insert mode:** `Tab` indents (4 spaces); **Enter auto-indents** the new line — one
+  level deeper after `{`, `(`, `[` or `:` — and typing `}` on a blank-indented line
+  **dedents it electrically**; `o`/`O` follow the same rules
 
 **Command line (`:`)**
 - `:submit` — check the current item (same as `Ctrl-R`)
@@ -245,6 +247,13 @@ Set `ui.layout` in `config.toml` (or change it live with `:config`):
 - **`vertical`** (default) — three side-by-side columns: notes │ editor │ chat.
 - **`horizontal`** — notes on the left, with the **content on top and your input on the
   bottom**. Better for reading- and writing-heavy subjects.
+
+Set your **default pane split** with `sidebar_percent` / `chat_percent` under `[ui]`
+(percent of the width; the editor takes the rest — e.g. `chat_percent = 45` for a
+chat-heavy layout). `:compact` / `:wide` still adjust live from that base.
+
+The `:` command line (and the editor's `:` / `/` prompts) recall **previous commands
+with ↑/↓**, with separate histories for commands and searches.
 
 > `:w` (save & resume) is intentionally separate from `:submit` (check), so you can stop
 > mid-answer and come back to it.

@@ -116,6 +116,72 @@ func TestClassicClickFocusesPane(t *testing.T) {
 	}
 }
 
+func TestConfigurablePaneRatios(t *testing.T) {
+	m := newModel(testDeps(t))
+	m.deps.Cfg.UI.ChatPercent = 50
+	m.deps.Cfg.UI.SidebarPercent = 12
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+
+	contentW := 120 - 6 // three bordered boxes
+	if want := clampMin(contentW*50/100, 16); m.chatW != want {
+		t.Fatalf("chatW = %d, want %d (50%%)", m.chatW, want)
+	}
+	if want := clampMin(contentW*12/100, 12); m.sidebarW != want {
+		t.Fatalf("sidebarW = %d, want %d (12%%)", m.sidebarW, want)
+	}
+
+	// Unset config keeps the built-in defaults.
+	m2 := newModel(testDeps(t))
+	m2 = step(t, m2, tea.WindowSizeMsg{Width: 120, Height: 40})
+	if want := clampMin(contentW*30/100, 16); m2.chatW != want {
+		t.Fatalf("default chatW = %d, want %d", m2.chatW, want)
+	}
+}
+
+func TestCmdLineHistory(t *testing.T) {
+	m := newTestVaultModel(t)
+
+	type tm = tea.KeyMsg
+	typeStr := func(s string) {
+		for _, r := range s {
+			mm, _ := m.Update(tm{Type: tea.KeyRunes, Runes: []rune{r}})
+			m = mm.(VaultModel)
+		}
+	}
+	press := func(k tea.KeyType) {
+		mm, _ := m.Update(tm{Type: k})
+		m = mm.(VaultModel)
+	}
+
+	// Run two commands through the global ":" line.
+	typeStr(":")
+	typeStr("copy")
+	press(tea.KeyEnter)
+	typeStr(":")
+	typeStr("wide")
+	press(tea.KeyEnter)
+
+	// Reopen and recall: ↑ gives the latest, ↑ again the older, ↓ back down.
+	typeStr(":")
+	press(tea.KeyUp)
+	if got := m.cmdLine.Value(); got != "wide" {
+		t.Fatalf("↑ = %q, want \"wide\"", got)
+	}
+	press(tea.KeyUp)
+	if got := m.cmdLine.Value(); got != "copy" {
+		t.Fatalf("↑↑ = %q, want \"copy\"", got)
+	}
+	press(tea.KeyDown)
+	if got := m.cmdLine.Value(); got != "wide" {
+		t.Fatalf("↓ = %q, want \"wide\"", got)
+	}
+	press(tea.KeyDown)
+	if got := m.cmdLine.Value(); got != "" {
+		t.Fatalf("↓ past newest should restore the empty draft, got %q", got)
+	}
+}
+
 func TestConfigReloadRebuildsTutor(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := dir + "/config.toml"

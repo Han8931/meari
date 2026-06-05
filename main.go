@@ -241,5 +241,5 @@ func runNotes(args []string) error {
 		return err
 	}
 	svc := core.New(v, tutor.New(cfg.AI))
-	return tui.RunVault(svc, cfg.VimEditor())
+	return tui.RunVault(svc, cfg)
 }

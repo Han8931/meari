@@ -192,6 +192,57 @@ func TestSearchAndRepeat(t *testing.T) {
 	}
 }
 
+func TestXAtEndOfLineCutsLastChar(t *testing.T) {
+	// The reported bug: after $ (or leaving Insert at EOL) the cursor sat PAST
+	// the last char, so x ate the newline instead of cutting a character.
+	m := New("abc\ndef", true, nil)
+	m.SetSize(60, 10)
+	m = apply(m, key("$"), key("x"))
+	if got := m.Value(); got != "ab\ndef" {
+		t.Fatalf("$ x should cut the last char: %q", got)
+	}
+	if m.register != "c" {
+		t.Fatalf("register = %q, want \"c\"", m.register)
+	}
+}
+
+func TestXAfterInsertEscCutsTypedChar(t *testing.T) {
+	m := New("", true, nil)
+	m.SetSize(60, 10)
+	// Type "hi", Esc (cursor must land ON 'i', Vim-style), then x cuts it.
+	m = apply(m, key("i"), key("h"), key("i"), esc(), key("x"))
+	if got := m.Value(); got != "h" {
+		t.Fatalf("i hi <esc> x: %q", got)
+	}
+}
+
+func TestXNeverEatsNewline(t *testing.T) {
+	m := New("ab\ncd", true, nil)
+	m.SetSize(60, 10)
+	// 9x from 'a': cuts at most to the end of the line, never joining lines.
+	m = apply(m, key("9"), key("x"))
+	if got := m.Value(); got != "\ncd" {
+		t.Fatalf("9x: %q", got)
+	}
+	if m.register != "ab" {
+		t.Fatalf("register = %q", m.register)
+	}
+	// x on the now-empty line is a no-op (as in Vim).
+	m = apply(m, key("x"))
+	if got := m.Value(); got != "\ncd" {
+		t.Fatalf("x on empty line must be a no-op: %q", got)
+	}
+}
+
+func TestTildeAtEndOfLine(t *testing.T) {
+	m := New("abc", true, nil)
+	m.SetSize(60, 10)
+	m = apply(m, key("$"), key("~"))
+	if got := m.Value(); got != "abC" {
+		t.Fatalf("$ ~ should toggle the last char: %q", got)
+	}
+}
+
 func TestSearchNotFound(t *testing.T) {
 	m := New("hello", true, nil)
 	m.SetSize(60, 10)

@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"meari/internal/config"
 	"meari/internal/core"
 	"meari/internal/editor"
 	"meari/internal/tutor"
@@ -56,10 +57,14 @@ type VaultModel struct {
 	// global ex-command line (":" from the notes pane)
 	cmdMode bool
 	cmdLine textinput.Model
+	cmdHist editor.CmdHistory
 
 	// editorBias shifts the editor/chat split (":wide" grows the editor,
 	// ":compact" grows the chat), sharing the classic TUI's step/clamp.
 	editorBias int
+
+	// cfg supplies the configured pane ratios and editor keybindings.
+	cfg config.Config
 
 	pending  int
 	loadKind string
@@ -70,17 +75,19 @@ type VaultModel struct {
 }
 
 // RunVault constructs and runs the vault terminal UI over svc.
-func RunVault(svc *core.Service, vim bool) error {
-	m := newVaultModel(svc, vim)
+func RunVault(svc *core.Service, cfg config.Config) error {
+	m := newVaultModel(svc, cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
 
-func newVaultModel(svc *core.Service, vim bool) VaultModel {
+func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
+	vim := cfg.VimEditor()
 	curPath := new(string)
 	m := VaultModel{
 		svc:        svc,
+		cfg:        cfg,
 		curPath:    curPath,
 		sidebar:    newSidebar(),
 		chat:       newChat(),
@@ -223,6 +230,7 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == ":" {
 			m.cmdMode = true
 			m.cmdLine.SetValue("")
+			m.cmdHist.Open()
 			return m, m.cmdLine.Focus()
 		}
 		var enter bool
@@ -312,6 +320,18 @@ func (m VaultModel) paneAt(x, y int) (pane, bool) {
 
 func (m VaultModel) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
+	case tea.KeyUp:
+		if s, ok := m.cmdHist.Prev(m.cmdLine.Value()); ok {
+			m.cmdLine.SetValue(s)
+			m.cmdLine.CursorEnd()
+		}
+		return m, nil
+	case tea.KeyDown:
+		if s, ok := m.cmdHist.Next(); ok {
+			m.cmdLine.SetValue(s)
+			m.cmdLine.CursorEnd()
+		}
+		return m, nil
 	case tea.KeyCtrlC:
 		return m, tea.Quit
 	case tea.KeyEnter:
@@ -321,6 +341,7 @@ func (m VaultModel) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if raw == "" {
 			return m, nil
 		}
+		m.cmdHist.Record(raw)
 		return m.runEx(raw)
 	case tea.KeyEsc:
 		m.cmdMode = false
@@ -649,9 +670,9 @@ func (m *VaultModel) layout() {
 	if contentW < 3 {
 		contentW = 3
 	}
-	// :compact / :wide shift the chat's share of the width away from the default.
-	chatPct := clampRange(32-m.editorBias, 22, 62)
-	m.sidebarW = clampMin(contentW*22/100, 12)
+	// The configured split is the base; :compact / :wide shift it live.
+	chatPct := clampRange(m.cfg.ChatPct(32)-m.editorBias, 15, 75)
+	m.sidebarW = clampMin(contentW*m.cfg.SidebarPct(22)/100, 12)
 	m.chatW = clampMin(contentW*chatPct/100, 16)
 	m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
 

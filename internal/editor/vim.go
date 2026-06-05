@@ -181,12 +181,64 @@ func (m *Model) applyMotion(key string) bool {
 		m.ta.CursorStart()
 	case "$":
 		m.ta.CursorEnd()
+		m.clampCharwise() // Vim's $ sits ON the last char, not past it
 	case "G":
 		m.send(tea.KeyCtrlEnd) // jump to end of buffer
 	default:
 		return false
 	}
 	return true
+}
+
+// --- charwise cursor discipline ---
+
+// clampCharwise pulls a cursor sitting past the line's last character back onto
+// it. The textarea's cursor is an insert position (0..len); Vim's Normal-mode
+// cursor sits ON a character (0..len-1). Charwise operations (x, r, ~) and the
+// $ motion need the Vim view, or they act on the newline instead of the last
+// character.
+func (m *Model) clampCharwise() {
+	lines := strings.Split(m.ta.Value(), "\n")
+	row, col := m.cursorPos()
+	if row < 0 || row >= len(lines) {
+		return
+	}
+	if n := len([]rune(lines[row])); n > 0 && col >= n {
+		m.ta.SetCursor(n - 1)
+	}
+}
+
+// deleteChars implements x: cut n characters from the cursor into the register,
+// bounded by the end of the line (Vim's x never crosses a newline).
+func (m *Model) deleteChars(n int) {
+	m.clampCharwise()
+	lines := strings.Split(m.ta.Value(), "\n")
+	row, col := m.cursorPos()
+	if row < 0 || row >= len(lines) {
+		return
+	}
+	line := []rune(lines[row])
+	if len(line) == 0 || col >= len(line) {
+		return // empty line: x is a no-op, as in Vim
+	}
+	end := col + n
+	if end > len(line) {
+		end = len(line)
+	}
+	m.pushUndo()
+	m.register = string(line[col:end])
+	m.regLinewise = false
+	lines[row] = string(line[:col]) + string(line[end:])
+	m.ta.SetValue(strings.Join(lines, "\n"))
+	// Cursor stays put, clamped onto the (new) last character if needed.
+	c := col
+	if l := len([]rune(lines[row])); c >= l {
+		c = l - 1
+		if c < 0 {
+			c = 0
+		}
+	}
+	m.moveTo(row, c)
 }
 
 // --- counts, char-find, join, case, search ---
@@ -290,6 +342,7 @@ func (m *Model) joinLines(n int) {
 // toggleCase implements ~: flip the case of the rune under the cursor and
 // advance, n times.
 func (m *Model) toggleCase(n int) {
+	m.clampCharwise()
 	for ; n > 0; n-- {
 		lines := strings.Split(m.ta.Value(), "\n")
 		row, col := m.cursorPos()
@@ -423,12 +476,78 @@ func (m *Model) lineIndent() string {
 	if r < 0 || r >= len(lines) {
 		return ""
 	}
-	line := lines[r]
+	return leadingWS(lines[r])
+}
+
+func leadingWS(line string) string {
 	i := 0
 	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
 		i++
 	}
 	return line[:i]
+}
+
+// autoIndentFor returns the indentation a NEW line should get when opened after
+// the given text: the text's own leading whitespace, one level deeper when it
+// ends with an indent-opening token — '{', '(' and '[' for brace languages,
+// ':' for Python blocks (and Go labels/cases).
+func autoIndentFor(text string) string {
+	indent := leadingWS(text)
+	t := strings.TrimRight(text, " \t")
+	if t == "" {
+		return indent
+	}
+	switch t[len(t)-1] {
+	case '{', '(', '[', ':':
+		indent += tabIndent
+	}
+	return indent
+}
+
+// insertNewlineIndented handles Enter in Insert mode: split the line and indent
+// the new one automatically (Vim's autoindent + an extra level after openers).
+func (m *Model) insertNewlineIndented() {
+	lines := strings.Split(m.ta.Value(), "\n")
+	row, col := m.cursorPos()
+	prefix := ""
+	if row >= 0 && row < len(lines) {
+		line := []rune(lines[row])
+		if col > len(line) {
+			col = len(line)
+		}
+		prefix = string(line[:col])
+	}
+	m.send(tea.KeyEnter)
+	if indent := autoIndentFor(prefix); indent != "" {
+		m.ta.InsertString(indent)
+	}
+}
+
+// electricClose dedents the current line one level when the learner types a
+// closing brace on a line that is so far only indentation — so "}" lands at
+// the block's opening depth, as in Vim/IDEs. The brace itself is inserted by
+// the caller afterwards.
+func (m *Model) electricClose() {
+	lines := strings.Split(m.ta.Value(), "\n")
+	row, col := m.cursorPos()
+	if row < 0 || row >= len(lines) {
+		return
+	}
+	line := []rune(lines[row])
+	if col > len(line) {
+		col = len(line)
+	}
+	prefix := string(line[:col])
+	if prefix == "" || strings.TrimSpace(prefix) != "" {
+		return // not at the start-of-line indentation
+	}
+	dedented := shiftLine(prefix, -1)
+	if dedented == prefix {
+		return
+	}
+	lines[row] = dedented + string(line[col:])
+	m.ta.SetValue(strings.Join(lines, "\n"))
+	m.moveTo(row, len([]rune(dedented)))
 }
 
 // --- Visual mode ---

@@ -155,6 +155,7 @@ type Model struct {
 	// also driven by RunCommandMsg forwarded from the editor's own command line.
 	cmdMode bool
 	cmdLine textinput.Model
+	cmdHist editor.CmdHistory
 
 	// Modal overlays drawn full-screen over the panes (like the setup wizard).
 	overlay       overlayKind
@@ -539,6 +540,7 @@ func (m Model) paneAt(x, y int) (pane, bool) {
 func (m Model) openCmdLine() (tea.Model, tea.Cmd) {
 	m.cmdMode = true
 	m.cmdLine.SetValue("")
+	m.cmdHist.Open()
 	return m, m.cmdLine.Focus()
 }
 
@@ -546,6 +548,18 @@ func (m Model) openCmdLine() (tea.Model, tea.Cmd) {
 // still quits, anything else edits the text.
 func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
+	case tea.KeyUp:
+		if s, ok := m.cmdHist.Prev(m.cmdLine.Value()); ok {
+			m.cmdLine.SetValue(s)
+			m.cmdLine.CursorEnd()
+		}
+		return m, nil
+	case tea.KeyDown:
+		if s, ok := m.cmdHist.Next(); ok {
+			m.cmdLine.SetValue(s)
+			m.cmdLine.CursorEnd()
+		}
+		return m, nil
 	case tea.KeyCtrlC:
 		return m, m.quit()
 	case tea.KeyEnter:
@@ -555,6 +569,7 @@ func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if raw == "" {
 			return m, nil
 		}
+		m.cmdHist.Record(raw)
 		return m.runEx(raw)
 	case tea.KeyEsc:
 		m.cmdMode = false
@@ -1617,7 +1632,7 @@ func (m *Model) layout() {
 			m.sidebarW = 0
 			m.rightW = clampMin(contentW, 20)
 		} else {
-			m.sidebarW = clampMin(contentW*22/100, 14)
+			m.sidebarW = clampMin(contentW*m.deps.Cfg.SidebarPct(22)/100, 14)
 			m.rightW = clampMin(contentW-m.sidebarW, 20)
 		}
 		// The two stacked boxes cost 4 border rows vs the sidebar's 2, so their
@@ -1628,7 +1643,7 @@ func (m *Model) layout() {
 		}
 		// In this stacked layout the editor sits below the chat, so :compact /
 		// :wide trade height between them rather than width.
-		chatPct := clampRange(55-m.editorBias, 40, 82)
+		chatPct := clampRange(m.deps.Cfg.ChatPct(55)-m.editorBias, 30, 85)
 		m.chatH = clampMin(rightContent*chatPct/100, 3)
 		m.editorH = clampMin(rightContent-m.chatH, 3)
 
@@ -1648,14 +1663,14 @@ func (m *Model) layout() {
 	if contentW < 3 {
 		contentW = 3
 	}
-	// :compact / :wide shift the chat's share of the width away from the default.
-	chatPct := clampRange(30-m.editorBias, 22, 62)
+	// The configured split is the base; :compact / :wide shift it live.
+	chatPct := clampRange(m.deps.Cfg.ChatPct(30)-m.editorBias, 15, 75)
 	if m.sidebarCollapsed {
 		m.sidebarW = 0
 		m.chatW = clampMin(contentW*chatPct/100, 16)
 		m.editorW = clampMin(contentW-m.chatW, 10)
 	} else {
-		m.sidebarW = clampMin(contentW*22/100, 12)
+		m.sidebarW = clampMin(contentW*m.deps.Cfg.SidebarPct(22)/100, 12)
 		m.chatW = clampMin(contentW*chatPct/100, 16)
 		m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
 	}

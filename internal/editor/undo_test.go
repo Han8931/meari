@@ -114,6 +114,102 @@ func TestOpenAboveAutoIndents(t *testing.T) {
 	}
 }
 
+func TestEditorCommandHistory(t *testing.T) {
+	m := New("", true, nil)
+	m.SetSize(60, 10)
+	// Run two ex-commands (unknown ones are forwarded to the parent, but they
+	// still enter the history).
+	m = apply(m, key(":"))
+	for _, r := range "progress" {
+		m = apply(m, key(string(r)))
+	}
+	m = apply(m, enter())
+	m = apply(m, key(":"))
+	for _, r := range "w" {
+		m = apply(m, key(string(r)))
+	}
+	m = apply(m, enter())
+
+	// Recall via ↑ in a fresh prompt.
+	m = apply(m, key(":"), tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.cmd.Value(); got != "w" {
+		t.Fatalf("↑ = %q, want \"w\"", got)
+	}
+	m = apply(m, tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.cmd.Value(); got != "progress" {
+		t.Fatalf("↑↑ = %q, want \"progress\"", got)
+	}
+
+	// Search history is separate from ex history.
+	m = apply(m, tea.KeyMsg{Type: tea.KeyEsc}, key("/"), tea.KeyMsg{Type: tea.KeyUp})
+	if got := m.cmd.Value(); got != "" {
+		t.Fatalf("search history should start empty, got %q", got)
+	}
+}
+
+func TestEnterAutoIndentsInsideBraces(t *testing.T) {
+	m := New("", true, nil)
+	m.SetSize(60, 10)
+	// Type a Go block: "func f() {" <Enter> "x" <Enter> "}" — the body indents
+	// itself and the closing brace electrically dedents back to column 0.
+	m = apply(m, key("i"))
+	for _, r := range "func f() {" {
+		m = apply(m, key(string(r)))
+	}
+	m = apply(m, enter())
+	if got := m.Value(); got != "func f() {\n"+tabIndent {
+		t.Fatalf("enter after {: %q", got)
+	}
+	m = apply(m, key("x"), enter())
+	if got := m.Value(); got != "func f() {\n"+tabIndent+"x\n"+tabIndent {
+		t.Fatalf("enter keeps depth: %q", got)
+	}
+	m = apply(m, key("}"))
+	if got := m.Value(); got != "func f() {\n"+tabIndent+"x\n}" {
+		t.Fatalf("electric }: %q", got)
+	}
+}
+
+func TestEnterCopiesIndentWithoutOpener(t *testing.T) {
+	m := New("    return x", true, nil)
+	m.SetSize(60, 10)
+	// A (append at end) then Enter: same depth, no deepening.
+	m = apply(m, key("A"), enter(), key("y"))
+	if got := m.Value(); got != "    return x\n    y" {
+		t.Fatalf("plain autoindent: %q", got)
+	}
+}
+
+func TestOpenBelowDeepensAfterOpener(t *testing.T) {
+	m := New("if ready {", true, nil)
+	m.SetSize(60, 10)
+	m = apply(m, key("o"), key("x"))
+	if got := m.Value(); got != "if ready {\n"+tabIndent+"x" {
+		t.Fatalf("o after {: %q", got)
+	}
+	// Python's colon deepens too.
+	m2 := New("def f():", true, nil)
+	m2.SetSize(60, 10)
+	m2 = apply(m2, key("o"), key("y"))
+	if got := m2.Value(); got != "def f():\n"+tabIndent+"y" {
+		t.Fatalf("o after colon: %q", got)
+	}
+}
+
+func TestElectricCloseOnlyOnBareIndent(t *testing.T) {
+	// Typing } after real text must NOT re-indent the line.
+	m := New("", true, nil)
+	m.SetSize(60, 10)
+	m = apply(m, key("i"))
+	for _, r := range "    x" {
+		m = apply(m, key(string(r)))
+	}
+	m = apply(m, key("}"))
+	if got := m.Value(); got != "    x}" {
+		t.Fatalf("} after text must not dedent: %q", got)
+	}
+}
+
 func TestOpenBelowNoIndentUnchanged(t *testing.T) {
 	m := New("plain", true, nil)
 	m.SetSize(40, 10)

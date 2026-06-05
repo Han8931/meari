@@ -22,7 +22,7 @@ func newTestVaultModel(t *testing.T) VaultModel {
 	if !tut.Offline() {
 		t.Fatal("expected offline tutor")
 	}
-	m := newVaultModel(core.New(v, tut), false)
+	m := newVaultModel(core.New(v, tut), config.Config{})
 	tm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	return tm.(VaultModel)
 }
