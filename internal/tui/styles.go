@@ -64,6 +64,11 @@ var (
 	doneGlyph   = lipgloss.NewStyle().Foreground(doneColor)
 	wipGlyph    = lipgloss.NewStyle().Foreground(wipColor)
 
+	// activeItem bolds the sidebar row open in the editor (replacing the old
+	// "▶" marker column); markedItem tints rows space-marked for a batch op.
+	activeItem = lipgloss.NewStyle().Bold(true)
+	markedItem = lipgloss.NewStyle().Foreground(wipColor)
+
 	// Chat transcript styles. Each speaker turn opens with a colored BADGE on
 	// its own line (" you " / " tutor " / " lesson " on a filled background) so
 	// who is talking is unmistakable even when skimming; the message body stays

@@ -163,6 +163,7 @@ type Model struct {
 	cmdMode bool
 	cmdLine textinput.Model
 	cmdHist editor.CmdHistory
+	cmdComp editor.CmdCompleter // Tab completion over tutorExCmds
 
 	// Modal overlays drawn full-screen over the panes (like the setup wizard).
 	overlay       overlayKind
@@ -251,7 +252,7 @@ func newModel(d Deps) Model {
 		horizontal:       d.Cfg.Horizontal(),
 		sidebarCollapsed: d.Cfg.UI.SidebarFolded,
 		sidebar:          newSidebar(),
-		editor:           editor.New("", d.Cfg.VimEditor(), save),
+		editor:           editor.New("", d.Cfg.VimEditor(), save).WithGlobalCmds(tutorExCmds),
 		chat:             newChat(),
 		topicInput:       ti,
 		cmdLine:          cl,
@@ -513,6 +514,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "alt+o", "ø", "Ø":
 			m.flash(copyChat(&m.chat, ""))
 			return m, nil
+		// Paste the system clipboard into the chat input: Alt+V / Option+V
+		// (macOS sends "√" for Option+V). Cmd+V also works — the terminal
+		// delivers it as a bracketed paste straight into the input.
+		case "alt+v", "√":
+			m.flash(pasteChat(&m.chat))
+			return m, nil
 		}
 		if msg.Type == tea.KeyEnter {
 			return m.submitChat()
@@ -630,9 +637,23 @@ func (m Model) openCmdLine() (tea.Model, tea.Cmd) {
 }
 
 // updateCmdLine drives the command prompt: Enter runs it, Esc cancels, Ctrl-C
-// still quits, anything else edits the text.
+// still quits, Tab/Shift-Tab cycle command completions, anything else edits
+// the text.
 func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type != tea.KeyTab && msg.Type != tea.KeyShiftTab {
+		m.cmdComp.Reset() // any other key ends the completion cycle
+	}
 	switch msg.Type {
+	case tea.KeyTab, tea.KeyShiftTab:
+		dir := 1
+		if msg.Type == tea.KeyShiftTab {
+			dir = -1
+		}
+		if s, ok := m.cmdComp.Next(m.cmdLine.Value(), tutorExCmds, dir); ok {
+			m.cmdLine.SetValue(s)
+			m.cmdLine.CursorEnd()
+		}
+		return m, nil
 	case tea.KeyUp:
 		if s, ok := m.cmdHist.Prev(m.cmdLine.Value()); ok {
 			m.cmdLine.SetValue(s)
@@ -664,6 +685,14 @@ func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.cmdLine, cmd = m.cmdLine.Update(msg)
 	return m, cmd
+}
+
+// tutorExCmds lists every command runEx accepts (aliases included), sorted,
+// for Tab completion in the command prompt.
+var tutorExCmds = []string{
+	"answer", "clear", "compact", "config", "copy", "course", "fold", "help",
+	"notes", "paste", "progress", "sidebar", "subject", "topic", "vault",
+	"wide", "yank",
 }
 
 // runEx dispatches an ex-command (without the leading colon), from either the
@@ -2014,7 +2043,12 @@ func fitWidth(s string, w int) string {
 
 func (m Model) statusView() string {
 	if m.cmdMode {
-		return statusBar.Width(m.width).Render(m.cmdLine.View())
+		line := m.cmdLine.View()
+		if h := m.cmdComp.Hint(); h != "" {
+			line += "   " + hintStyle.Render(h)
+		}
+		// MaxWidth keeps a long wildmenu to the single status row.
+		return statusBar.Width(m.width).MaxWidth(m.width).Render(line)
 	}
 	left := "[" + m.focusName() + "]"
 	if m.pending > 0 {

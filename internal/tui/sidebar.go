@@ -7,15 +7,22 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// sidebarItem is one row: a challenge and its progress, which (since each
-// challenge maps to one workspace/drafts/<id>.py) doubles as the learner's file
-// list.
+// sidebarItem is one row: a challenge and its progress in the tutor TUI, or a
+// node of the vault's file tree (a directory or note) in the vault TUI.
 type sidebarItem struct {
 	id     string
-	title  string // first line of the prompt, the topic title, or the id
+	title  string // first line of the prompt, the topic title, or the file name
 	status string // "done" | "in_progress" | ""
-	active bool   // true when this row is the challenge currently open in the editor
+	active bool   // true when this row is open in the editor (rendered bold)
 	header bool   // a non-selectable section heading (e.g. a curriculum module)
+
+	// Tree fields (vault TUI). depth indents the row; dir marks a directory
+	// node (▸ collapsed / ▾ expanded); marked is the space-bar selection used
+	// by the NERDTree-style batch operations.
+	depth    int
+	dir      bool
+	expanded bool
+	marked   bool
 }
 
 // sidebarModel is the left pane: a hand-rolled cursor list. Hand-rolled rather
@@ -148,31 +155,52 @@ func (s sidebarModel) window() (int, int) {
 	return lo, hi
 }
 
+// rowGlyph picks the one-cell marker before the title: the fold state for
+// directories, the progress state for challenges, a blank otherwise.
+func (it sidebarItem) rowGlyph() string {
+	switch {
+	case it.dir && it.expanded:
+		return "▾"
+	case it.dir:
+		return "▸"
+	case it.status == "done":
+		return "✓"
+	case it.status == "in_progress":
+		return "…"
+	}
+	return " "
+}
+
 func (s sidebarModel) renderRow(it sidebarItem, selected bool) string {
 	if it.header {
 		return headerRow.Width(s.w).Render(it.title)
 	}
 
-	active := " "
-	if it.active {
-		active = "▶"
-	}
+	indent := strings.Repeat("  ", it.depth)
+	glyph := it.rowGlyph()
 
 	title := it.title
-	max := s.w - 3 // reserve room for active marker, status glyph, and a space
+	max := s.w - len(indent) - 2 // reserve room for the glyph and a space
 	if max > 0 && lipgloss.Width(title) > max {
 		title = truncate(title, max)
 	}
 
 	if !selected {
-		glyph := " "
+		g := glyph
 		switch it.status {
 		case "done":
-			glyph = doneGlyph.Render("✓")
+			g = doneGlyph.Render(glyph)
 		case "in_progress":
-			glyph = wipGlyph.Render("…")
+			g = wipGlyph.Render(glyph)
 		}
-		return active + glyph + " " + title
+		t := title
+		switch {
+		case it.marked:
+			t = markedItem.Render(title) // space-marked for a batch op
+		case it.active:
+			t = activeItem.Render(title) // open in the editor
+		}
+		return indent + g + " " + t
 	}
 
 	// Paint one continuous cursor bar across the whole row. We style each segment
@@ -186,16 +214,23 @@ func (s sidebarModel) renderRow(it sidebarItem, selected bool) string {
 	}
 	base := lipgloss.NewStyle().Background(bg).Foreground(selectedFg)
 
-	glyph := base.Render(" ")
+	g := base.Render(glyph)
 	switch it.status {
 	case "done":
-		glyph = base.Foreground(doneColor).Render("✓")
+		g = base.Foreground(doneColor).Render(glyph)
 	case "in_progress":
-		glyph = base.Foreground(wipColor).Render("…")
+		g = base.Foreground(wipColor).Render(glyph)
+	}
+	t := base.Render(" " + title)
+	switch {
+	case it.marked:
+		t = base.Foreground(wipColor).Render(" " + title)
+	case it.active:
+		t = base.Bold(true).Render(" " + title)
 	}
 
-	row := base.Render(active) + glyph + base.Render(" "+title)
-	if pad := s.w - 3 - lipgloss.Width(title); pad > 0 {
+	row := base.Render(indent) + g + t
+	if pad := s.w - len(indent) - 2 - lipgloss.Width(title); pad > 0 {
 		row += base.Render(strings.Repeat(" ", pad))
 	}
 	return row

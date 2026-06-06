@@ -186,24 +186,117 @@ func TestVaultViewRenders(t *testing.T) {
 	}
 }
 
-func TestVaultRebuildSidebarGroupsBySubject(t *testing.T) {
+func TestVaultSidebarTree(t *testing.T) {
 	m := newTestVaultModel(t)
-	m.notes = []core.NoteMeta{
-		{Path: "math/A.md", Title: "A", Subject: "math"},
-		{Path: "bio/B.md", Title: "B", Subject: "bio"},
-		{Path: "math/C.md", Title: "C", Subject: "math"},
+	m.tree = []core.TreeEntry{
+		{Path: "bio", Name: "bio", Dir: true},
+		{Path: "bio/B.md", Name: "B"},
+		{Path: "math", Name: "math", Dir: true},
+		{Path: "math/A.md", Name: "A"},
+		{Path: "math/calc", Name: "calc", Dir: true},
+		{Path: "math/calc/C.md", Name: "C"},
+		{Path: "root.md", Name: "root"},
 	}
+
+	// Collapsed by default: only the top level is visible, directories first.
 	m.rebuildSidebar()
-	// Expect: header(bio), B, header(math), A, C  -> 2 headers, 3 notes.
-	headers, notes := 0, 0
+	got := make([]string, 0, len(m.sidebar.items))
 	for _, it := range m.sidebar.items {
-		if it.header {
-			headers++
-		} else {
-			notes++
+		got = append(got, it.id)
+	}
+	want := []string{"bio", "math", "root.md"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("collapsed tree = %v, want %v", got, want)
+	}
+
+	// Expanding math reveals its children (subdirectory before file), at depth 1.
+	m.expanded["math"] = true
+	m.rebuildSidebar()
+	got = got[:0]
+	for _, it := range m.sidebar.items {
+		got = append(got, it.id)
+	}
+	want = []string{"bio", "math", "math/calc", "math/A.md", "root.md"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("expanded tree = %v, want %v", got, want)
+	}
+	for _, it := range m.sidebar.items {
+		if it.id == "math/A.md" && it.depth != 1 {
+			t.Fatalf("math/A.md depth = %d, want 1", it.depth)
+		}
+		if it.id == "math" && (!it.dir || !it.expanded) {
+			t.Fatalf("math should render as an expanded dir: %+v", it)
 		}
 	}
-	if headers != 2 || notes != 3 {
-		t.Fatalf("grouping wrong: %d headers, %d notes", headers, notes)
+}
+
+func TestVaultSidebarMarkAndDirToggle(t *testing.T) {
+	m := newTestVaultModel(t)
+	// A real vault: one dir with a note, one root note.
+	vSaveCmd(m.svc, "math/A.md", "# A\n")()
+	vSaveCmd(m.svc, "root.md", "# Root\n")()
+	tm, _ := m.Update(vListCmd(m.svc)())
+	m = tm.(VaultModel)
+	m.setFocus(paneSidebar)
+
+	// Enter on the collapsed "math" dir unfolds it.
+	if it, _ := m.sidebar.selected(); it.id != "math" {
+		t.Fatalf("cursor should start on the math dir, got %q", it.id)
+	}
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m = tm.(VaultModel)
+	if !m.expanded["math"] {
+		t.Fatal("enter should unfold the directory")
+	}
+	if len(m.sidebar.items) != 3 {
+		t.Fatalf("after unfold the tree should show 3 rows, got %d", len(m.sidebar.items))
+	}
+
+	// Space marks the row under the cursor and steps down.
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = tm.(VaultModel)
+	if !m.marked["math"] {
+		t.Fatal("space should mark the dir under the cursor")
+	}
+	if it, _ := m.sidebar.selected(); it.id == "math" {
+		t.Fatal("space should step the cursor down after marking")
+	}
+
+	// m then d arms deletion of the marked rows; "n" cancels.
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = tm.(VaultModel)
+	if len(m.confirmDel) != 1 || m.confirmDel[0] != "math" {
+		t.Fatalf("confirmDel = %v, want [math]", m.confirmDel)
+	}
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = tm.(VaultModel)
+	if len(m.confirmDel) != 0 {
+		t.Fatal("any non-y key should cancel the delete")
+	}
+
+	// m then d then y deletes the marked dir and its note.
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = tm.(VaultModel)
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = tm.(VaultModel)
+	if cmd == nil {
+		t.Fatal("y should issue the delete command")
+	}
+	del, ok := cmd().(vDeletedMsg)
+	if !ok {
+		t.Fatalf("expected vDeletedMsg, got %T", cmd())
+	}
+	tm, cmd = m.Update(del)
+	m = tm.(VaultModel)
+	tm, _ = m.Update(cmd().(vNotesMsg)) // refresh the tree
+	m = tm.(VaultModel)
+	for _, it := range m.sidebar.items {
+		if it.id == "math" || it.id == "math/A.md" {
+			t.Fatalf("deleted %q still in the tree", it.id)
+		}
 	}
 }

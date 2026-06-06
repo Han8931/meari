@@ -9,6 +9,7 @@ package tui
 
 import (
 	"context"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -36,7 +37,25 @@ type VaultModel struct {
 	editor  editor.Model
 	chat    chatModel
 
-	notes        []core.NoteMeta
+	notes []core.NoteMeta
+
+	// The sidebar's file tree: the vault's real on-disk structure. expanded
+	// tracks which directories are unfolded; marked holds the space-bar
+	// selection the NERDTree-style batch operations act on.
+	tree     []core.TreeEntry
+	expanded map[string]bool
+	marked   map[string]bool
+
+	// NERDTree-style node-operation state. pendingNode is set after "m" in the
+	// sidebar (the next key picks add/move/delete). promptMode tells the
+	// status-row input what it is collecting: an ex-command (""), a new node
+	// path ("add"), or a rename target ("move", with promptOld the original).
+	// confirmDel holds delete targets awaiting a y/n keystroke.
+	pendingNode bool
+	promptMode  string
+	promptOld   string
+	confirmDel  []string
+
 	current      string // path of the open note ("" = none)
 	currentTitle string
 	curPath      *string          // shared with the editor save closure
@@ -65,6 +84,7 @@ type VaultModel struct {
 	cmdMode bool
 	cmdLine textinput.Model
 	cmdHist editor.CmdHistory
+	cmdComp editor.CmdCompleter // Tab completion over vaultExCmds
 
 	// Vim-style chords mirroring the coding TUI: pendingWindow is set after
 	// Ctrl-W (the next h/j/k/l picks a pane by direction); pendingLeader is set
@@ -120,6 +140,8 @@ func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
 		chat:             newChat(),
 		chatByNote:       map[string][]chatBlock{},
 		histByNote:       map[string][]tutor.ChatTurn{},
+		expanded:         map[string]bool{},
+		marked:           map[string]bool{},
 		spin:             spinner.New(spinner.WithSpinner(spinner.Dot)),
 	}
 	// The editor's save closure persists the open note — but never while the
@@ -131,7 +153,7 @@ func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
 		_, err := svc.SaveNote(*curPath, code)
 		return err
 	}
-	m.editor = editor.New("", vim, save)
+	m.editor = editor.New("", vim, save).WithGlobalCmds(vaultExCmds)
 	m.editor.SetLanguage("markdown")
 	m.editor.SetShowLineNumbers(cfg.LineNumbers())
 
@@ -173,6 +195,7 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case vNotesMsg:
 		m.notes = msg.notes
+		m.tree = msg.tree
 		m.rebuildSidebar()
 		return m, nil
 
@@ -183,9 +206,53 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentTitle = msg.note.Title
 		*m.curPath = msg.note.Path
 		m.editor.SetValue(msg.note.Body)
-		m.backlinks = nil // drop the previous note's backlinks until the fetch returns
+		m.backlinks = nil         // drop the previous note's backlinks until the fetch returns
+		m.expandTo(msg.note.Path) // unfold to a note opened indirectly (:learn, :new)
 		m.rebuildSidebar()
 		return m, tea.Batch(m.setFocus(paneEditor), vBacklinksCmd(m.svc, m.current))
+
+	case vDeletedMsg:
+		for _, p := range msg.paths {
+			delete(m.expanded, p)
+			// If the open note went with it, clear the editor: keeping a buffer
+			// that autosaves would resurrect the file.
+			if m.current == p || strings.HasPrefix(m.current, p+"/") {
+				m.current, m.currentTitle = "", ""
+				*m.curPath = ""
+				m.editor.SetValue("")
+				m.backlinks = nil
+			}
+		}
+		if len(msg.paths) == 1 {
+			m.flash("deleted " + msg.paths[0])
+		} else {
+			m.flash("deleted " + itoa(len(msg.paths)) + " items")
+		}
+		return m, vListCmd(m.svc)
+
+	case vRenamedMsg:
+		// Carry fold state and the open note across the move.
+		if m.expanded[msg.oldPath] {
+			delete(m.expanded, msg.oldPath)
+			m.expanded[msg.newPath] = true
+		}
+		switch {
+		case m.current == msg.oldPath:
+			m.current = msg.newPath
+			*m.curPath = m.current
+		case strings.HasPrefix(m.current, msg.oldPath+"/"):
+			m.current = msg.newPath + strings.TrimPrefix(m.current, msg.oldPath)
+			*m.curPath = m.current
+		}
+		m.expandTo(msg.newPath)
+		m.flash("moved to " + msg.newPath)
+		return m, vListCmd(m.svc)
+
+	case vMkdirMsg:
+		m.expanded[msg.path] = true // show the new directory unfolded
+		m.expandTo(msg.path)
+		m.flash("created " + msg.path + "/")
+		return m, vListCmd(m.svc)
 
 	case vBacklinksMsg:
 		if msg.path == m.current {
@@ -288,16 +355,74 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.focus {
 	case paneSidebar:
-		if msg.String() == ":" {
+		// A pending delete confirmation eats the next key: y deletes, anything
+		// else cancels.
+		if len(m.confirmDel) > 0 {
+			targets := m.confirmDel
+			m.confirmDel = nil
+			if msg.String() == "y" {
+				m.marked = map[string]bool{}
+				m.rebuildSidebar()
+				return m, vDeleteCmd(m.svc, targets)
+			}
+			m.flash("delete cancelled")
+			return m, nil
+		}
+		// The "m" node menu: the next key picks the operation.
+		if m.pendingNode {
+			m.pendingNode = false
+			it, ok := m.sidebar.selected()
+			if !ok {
+				return m, nil
+			}
+			switch msg.String() {
+			case "a":
+				return m.openNodePrompt("add", it)
+			case "m":
+				return m.openNodePrompt("move", it)
+			case "d":
+				return m.confirmDelete(it)
+			}
+			return m, nil
+		}
+		switch msg.String() {
+		case ":":
 			m.cmdMode = true
 			m.cmdLine.SetValue("")
 			m.cmdHist.Open()
 			return m, m.cmdLine.Focus()
+		case " ":
+			// Space-mark the row (NERDTree-style multi-select), then step down
+			// so a run of files can be marked in one sweep.
+			if it, ok := m.sidebar.selected(); ok {
+				if m.marked[it.id] {
+					delete(m.marked, it.id)
+				} else {
+					m.marked[it.id] = true
+				}
+				m.rebuildSidebar()
+				m.sidebar.move(1)
+			}
+			return m, nil
+		case "m":
+			if _, ok := m.sidebar.selected(); ok {
+				m.pendingNode = true
+			}
+			return m, nil
 		}
 		var enter bool
 		m.sidebar, enter = m.sidebar.Update(msg)
 		if enter {
 			if it, ok := m.sidebar.selected(); ok {
+				if it.dir { // enter folds/unfolds a directory
+					if m.expanded[it.id] {
+						delete(m.expanded, it.id)
+					} else {
+						m.expanded[it.id] = true
+					}
+					m.rebuildSidebar()
+					return m, nil
+				}
 				return m, vOpenCmd(m.svc, it.id)
 			}
 		}
@@ -331,6 +456,12 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// arrives as "ø"/"Ø" unless the terminal sends Option as Meta).
 		case "alt+o", "ø", "Ø":
 			m.flash(copyChat(&m.chat, ""))
+			return m, nil
+		// Paste the system clipboard into the chat input: Alt+V / Option+V
+		// (macOS sends "√" for Option+V). Cmd+V also works — the terminal
+		// delivers it as a bracketed paste straight into the input.
+		case "alt+v", "√":
+			m.flash(pasteChat(&m.chat))
 			return m, nil
 		}
 		if msg.Type == tea.KeyEnter {
@@ -420,14 +551,36 @@ func (m VaultModel) paneAt(x, y int) (pane, bool) {
 }
 
 func (m VaultModel) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type != tea.KeyTab && msg.Type != tea.KeyShiftTab {
+		m.cmdComp.Reset() // any other key ends the completion cycle
+	}
 	switch msg.Type {
+	case tea.KeyTab, tea.KeyShiftTab:
+		if m.promptMode != "" {
+			return m, nil // path prompts have no command completion
+		}
+		dir := 1
+		if msg.Type == tea.KeyShiftTab {
+			dir = -1
+		}
+		if s, ok := m.cmdComp.Next(m.cmdLine.Value(), vaultExCmds, dir); ok {
+			m.cmdLine.SetValue(s)
+			m.cmdLine.CursorEnd()
+		}
+		return m, nil
 	case tea.KeyUp:
+		if m.promptMode != "" {
+			return m, nil // ex-command history stays out of path prompts
+		}
 		if s, ok := m.cmdHist.Prev(m.cmdLine.Value()); ok {
 			m.cmdLine.SetValue(s)
 			m.cmdLine.CursorEnd()
 		}
 		return m, nil
 	case tea.KeyDown:
+		if m.promptMode != "" {
+			return m, nil
+		}
 		if s, ok := m.cmdHist.Next(); ok {
 			m.cmdLine.SetValue(s)
 			m.cmdLine.CursorEnd()
@@ -437,21 +590,110 @@ func (m VaultModel) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case tea.KeyEnter:
 		raw := strings.TrimSpace(m.cmdLine.Value())
-		m.cmdMode = false
-		m.cmdLine.Blur()
+		mode, old := m.promptMode, m.promptOld
+		m.closeCmdLine()
+		if mode != "" {
+			return m.runNodePrompt(mode, old, raw)
+		}
 		if raw == "" {
 			return m, nil
 		}
 		m.cmdHist.Record(raw)
 		return m.runEx(raw)
 	case tea.KeyEsc:
-		m.cmdMode = false
-		m.cmdLine.Blur()
+		m.closeCmdLine()
 		return m, nil
 	}
 	var cmd tea.Cmd
 	m.cmdLine, cmd = m.cmdLine.Update(msg)
 	return m, cmd
+}
+
+// closeCmdLine shuts the status-row input and restores it to ex-command mode.
+func (m *VaultModel) closeCmdLine() {
+	m.cmdMode = false
+	m.cmdLine.Blur()
+	m.cmdLine.Prompt = ":"
+	m.promptMode = ""
+	m.promptOld = ""
+}
+
+// openNodePrompt opens the status-row input for a node operation: "add"
+// collects a path for a new note/folder under the cursor's directory; "move"
+// collects the destination for a rename, prefilled with the current path.
+func (m VaultModel) openNodePrompt(mode string, it sidebarItem) (tea.Model, tea.Cmd) {
+	m.promptMode = mode
+	m.cmdMode = true
+	switch mode {
+	case "add":
+		base := it.id
+		if !it.dir {
+			base = path.Dir(it.id)
+			if base == "." {
+				base = ""
+			}
+		}
+		if base != "" {
+			base += "/"
+		}
+		m.cmdLine.Prompt = "add (end with / for a folder): "
+		m.cmdLine.SetValue(base)
+	case "move":
+		m.promptOld = it.id
+		m.cmdLine.Prompt = "move to: "
+		m.cmdLine.SetValue(it.id)
+	}
+	m.cmdLine.CursorEnd()
+	return m, m.cmdLine.Focus()
+}
+
+// runNodePrompt executes a completed node prompt: "add" creates a folder
+// (trailing "/") or a markdown note (opened right away); "move" renames.
+func (m VaultModel) runNodePrompt(mode, old, raw string) (tea.Model, tea.Cmd) {
+	if raw == "" {
+		return m, nil
+	}
+	switch mode {
+	case "add":
+		if strings.HasSuffix(raw, "/") {
+			return m, vMkdirCmd(m.svc, strings.TrimSuffix(raw, "/"))
+		}
+		if !strings.HasSuffix(strings.ToLower(raw), ".md") {
+			raw += ".md"
+		}
+		m.expandTo(raw)
+		return m, vSaveOpenCmd(m.svc, raw, "")
+	case "move":
+		if raw == old {
+			return m, nil
+		}
+		return m, vRenameCmd(m.svc, old, raw)
+	}
+	return m, nil
+}
+
+// confirmDelete arms the y/n confirmation for the space-marked rows, or for
+// the cursor row when nothing is marked. The question renders in the status
+// bar until the next key answers it.
+func (m VaultModel) confirmDelete(it sidebarItem) (tea.Model, tea.Cmd) {
+	targets := make([]string, 0, len(m.marked))
+	for p := range m.marked {
+		targets = append(targets, p)
+	}
+	sort.Strings(targets)
+	if len(targets) == 0 {
+		targets = []string{it.id}
+	}
+	m.confirmDel = targets
+	return m, nil
+}
+
+// vaultExCmds lists every command runEx accepts (aliases included), sorted,
+// for Tab completion in the command prompt.
+var vaultExCmds = []string{
+	"answer", "backlinks", "code", "compact", "copy", "done", "essay", "fold",
+	"gen", "grade", "learn", "lesson", "links", "new", "paste", "q", "quit",
+	"sidebar", "tutor", "wide", "yank",
 }
 
 // runEx dispatches a vault ex-command (without the leading colon).
@@ -770,32 +1012,54 @@ func (m *VaultModel) setFocus(p pane) tea.Cmd {
 
 // rebuildSidebar groups notes by subject into selectable rows (id = note path).
 func (m *VaultModel) rebuildSidebar() {
-	bySubject := map[string][]core.NoteMeta{}
-	var subjects []string
-	for _, n := range m.notes {
-		s := n.Subject
-		if s == "" {
-			s = "—"
+	// Group entries under their parent directory, then walk the tree depth-
+	// first from the root, emitting only rows whose ancestors are expanded.
+	// Directories sort before files at each level, NERDTree/Obsidian-style.
+	children := map[string][]core.TreeEntry{}
+	for _, e := range m.tree {
+		parent := path.Dir(e.Path)
+		if parent == "." {
+			parent = ""
 		}
-		if _, ok := bySubject[s]; !ok {
-			subjects = append(subjects, s)
-		}
-		bySubject[s] = append(bySubject[s], n)
+		children[parent] = append(children[parent], e)
 	}
-	sort.Strings(subjects)
+	for _, ents := range children {
+		sort.SliceStable(ents, func(i, j int) bool {
+			if ents[i].Dir != ents[j].Dir {
+				return ents[i].Dir
+			}
+			return strings.ToLower(ents[i].Name) < strings.ToLower(ents[j].Name)
+		})
+	}
 
 	var items []sidebarItem
-	for _, s := range subjects {
-		items = append(items, sidebarItem{title: s, header: true})
-		for _, n := range bySubject[s] {
+	var walk func(dir string, depth int)
+	walk = func(dir string, depth int) {
+		for _, e := range children[dir] {
 			items = append(items, sidebarItem{
-				id:     n.Path,
-				title:  n.Title,
-				active: n.Path == m.current,
+				id:       e.Path,
+				title:    e.Name,
+				depth:    depth,
+				dir:      e.Dir,
+				expanded: m.expanded[e.Path],
+				marked:   m.marked[e.Path],
+				active:   !e.Dir && e.Path == m.current,
 			})
+			if e.Dir && m.expanded[e.Path] {
+				walk(e.Path, depth+1)
+			}
 		}
 	}
+	walk("", 0)
 	m.sidebar.setItems(items)
+}
+
+// expandTo unfolds every ancestor directory of relPath so its row is visible
+// after the next sidebar rebuild.
+func (m *VaultModel) expandTo(relPath string) {
+	for d := path.Dir(relPath); d != "." && d != "/" && d != ""; d = path.Dir(d) {
+		m.expanded[d] = true
+	}
 }
 
 // --- layout & view ---
@@ -939,7 +1203,25 @@ func (m VaultModel) titleView() string {
 
 func (m VaultModel) statusView() string {
 	if m.cmdMode {
-		return statusBar.Width(m.width).Render(m.cmdLine.View())
+		line := m.cmdLine.View()
+		if h := m.cmdComp.Hint(); h != "" {
+			line += "   " + hintStyle.Render(h)
+		}
+		// MaxWidth keeps a long wildmenu to the single status row.
+		return statusBar.Width(m.width).MaxWidth(m.width).Render(line)
+	}
+	// Node-operation states render persistently (a flash would fade mid-decision).
+	if len(m.confirmDel) > 0 {
+		what := m.confirmDel[0]
+		if len(m.confirmDel) > 1 {
+			what = itoa(len(m.confirmDel)) + " items"
+		}
+		line := errStyle.Render("delete "+what+"?") + " " + hintStyle.Render("y confirm · any other key cancels")
+		return statusBar.Width(m.width).MaxWidth(m.width).Render(line)
+	}
+	if m.pendingNode {
+		line := noticeStyle.Render("node:") + " " + hintStyle.Render("(a)dd · (m)ove/rename · (d)elete · any other key cancels")
+		return statusBar.Width(m.width).Render(line)
 	}
 	left := "[" + m.focusName() + "]"
 	if m.pending > 0 {
@@ -956,6 +1238,8 @@ func (m VaultModel) statusView() string {
 		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
 	case m.studyMode:
 		hints = ":grade check answer · :answer see a model answer · :done finish"
+	case m.focus == paneSidebar:
+		hints = "j/k move · enter open/fold dir · space mark · m node ops · : cmds"
 	case m.focus == paneChat:
 		hints = "enter send · ⌥o/:copy copy reply · ⌃f/⌃b scroll"
 	}
@@ -1008,12 +1292,18 @@ func itoa(n int) string {
 // --- async commands & messages ---
 
 type (
-	vNotesMsg     struct{ notes []core.NoteMeta }
+	vNotesMsg struct {
+		notes []core.NoteMeta
+		tree  []core.TreeEntry
+	}
 	vOpenedMsg    struct{ note core.Note }
 	vBacklinksMsg struct {
 		path  string
 		links []core.NoteMeta
 	}
+	vDeletedMsg   struct{ paths []string }
+	vRenamedMsg   struct{ oldPath, newPath string }
+	vMkdirMsg     struct{ path string }
 	vGeneratedMsg struct{ meta core.NoteMeta }
 	vSavedMsg     struct{ meta core.NoteMeta }
 	vEssayMsg     struct{ res core.EssayResult }
@@ -1030,7 +1320,42 @@ func vListCmd(svc *core.Service) tea.Cmd {
 		if err != nil {
 			return vErrMsg{kind: "list", err: err}
 		}
-		return vNotesMsg{notes: notes}
+		tree, err := svc.Tree()
+		if err != nil {
+			return vErrMsg{kind: "list", err: err}
+		}
+		return vNotesMsg{notes: notes, tree: tree}
+	}
+}
+
+// vDeleteCmd removes the given notes/directories (a space-marked batch or the
+// cursor row).
+func vDeleteCmd(svc *core.Service, paths []string) tea.Cmd {
+	return func() tea.Msg {
+		for _, p := range paths {
+			if err := svc.Delete(p); err != nil {
+				return vErrMsg{kind: "delete", err: err}
+			}
+		}
+		return vDeletedMsg{paths: paths}
+	}
+}
+
+func vRenameCmd(svc *core.Service, oldPath, newPath string) tea.Cmd {
+	return func() tea.Msg {
+		if err := svc.Rename(oldPath, newPath); err != nil {
+			return vErrMsg{kind: "move", err: err}
+		}
+		return vRenamedMsg{oldPath: oldPath, newPath: newPath}
+	}
+}
+
+func vMkdirCmd(svc *core.Service, path string) tea.Cmd {
+	return func() tea.Msg {
+		if err := svc.MakeDir(path); err != nil {
+			return vErrMsg{kind: "mkdir", err: err}
+		}
+		return vMkdirMsg{path: path}
 	}
 }
 

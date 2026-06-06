@@ -39,3 +39,10 @@ sidebar_percent = 22
 chat_percent = 30
 # Start with the left pane folded away (toggle live with :fold).
 sidebar_folded = false
+
+[vault]
+# dir is where your markdown notes live, so the vault can sit outside the
+# meari directory (e.g. an existing Obsidian vault). "~/" expands to your
+# home; a relative path is rooted at the meari directory. Unset keeps the
+# default "vault" folder next to meari.
+dir = "/Users/han/Han/coding_notes/CodingNotes"

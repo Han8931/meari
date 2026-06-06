@@ -35,6 +35,12 @@ func (m *Model) cursorPos() (row, col int) {
 // moveTo places the cursor at logical (row, col). Vertical movement goes
 // through CursorUp/Down (which step visual lines), so a guard bounds the loop
 // on soft-wrapped rows; SetCursor clamps the column to the line length.
+// repositionMsg is a no-op message pumped through the textarea's Update: the
+// textarea repositions its viewport only there, so direct CursorUp/CursorDown
+// moves (moveTo) would otherwise leave a long jump ({, }, w, search) with the
+// cursor stranded outside the visible window.
+type repositionMsg struct{}
+
 func (m *Model) moveTo(row, col int) {
 	for guard := 0; m.ta.Line() < row && guard < 100000; guard++ {
 		before := m.ta.Line()
@@ -51,6 +57,7 @@ func (m *Model) moveTo(row, col int) {
 		}
 	}
 	m.ta.SetCursor(col)
+	m.ta, _ = m.ta.Update(repositionMsg{}) // scroll the viewport to the cursor
 }
 
 // --- Vim word motions (pure text math, unit-testable) ---
@@ -184,10 +191,111 @@ func (m *Model) applyMotion(key string) bool {
 		m.clampCharwise() // Vim's $ sits ON the last char, not past it
 	case "G":
 		m.send(tea.KeyCtrlEnd) // jump to end of buffer
+	case "{":
+		m.paragraph(-1)
+	case "}":
+		m.paragraph(1)
+	case "ctrl+e":
+		// One-line scrolls. The textarea's viewport follows the cursor and has
+		// no public scroll API, so these move the cursor line by line (the
+		// view scrolls with it at the window edges) — Vim's Ctrl-E/Ctrl-Y
+		// under scrolloff, near enough.
+		m.arrow(tea.KeyDown)
+	case "ctrl+y":
+		m.arrow(tea.KeyUp)
 	default:
 		return false
 	}
 	return true
+}
+
+// paragraph implements Vim's { and } motions: jump to the previous/next blank
+// line, skipping any blank run the cursor is already in, clamped to the buffer
+// edges. Being a motion, it composes with counts (3}) and Visual selections.
+func (m *Model) paragraph(dir int) {
+	lines := strings.Split(m.ta.Value(), "\n")
+	blank := func(i int) bool { return strings.TrimSpace(lines[i]) == "" }
+	row, _ := m.cursorPos()
+	i := row + dir
+	for i >= 0 && i < len(lines) && blank(i) {
+		i += dir // step out of the current blank run
+	}
+	for i >= 0 && i < len(lines) && !blank(i) {
+		i += dir // cross the paragraph to the blank line beyond it
+	}
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(lines) {
+		i = len(lines) - 1
+	}
+	m.moveTo(i, 0)
+}
+
+// centerView places the cursor at (row, col) with its line roughly mid-
+// screen. SetValue resets the textarea's viewport to the top, and a plain
+// moveTo would re-scroll only until the cursor reaches the view's bottom edge
+// — leaving the window somewhere the learner wasn't (the post-undo "screen
+// jumped" effect). The viewport has no public scroll API, but it always
+// anchors to the cursor: jumping first to a row half a window below pins that
+// row to the bottom edge, so stepping back up leaves the target centered.
+func (m *Model) centerView(row, col int) {
+	below := row + m.ta.Height()/2
+	if last := strings.Count(m.ta.Value(), "\n"); below > last {
+		below = last
+	}
+	m.moveTo(below, 0)
+	m.moveTo(row, col)
+}
+
+// --- jumplist (Ctrl-O / Ctrl-I) ---
+
+// jumpPos is one jumplist entry: a buffer position.
+type jumpPos struct{ row, col int }
+
+func (m *Model) curJumpPos() jumpPos {
+	row, col := m.cursorPos()
+	return jumpPos{row, col}
+}
+
+// recordJump pushes the origin of a jump command onto the jumplist. Making a
+// new jump while walked back in history truncates the forward entries, like
+// an undo stack; consecutive duplicates collapse.
+func (m *Model) recordJump(from jumpPos) {
+	m.jumps = m.jumps[:m.jumpIdx]
+	if n := len(m.jumps); n == 0 || m.jumps[n-1] != from {
+		m.jumps = append(m.jumps, from)
+	}
+	if len(m.jumps) > 100 {
+		m.jumps = m.jumps[1:]
+	}
+	m.jumpIdx = len(m.jumps)
+}
+
+// jumpBack moves to the previous jumplist position (Ctrl-O), stashing the
+// live position first so Ctrl-I can return to it.
+func (m *Model) jumpBack() {
+	if m.jumpIdx == 0 {
+		m.status = "at oldest jump"
+		return
+	}
+	if m.jumpIdx == len(m.jumps) {
+		m.jumps = append(m.jumps, m.curJumpPos())
+	}
+	m.jumpIdx--
+	p := m.jumps[m.jumpIdx]
+	m.moveTo(p.row, p.col)
+}
+
+// jumpForward moves to the next jumplist position (Ctrl-I / Tab).
+func (m *Model) jumpForward() {
+	if m.jumpIdx+1 >= len(m.jumps) {
+		m.status = "at newest jump"
+		return
+	}
+	m.jumpIdx++
+	p := m.jumps[m.jumpIdx]
+	m.moveTo(p.row, p.col)
 }
 
 // --- charwise cursor discipline ---
@@ -436,7 +544,7 @@ func (m *Model) undo() {
 		row, col := m.cursorPos()
 		m.redoStack = append(m.redoStack, editState{value: cur, row: row, col: col})
 		m.ta.SetValue(st.value)
-		m.moveTo(st.row, st.col)
+		m.centerView(st.row, st.col)
 		return
 	}
 	m.status = "already at oldest change"
@@ -454,7 +562,7 @@ func (m *Model) redo() {
 		row, col := m.cursorPos()
 		m.undoStack = append(m.undoStack, editState{value: cur, row: row, col: col})
 		m.ta.SetValue(st.value)
-		m.moveTo(st.row, st.col)
+		m.centerView(st.row, st.col)
 		return
 	}
 	m.status = "already at newest change"
@@ -558,6 +666,8 @@ func (m *Model) enterVisual(linewise bool) {
 	m.anchorRow, m.anchorCol = m.cursorPos()
 	m.visualLine = linewise
 	m.mode = modeVisual
+	m.syncVisualTop() // open on the textarea's current window, not a recomputed one
+	m.scrollVisual()
 }
 
 // updateVisual routes a key while a selection is active: motions extend it,
@@ -569,6 +679,7 @@ func (m Model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pending = 0
 		if op == 'g' && msg.String() == "g" {
 			m.send(tea.KeyCtrlHome)
+			m.scrollVisual()
 		}
 		return m, nil
 	}
@@ -578,6 +689,7 @@ func (m Model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.applyMotion(msg.String()) {
+		m.scrollVisual() // keep the Visual window following the cursor
 		return m, nil
 	}
 
@@ -702,7 +814,7 @@ func (m *Model) visualYank() {
 	if m.visualLine {
 		text = strings.Trim(text, "\n")
 	}
-	m.register, m.regLinewise = text, m.visualLine
+	m.setYank(text, m.visualLine)
 	r, c := rowColOf(runes, start)
 	m.moveTo(r, c)
 }
@@ -792,49 +904,136 @@ var (
 // numbers + width-aware soft wrap + a scrolled window that keeps the cursor
 // visible. Editing is impossible while selecting, so the simpler renderer can't
 // drift from the real buffer.
-func (m Model) visualView() string {
+// vseg is one wrapped visual row of the Visual-mode renderer: a rune range of
+// a logical line.
+type vseg struct {
+	lineIdx    int // logical line
+	start, end int // rune range within the line
+	first      bool
+}
+
+// visualLayout wraps every logical line to the Visual view's content width,
+// returning the segments and the index of the one holding the cursor.
+func (m Model) visualLayout() (segs []vseg, cursorSeg int) {
 	lines := strings.Split(m.ta.Value(), "\n")
 	curRow, curCol := m.cursorPos()
-	_, selStart, selCut := m.visualSpan()
-
-	height := m.ta.Height()
-	if height <= 0 {
-		height = 10
-	}
-	gutterW := len(fmt.Sprintf("%d", len(lines))) + 2
-	contentW := m.width - gutterW
+	contentW := m.width - visualGutterWidth(len(lines))
 	if contentW < 8 {
 		contentW = 8
 	}
-
-	// Lay every logical line out into wrapped segments, tracking which visual
-	// row holds the cursor so the window can follow it.
-	type seg struct {
-		lineIdx    int // logical line
-		start, end int // rune range within the line
-		first      bool
-	}
-	var segs []seg
-	cursorSeg := 0
 	for li, line := range lines {
 		parts := wrapWidths([]rune(line), contentW)
 		for si, p := range parts {
-			s := seg{lineIdx: li, start: p[0], end: p[1], first: si == 0}
+			s := vseg{lineIdx: li, start: p[0], end: p[1], first: si == 0}
 			if li == curRow && curCol >= p[0] && (curCol < p[1] || si == len(parts)-1) {
 				cursorSeg = len(segs)
 			}
 			segs = append(segs, s)
 		}
 	}
+	return segs, cursorSeg
+}
 
-	// Scroll: keep the cursor's row inside the window.
-	top := 0
-	if cursorSeg >= height {
+func visualGutterWidth(lineCount int) int {
+	return len(fmt.Sprintf("%d", lineCount)) + 2
+}
+
+// visualHeight is the Visual window height (the textarea's row count).
+func (m Model) visualHeight() int {
+	if h := m.ta.Height(); h > 0 {
+		return h
+	}
+	return 10
+}
+
+// syncVisualTop anchors the Visual window to the textarea's current viewport
+// by reading the line-number gutter off its render, so entering Visual mode
+// doesn't jump the view. Without a parsable gutter the cursor clamp in
+// scrollVisual decides alone.
+func (m *Model) syncVisualTop() {
+	for k, row := range strings.Split(m.ta.View(), "\n") {
+		n, ok := rowLineNumber(row, m.ta.ShowLineNumbers)
+		if !ok {
+			continue // a soft-wrap continuation row; the next row is numbered
+		}
+		segs, _ := m.visualLayout()
+		for i, s := range segs {
+			if s.lineIdx == n-1 && s.first {
+				m.visualTop = i - k
+				return
+			}
+		}
+		return
+	}
+}
+
+// scrollVisual keeps the cursor segment inside the Visual window, scrolling
+// minimally like the textarea's own viewport does.
+func (m *Model) scrollVisual() {
+	segs, cursorSeg := m.visualLayout()
+	h := m.visualHeight()
+	if maxTop := len(segs) - h; m.visualTop > maxTop {
+		m.visualTop = maxTop
+	}
+	if m.visualTop < 0 {
+		m.visualTop = 0
+	}
+	if cursorSeg < m.visualTop {
+		m.visualTop = cursorSeg
+	} else if cursorSeg >= m.visualTop+h {
+		m.visualTop = cursorSeg - h + 1
+	}
+}
+
+// highlightVisualSeg applies the language's highlighting to one Visual-mode
+// segment AFTER the selection/cursor styling: the highlighter is escape-aware
+// and re-asserts the selection background after each styled token — the same
+// ambient-SGR mechanism that protects the cursor-line background in normal
+// rendering. states carries the markdown block context per logical line.
+func (m Model) highlightVisualSeg(content string, states []lineState, lineIdx int) string {
+	switch strings.ToLower(m.lang) {
+	case "markdown", "md":
+		st := mdState{cur: states[lineIdx]}
+		return highlightMarkdownRow(content, &st)
+	case "go", "golang", "python", "py":
+		rules, _ := fenceRules(strings.ToLower(m.lang))
+		inBlock := false
+		return highlightLine(content, rules, &inBlock)
+	}
+	return content
+}
+
+func (m Model) visualView() string {
+	lines := strings.Split(m.ta.Value(), "\n")
+	curRow, curCol := m.cursorPos()
+	_, selStart, selCut := m.visualSpan()
+
+	height := m.visualHeight()
+	gutterW := visualGutterWidth(len(lines))
+	segs, cursorSeg := m.visualLayout()
+
+	// The window was anchored on entry and scrolled by updateVisual; clamp
+	// defensively (m is a copy here, so this can't drift the stored state).
+	top := m.visualTop
+	if maxTop := len(segs) - height; top > maxTop {
+		top = maxTop
+	}
+	if top < 0 {
+		top = 0
+	}
+	if cursorSeg < top {
+		top = cursorSeg
+	} else if cursorSeg >= top+height {
 		top = cursorSeg - height + 1
 	}
 	bottom := top + height
 	if bottom > len(segs) {
 		bottom = len(segs)
+	}
+
+	var states []lineState
+	if l := strings.ToLower(m.lang); l == "markdown" || l == "md" {
+		states = mdScanBuffer(m.ta.Value())
 	}
 
 	flatStarts := flatLineStarts(lines)
@@ -849,10 +1048,11 @@ func (m Model) visualView() string {
 			gutter = fmt.Sprintf(" %*d ", gutterW-2, s.lineIdx+1)
 		}
 		b.WriteString(visualGutterStyle.Render(gutter))
-		b.WriteString(renderSelSegment(
+		content := renderSelSegment(
 			[]rune(lines[s.lineIdx]), s.start, s.end, flatStarts[s.lineIdx],
 			selStart, selCut, s.lineIdx == curRow, curCol,
-		))
+		)
+		b.WriteString(m.highlightVisualSeg(content, states, s.lineIdx))
 	}
 	// Pad to the textarea's height so the surrounding layout doesn't shift.
 	for i := bottom - top; i < height; i++ {
@@ -999,8 +1199,7 @@ func (m *Model) yankLines(n int) {
 	if end > len(lines) {
 		end = len(lines)
 	}
-	m.register = strings.Join(lines[r:end], "\n")
-	m.regLinewise = true
+	m.setYank(strings.Join(lines[r:end], "\n"), true)
 }
 
 // pasteCmd handles p/P: paste the register (count times); with an empty

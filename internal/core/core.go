@@ -12,6 +12,7 @@ package core
 
 import (
 	"context"
+	"path"
 	"sort"
 	"strings"
 
@@ -69,6 +70,48 @@ func (s *Service) ListNotes() ([]NoteMeta, error) {
 	}
 	return out, nil
 }
+
+// TreeEntry is one node of the vault's on-disk structure: a directory or a
+// markdown note. Paths are vault-relative and "/"-separated; Name is the
+// display name (the base name, without ".md" for notes), so file-tree UIs
+// mirror the learner's real layout.
+type TreeEntry struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+	Dir  bool   `json:"dir"`
+}
+
+// Tree returns the vault's file structure — every directory (including empty
+// ones) and every note — sorted by path.
+func (s *Service) Tree() ([]TreeEntry, error) {
+	notes, err := s.vault.List()
+	if err != nil {
+		return nil, err
+	}
+	dirs, err := s.vault.Dirs()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TreeEntry, 0, len(dirs)+len(notes))
+	for _, d := range dirs {
+		out = append(out, TreeEntry{Path: d, Name: path.Base(d), Dir: true})
+	}
+	for _, n := range notes {
+		name := strings.TrimSuffix(path.Base(n.RelPath), path.Ext(n.RelPath))
+		out = append(out, TreeEntry{Path: n.RelPath, Name: name})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out, nil
+}
+
+// Delete removes a note, or a directory and everything in it.
+func (s *Service) Delete(path string) error { return s.vault.Delete(path) }
+
+// Rename moves a note or directory to a new vault-relative path.
+func (s *Service) Rename(oldPath, newPath string) error { return s.vault.Rename(oldPath, newPath) }
+
+// MakeDir creates a directory, so structure can be laid out before notes exist.
+func (s *Service) MakeDir(path string) error { return s.vault.MakeDir(path) }
 
 // OpenNote loads a single note by its vault-relative path.
 func (s *Service) OpenNote(path string) (Note, error) {

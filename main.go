@@ -37,15 +37,14 @@ func main() {
 }
 
 func run() error {
-	// Subcommand dispatch: "serve" launches the web UI, "notes" the vault TUI;
-	// anything else is the classic coding TUI. We peel the subcommand off os.Args
-	// before flag parsing so each mode owns its own flag set.
+	// Subcommand dispatch: "serve" launches the web UI, "check" the provider
+	// diagnostic; anything else is the TUI (-vault / -tutor pick the mode). We
+	// peel the subcommand off os.Args before flag parsing so each mode owns
+	// its own flag set.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "serve":
 			return runServe(os.Args[2:])
-		case "notes":
-			return runNotes(os.Args[2:])
 		case "check":
 			return runCheck(os.Args[2:])
 		}
@@ -67,11 +66,20 @@ func runTUI() error {
 	var (
 		cfgPath   = flag.String("config", "config.toml", "path to config file")
 		topicFlag = flag.String("topic", "", "topic to learn (skips the startup prompt)")
-		currFlag  = flag.Bool("curriculum", false, "start in guided curriculum mode")
 		vimFlag   = flag.Bool("vim", false, "force Vim keybindings in the editor")
 		defFlag   = flag.Bool("default", false, "force default (non-Vim) keybindings")
+		tutorFlag = flag.Bool("tutor", false, "start in the coding tutor's curriculum, skipping the wizard")
+		vaultFlag = flag.Bool("vault", false, "start in the note-vault mode")
 	)
+	flag.BoolVar(tutorFlag, "t", false, "shorthand for -tutor")
+	flag.BoolVar(vaultFlag, "v", false, "shorthand for -vault")
 	flag.Parse()
+	if *tutorFlag && *vaultFlag {
+		return fmt.Errorf("--tutor and --vault are mutually exclusive")
+	}
+	if flag.NArg() > 0 {
+		return fmt.Errorf("unknown argument %q (subcommands: serve, check; -vault/-tutor pick the TUI mode)", flag.Arg(0))
+	}
 
 	cfg, wd, err := loadConfig(*cfgPath)
 	if err != nil {
@@ -90,8 +98,15 @@ func runTUI() error {
 		return err
 	}
 	deps.Topic = *topicFlag
-	deps.Curriculum = *currFlag
-	return runShell(tui.SwitchToTutor, deps, svc, cfg)
+	// -tutor skips the wizard straight into the curriculum (a bare `meari`
+	// keeps it for first-time setup); the vault entry also primes the
+	// curriculum so :tutor hands off to a resumed session.
+	deps.Curriculum = *tutorFlag || *vaultFlag
+	start := tui.SwitchToTutor
+	if *vaultFlag {
+		start = tui.SwitchToVault
+	}
+	return runShell(start, deps, svc, cfg)
 }
 
 // buildDeps constructs the shared engine both TUIs use — the tutor, draft store,
@@ -263,34 +278,4 @@ func runCheck(args []string) error {
 	}
 	fmt.Printf("✓ chat round-trip OK in %s\n", dur.Round(time.Millisecond))
 	return nil
-}
-
-// runNotes starts the vault terminal UI over the same vault and tutor as the web
-// UI, sharing the core engine.
-func runNotes(args []string) error {
-	fs := flag.NewFlagSet("notes", flag.ExitOnError)
-	cfgPath := fs.String("config", "config.toml", "path to config file")
-	vimFlag := fs.Bool("vim", false, "force Vim keybindings in the editor")
-	defFlag := fs.Bool("default", false, "force default (non-Vim) keybindings")
-	_ = fs.Parse(args)
-
-	cfg, wd, err := loadConfig(*cfgPath)
-	if err != nil {
-		return err
-	}
-	if *vimFlag {
-		cfg.Editor.Keybindings = "vim"
-	}
-	if *defFlag {
-		cfg.Editor.Keybindings = "default"
-	}
-
-	deps, svc, err := buildDeps(cfg, wd, *cfgPath)
-	if err != nil {
-		return err
-	}
-	// Start in the vault; :tutor hands off to the coding TUI (resuming any
-	// saved curriculum session).
-	deps.Curriculum = true
-	return runShell(tui.SwitchToVault, deps, svc, cfg)
 }

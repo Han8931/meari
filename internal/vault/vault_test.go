@@ -56,6 +56,23 @@ func TestParseNote_NoFrontmatter(t *testing.T) {
 	}
 }
 
+func TestParseNote_InvalidFrontmatterKeptInBody(t *testing.T) {
+	// Hand-written headers like "tags:git" (no space after the colon) are a
+	// YAML scalar, not a map. The note must still load — block kept in the
+	// body, title from the filename — instead of failing the whole vault.
+	raw := []byte("---\ntags:git\n---\n\nbranching basics\n")
+	n, err := ParseNote("Git/Branching.md", raw)
+	if err != nil {
+		t.Fatalf("ParseNote: %v", err)
+	}
+	if n.Title != "Branching" {
+		t.Fatalf("title should fall back to filename, got %q", n.Title)
+	}
+	if !strings.Contains(n.Body, "tags:git") || !strings.Contains(n.Body, "branching basics") {
+		t.Fatalf("body should keep the whole file, got %q", n.Body)
+	}
+}
+
 func TestParseNote_TitleFallsBackToFilename(t *testing.T) {
 	n, err := ParseNote("x/My File.md", []byte("no heading here\n"))
 	if err != nil {

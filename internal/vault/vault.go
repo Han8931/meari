@@ -71,7 +71,11 @@ var frontmatterRE = regexp.MustCompile(`(?s)\A---\r?\n(.*?)\r?\n---\r?\n?`)
 
 // ParseNote parses raw file bytes into a Note. relPath records where the note
 // lives relative to the vault root. A file with no frontmatter is still a valid
-// note: its whole content becomes the body.
+// note: its whole content becomes the body. So is a file whose frontmatter
+// block isn't valid YAML — vaults pointed at pre-existing notes (vault.dir in
+// config) contain hand-written headers like "tags:git" (no space, a YAML
+// scalar, not a map); those notes keep the block in their body, Obsidian-style,
+// rather than failing the whole vault.
 func ParseNote(relPath string, raw []byte) (Note, error) {
 	n := Note{RelPath: relPath}
 	text := string(raw)
@@ -79,7 +83,9 @@ func ParseNote(relPath string, raw []byte) (Note, error) {
 	if m := frontmatterRE.FindStringSubmatch(text); m != nil {
 		var fm map[string]any
 		if err := yaml.Unmarshal([]byte(m[1]), &fm); err != nil {
-			return Note{}, fmt.Errorf("parse frontmatter in %s: %w", relPath, err)
+			n.Body = strings.TrimLeft(text, "\n")
+			n.Title = titleFromBodyOrPath(n.Body, relPath)
+			return n, nil
 		}
 		n.ID = stringField(fm, "id")
 		n.Title = stringField(fm, "title")

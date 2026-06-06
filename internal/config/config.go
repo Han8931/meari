@@ -8,6 +8,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -18,11 +19,21 @@ type Config struct {
 	Editor     EditorConfig     `toml:"editor"`
 	Navigation NavigationConfig `toml:"navigation"`
 	UI         UIConfig         `toml:"ui"`
+	Vault      VaultConfig      `toml:"vault"`
 
 	// Paths are derived at load time, not read from the file.
 	WorkspaceDir string `toml:"-"`
 	DataDir      string `toml:"-"`
-	VaultDir     string `toml:"-"` // the learner's markdown note vault
+	VaultDir     string `toml:"-"` // resolved note-vault dir (see VaultConfig.Dir)
+}
+
+// VaultConfig locates the learner's markdown note vault.
+type VaultConfig struct {
+	// Dir is where the notes live, so the vault can sit outside the meari
+	// directory (e.g. an existing Obsidian vault). "~/" expands to the home
+	// directory; a relative path is rooted at the meari base dir. Empty means
+	// the default <baseDir>/vault.
+	Dir string `toml:"dir"`
 }
 
 // AIConfig selects the model backend. All providers are reached through the
@@ -124,7 +135,11 @@ func Load(path, baseDir string) (Config, error) {
 
 	cfg.WorkspaceDir = filepath.Join(baseDir, "workspace")
 	cfg.DataDir = filepath.Join(baseDir, "data")
-	cfg.VaultDir = filepath.Join(baseDir, "vault")
+	vaultDir, err := resolveVaultDir(cfg.Vault.Dir, baseDir)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.VaultDir = vaultDir
 
 	// Normalize unknown values back to safe defaults.
 	if cfg.Editor.Keybindings != "vim" && cfg.Editor.Keybindings != "default" {
@@ -146,6 +161,26 @@ func Load(path, baseDir string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// resolveVaultDir turns the configured vault dir into an absolute path:
+// "~/..." expands to the home directory, a relative path is rooted at baseDir,
+// and empty falls back to the default <baseDir>/vault.
+func resolveVaultDir(dir, baseDir string) (string, error) {
+	if dir == "" {
+		return filepath.Join(baseDir, "vault"), nil
+	}
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, strings.TrimPrefix(dir[1:], "/")), nil
+	}
+	if !filepath.IsAbs(dir) {
+		return filepath.Join(baseDir, dir), nil
+	}
+	return filepath.Clean(dir), nil
 }
 
 func clampInt(v, lo, hi int) int {
@@ -220,6 +255,13 @@ layout = "vertical"
 # chat_percent = 30
 # Start with the left pane folded away (toggle live with :fold).
 # sidebar_folded = false
+
+[vault]
+# dir is where your markdown notes live, so the vault can sit outside the
+# meari directory (e.g. an existing Obsidian vault). "~/" expands to your
+# home; a relative path is rooted at the meari directory. Unset keeps the
+# default "vault" folder next to meari.
+# dir = "~/notes"
 `
 
 // EnsureFile writes the default config template to path if it does not yet

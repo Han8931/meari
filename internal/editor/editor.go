@@ -17,6 +17,8 @@
 package editor
 
 import (
+	"slices"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -100,8 +102,12 @@ type Model struct {
 
 	// Visual-mode selection: the anchor is the position where v/V was pressed;
 	// the selection spans anchor..cursor. visualLine marks linewise mode (V).
+	// visualTop is the hand-rolled Visual view's first visible segment,
+	// anchored to the textarea's viewport on entry and scrolled minimally so
+	// the view never jumps.
 	anchorRow, anchorCol int
 	visualLine           bool
+	visualTop            int
 
 	// undo/redo snapshots ('u' and Ctrl-R in Normal mode). One snapshot is
 	// taken before each mutating command, and once on Insert entry so a whole
@@ -118,6 +124,12 @@ type Model struct {
 	lastFindOp rune
 	lastFindCh rune
 
+	// jumps is the Vim jumplist: origins recorded by jump commands (G, {, },
+	// searches). Ctrl-O walks back through it, Tab (what terminals send for
+	// Ctrl-I) forward. jumpIdx == len(jumps) means "at the live position".
+	jumps   []jumpPos
+	jumpIdx int
+
 	// searchMode marks the command line as a / search; lastSearch feeds n/N.
 	searchMode bool
 	lastSearch string
@@ -125,6 +137,12 @@ type Model struct {
 	// Command-line history (↑/↓ in the ":" and "/" prompts).
 	exHist     CmdHistory
 	searchHist CmdHistory
+
+	// Tab completion for the ":" line. globalCmds are the parent's commands
+	// (the ones runCommand forwards via RunCommandMsg), completed alongside
+	// the editor's own; see WithGlobalCmds.
+	cmdComp    CmdCompleter
+	globalCmds []string
 
 	action Action
 	done   bool
@@ -162,6 +180,13 @@ func New(starter string, vim bool, save SaveFunc) Model {
 	if !vim {
 		m.mode = modeInsert
 	}
+	return m
+}
+
+// WithGlobalCmds registers the parent's ex-commands so the ":" line can
+// Tab-complete them too (on Enter they're dispatched via RunCommandMsg).
+func (m Model) WithGlobalCmds(names []string) Model {
+	m.globalCmds = names
 	return m
 }
 
@@ -293,6 +318,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				m.insertNewlineIndented()
 				return m, nil
+			case "alt+v":
+				return m.insertClipboard()
 			case "}":
 				m.electricClose()
 			}
@@ -306,6 +333,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.ta, cmd = m.ta.Update(msg)
 	return m, cmd
+}
+
+// insertClipboard pastes the system clipboard at the cursor (Alt+V).
+func (m Model) insertClipboard() (tea.Model, tea.Cmd) {
+	s, err := pasteFromSystem()
+	if err != nil || s == "" {
+		m.status = "clipboard is empty"
+		return m, nil
+	}
+	if m.vim {
+		m.pushUndo()
+	}
+	m.ta.InsertString(s)
+	return m, nil
 }
 
 // finish records the terminal action and emits a DoneMsg for the program (or
@@ -324,6 +365,25 @@ func (m Model) updateVim(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.finish(ActionSubmit)
 	case "ctrl+q":
 		return m.finish(ActionQuit)
+	}
+
+	if m.mode != modeCommand {
+		// Alt+V pastes the system clipboard at the cursor in any buffer mode;
+		// macOS Option+V arrives as "√", claimed only in Normal mode so a √
+		// can still be typed into a note. (Cmd+V never reaches the app — the
+		// terminal intercepts it and delivers the text as a bracketed paste,
+		// handled just below.)
+		if msg.String() == "alt+v" || (msg.String() == "√" && m.mode == modeNormal) {
+			return m.insertClipboard()
+		}
+		// A bracketed paste (terminal Cmd+V / middle click) outside Insert
+		// mode must land literally in the buffer — fed key-by-key into Normal
+		// mode it would execute as Vim commands.
+		if msg.Paste && m.mode != modeInsert {
+			m.pushUndo()
+			m.ta.InsertString(string(msg.Runes))
+			return m, nil
+		}
 	}
 
 	switch m.mode {
@@ -389,6 +449,13 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Jump commands record their origin in the jumplist (Ctrl-O / Ctrl-I),
+	// once per command even when a count repeats the motion.
+	switch key {
+	case "G", "{", "}":
+		m.recordJump(m.curJumpPos())
+	}
+
 	// Motions are shared with Visual mode; a count repeats them.
 	if m.applyMotion(key) {
 		for n := m.takeCount() - 1; n > 0; n-- {
@@ -403,6 +470,12 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.undo()
 	case "ctrl+r":
 		m.redo()
+
+	// --- jumplist ---
+	case "ctrl+o":
+		m.jumpBack()
+	case "tab": // terminals send Ctrl-I as Tab
+		m.jumpForward()
 
 	// --- char find & repeat ---
 	case "f", "F", "t", "T":
@@ -432,11 +505,15 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchHist.Open()
 		return m, textinput.Blink
 	case "n":
-		if !m.search(m.lastSearch, 1) {
+		if from := m.curJumpPos(); m.search(m.lastSearch, 1) {
+			m.recordJump(from)
+		} else {
 			m.status = "pattern not found: " + m.lastSearch
 		}
 	case "N":
-		if !m.search(m.lastSearch, -1) {
+		if from := m.curJumpPos(); m.search(m.lastSearch, -1) {
+			m.recordJump(from)
+		} else {
 			m.status = "pattern not found: " + m.lastSearch
 		}
 
@@ -633,7 +710,23 @@ func (m *Model) cmdHist() *CmdHistory {
 }
 
 func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type != tea.KeyTab && msg.Type != tea.KeyShiftTab {
+		m.cmdComp.Reset() // any other key ends the completion cycle
+	}
 	switch msg.Type {
+	case tea.KeyTab, tea.KeyShiftTab:
+		if m.searchMode {
+			return m, nil // "/" searches text; there's nothing to complete
+		}
+		dir := 1
+		if msg.Type == tea.KeyShiftTab {
+			dir = -1
+		}
+		if s, ok := m.cmdComp.Next(m.cmd.Value(), m.exCmdNames(), dir); ok {
+			m.cmd.SetValue(s)
+			m.cmd.CursorEnd()
+		}
+		return m, nil
 	case tea.KeyUp:
 		if s, ok := m.cmdHist().Prev(m.cmd.Value()); ok {
 			m.cmd.SetValue(s)
@@ -660,7 +753,9 @@ func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cmd.Prompt = ":"
 			m.searchMode = false
 			m.lastSearch = m.cmd.Value()
-			if !m.search(m.lastSearch, 1) {
+			if from := m.curJumpPos(); m.search(m.lastSearch, 1) {
+				m.recordJump(from)
+			} else {
 				m.status = "pattern not found: " + m.lastSearch
 			}
 			return m, nil
@@ -670,6 +765,21 @@ func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.cmd, cmd = m.cmd.Update(msg)
 	return m, cmd
+}
+
+// editorExCmds are the editor's own ex-commands, for Tab completion. They
+// mirror the cases in runCommand; the parent's commands (WithGlobalCmds) are
+// completed alongside them.
+var editorExCmds = []string{"config", "q", "quit", "submit", "w", "wq", "write"}
+
+// exCmdNames merges the editor's commands with the parent's for completion,
+// sorted so the Tab cycle runs alphabetically.
+func (m Model) exCmdNames() []string {
+	names := make([]string, 0, len(editorExCmds)+len(m.globalCmds))
+	names = append(names, editorExCmds...)
+	names = append(names, m.globalCmds...)
+	sort.Strings(names)
+	return slices.Compact(names) // "config" is in both lists
 }
 
 // runCommand dispatches the typed ex-command. ":submit" checks the solution,
@@ -721,7 +831,22 @@ func (m Model) View() string {
 	} else {
 		m.ta.Cursor.Style = insertCursor
 	}
-	return highlightSyntax(m.lang, m.ta.View()) + "\n" + m.statusLine()
+	return m.highlightView(m.ta.View()) + "\n" + m.statusLine()
+}
+
+// highlightView styles the rendered buffer for the editor pane. The markdown
+// pass needs to know whether rows begin with the textarea's line-number
+// gutter, so it can strip it before classifying a row — and never strip real
+// digits when the gutter is off.
+func (m Model) highlightView(s string) string {
+	switch strings.ToLower(m.lang) {
+	case "markdown", "md":
+		// The buffer scan anchors fence/quote state to real line numbers, so
+		// a row's styling never depends on where the viewport is scrolled.
+		return highlightMarkdown(s, m.ta.ShowLineNumbers, mdScanBuffer(m.ta.Value()))
+	default:
+		return highlightSyntax(m.lang, s)
+	}
 }
 
 // Highlight applies lang's syntax colors to plain source text. Exported so
@@ -733,10 +858,17 @@ func highlightSyntax(lang, s string) string {
 	switch strings.ToLower(lang) {
 	case "go", "golang":
 		return highlightCode(s, goSyntax())
-	case "physics", "plain", "text":
-		return s
-	default:
+	case "python", "py":
 		return highlightCode(s, pythonSyntax())
+	case "markdown", "md":
+		return highlightMarkdown(s, false, nil)
+	default:
+		// Prose and unknown languages pass through untouched. Highlighting
+		// markdown notes with code rules bolds ordinary words ("for", "and",
+		// "import"…) and the injected resets punch holes in the textarea's
+		// cursor-line background — the flickering artifacts that look like
+		// leftover text when the cursor moves.
+		return s
 	}
 }
 
@@ -783,22 +915,62 @@ func highlightCode(s string, rules syntaxRules) string {
 	var b strings.Builder
 	inBlock := false
 	for _, line := range lines {
+		// Never style through the newline: lipgloss treats "text\n" as a
+		// two-line block and pads the empty second line to the first's width,
+		// injecting phantom spaces that shift the next row sideways.
+		nl := ""
+		if strings.HasSuffix(line, "\n") {
+			nl, line = "\n", line[:len(line)-1]
+		}
 		b.WriteString(highlightLine(line, rules, &inBlock))
+		b.WriteString(nl)
 	}
 	return b.String()
 }
 
+// updateAmbient folds the SGR sequences inside chunk into the ambient state:
+// a reset clears it, any other SGR accumulates. The ambient state is what the
+// surrounding renderer (the textarea) expects to stay active — most notably
+// the cursor-line background — so highlightLine re-asserts it after every
+// styled token, whose lipgloss rendering ends in a reset.
+func updateAmbient(chunk string, ambient *string) {
+	for i := 0; i < len(chunk); {
+		end := ansiEscapeEnd(chunk, i)
+		if end == i {
+			i++
+			continue
+		}
+		seq := chunk[i:end]
+		if strings.HasSuffix(seq, "m") { // SGR only; ignore cursor moves etc.
+			if seq == "\x1b[0m" || seq == "\x1b[m" {
+				*ambient = ""
+			} else {
+				*ambient += seq
+			}
+		}
+		i = end
+	}
+}
+
 func highlightLine(line string, rules syntaxRules, inBlock *bool) string {
 	var b strings.Builder
+	// styled paints a chunk and restores the ambient SGR state its trailing
+	// reset wiped out (folding the chunk's own sequences in first).
+	ambient := ""
+	styled := func(chunk string, style lipgloss.Style) {
+		updateAmbient(chunk, &ambient)
+		b.WriteString(style.Render(chunk))
+		b.WriteString(ambient)
+	}
 	for i := 0; i < len(line); {
 		if *inBlock {
 			end := strings.Index(line[i:], rules.blockEnd)
 			if end < 0 {
-				b.WriteString(commentStyle.Render(line[i:]))
+				styled(line[i:], commentStyle)
 				return b.String()
 			}
 			end += i + len(rules.blockEnd)
-			b.WriteString(commentStyle.Render(line[i:end]))
+			styled(line[i:end], commentStyle)
 			i = end
 			*inBlock = false
 			continue
@@ -807,10 +979,11 @@ func highlightLine(line string, rules syntaxRules, inBlock *bool) string {
 		if raw, word, end, ok := readIdentToken(line, i); ok {
 			switch {
 			case rules.keywords[word]:
-				b.WriteString(renderToken(raw, keywordStyle))
+				b.WriteString(renderToken(raw, keywordStyle, &ambient))
 			case rules.types[word]:
-				b.WriteString(renderToken(raw, typeStyle))
+				b.WriteString(renderToken(raw, typeStyle, &ambient))
 			default:
+				updateAmbient(raw, &ambient)
 				b.WriteString(raw)
 			}
 			i = end
@@ -818,6 +991,7 @@ func highlightLine(line string, rules syntaxRules, inBlock *bool) string {
 		}
 
 		if escEnd := ansiEscapeEnd(line, i); escEnd > i {
+			updateAmbient(line[i:escEnd], &ambient)
 			b.WriteString(line[i:escEnd])
 			i = escEnd
 			continue
@@ -826,31 +1000,31 @@ func highlightLine(line string, rules syntaxRules, inBlock *bool) string {
 		if rules.blockStart != "" && strings.HasPrefix(line[i:], rules.blockStart) {
 			end := strings.Index(line[i+len(rules.blockStart):], rules.blockEnd)
 			if end < 0 {
-				b.WriteString(commentStyle.Render(line[i:]))
+				styled(line[i:], commentStyle)
 				*inBlock = true
 				return b.String()
 			}
 			end += i + len(rules.blockStart) + len(rules.blockEnd)
-			b.WriteString(commentStyle.Render(line[i:end]))
+			styled(line[i:end], commentStyle)
 			i = end
 			continue
 		}
 
 		if isLineComment(line[i:], rules.lineComments) {
-			b.WriteString(commentStyle.Render(line[i:]))
+			styled(line[i:], commentStyle)
 			return b.String()
 		}
 
 		if line[i] == '"' || line[i] == '\'' || line[i] == '`' {
 			end := stringEnd(line, i)
-			b.WriteString(stringStyle.Render(line[i:end]))
+			styled(line[i:end], stringStyle)
 			i = end
 			continue
 		}
 
 		if isDigit(line[i]) {
 			end := numberEnd(line, i)
-			b.WriteString(numberStyle.Render(line[i:end]))
+			styled(line[i:end], numberStyle)
 			i = end
 			continue
 		}
@@ -893,10 +1067,14 @@ func readIdentToken(s string, i int) (raw, word string, end int, ok bool) {
 	return rb.String(), wb.String(), len(s), true
 }
 
-func renderToken(raw string, style lipgloss.Style) string {
+// renderToken styles a token's text segments, passing its embedded escape
+// sequences through and re-asserting the ambient SGR state after each styled
+// segment (whose lipgloss rendering ends in a reset).
+func renderToken(raw string, style lipgloss.Style, ambient *string) string {
 	var b strings.Builder
 	for i := 0; i < len(raw); {
 		if escEnd := ansiEscapeEnd(raw, i); escEnd > i {
+			updateAmbient(raw[i:escEnd], ambient)
 			b.WriteString(raw[i:escEnd])
 			i = escEnd
 			continue
@@ -909,6 +1087,7 @@ func renderToken(raw string, style lipgloss.Style) string {
 			j++
 		}
 		b.WriteString(style.Render(raw[i:j]))
+		b.WriteString(*ambient)
 		i = j
 	}
 	return b.String()
@@ -987,7 +1166,14 @@ func isIdentPart(c byte) bool {
 
 func (m Model) statusLine() string {
 	if m.mode == modeCommand {
-		return m.cmd.View()
+		line := m.cmd.View()
+		if h := m.cmdComp.Hint(); h != "" {
+			line += "   " + hintStyle.Render(h)
+		}
+		if m.width > 0 {
+			line = lipgloss.NewStyle().MaxWidth(m.width).Render(line)
+		}
+		return line
 	}
 
 	var left string
