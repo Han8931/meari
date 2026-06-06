@@ -151,6 +151,11 @@ type Model struct {
 	// Vim window-command style.
 	pendingWindow bool
 
+	// pendingLeader is set after "," in the editor's Normal mode; it starts a
+	// leader chord. "n" folds the sidebar; any other key replays the swallowed
+	// "," to the editor so its repeat-find binding still works.
+	pendingLeader bool
+
 	// Global ex-command line (":topic", ":clear", ":progress"). cmdMode shows the
 	// cmdLine input in the status row; it's opened with ":" from the sidebar and
 	// also driven by RunCommandMsg forwarded from the editor's own command line.
@@ -429,6 +434,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.nextChallenge()
 	}
 
+	// A leader chord lives for exactly one keystroke: clear it here so a stray
+	// "," can never carry across a focus change or non-editor key.
+	leader := m.pendingLeader
+	m.pendingLeader = false
+
 	switch m.focus {
 	case paneSidebar:
 		if msg.String() == ":" {
@@ -442,6 +452,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case paneEditor:
+		// Leader chord ",n" folds the sidebar — but only in Vim Normal mode, so
+		// it never disturbs typing or a pending multi-key Vim command.
+		if leader {
+			if msg.String() == "n" {
+				return m.cmdFold()
+			}
+			// Not the fold chord: replay the swallowed "," (its Normal-mode
+			// repeat-find), then deliver the key that followed it.
+			comma := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{','}}
+			tm, _ := m.editor.Update(comma)
+			m.editor = tm.(editor.Model)
+			tm, cmd := m.editor.Update(msg)
+			m.editor = tm.(editor.Model)
+			return m, cmd
+		}
+		if msg.String() == "," && m.editor.NormalMode() {
+			m.pendingLeader = true
+			return m, nil
+		}
 		tm, cmd := m.editor.Update(msg)
 		m.editor = tm.(editor.Model)
 		return m, cmd

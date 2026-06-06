@@ -69,6 +69,14 @@ var (
 	// chatBusyStyle renders the in-pane "⠹ tutor thinking…" progress line.
 	chatBusyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("79")).Italic(true)
 
+	// Input-area styles. A dim rule (chatInputRule) separates the transcript
+	// from the typing area, and the "┃ " prompt prefix is painted bright cyan
+	// when the pane is focused (matching the "you" badge) and dim when it isn't,
+	// so it's always obvious where typing happens.
+	chatInputRule   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	chatPromptFocus = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
+	chatPromptBlur  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
 	// chatCodeGutter is the "│ " bar marking syntax-highlighted code blocks in
 	// tutor/lesson messages.
 	chatCodeGutter = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))

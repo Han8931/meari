@@ -74,7 +74,9 @@ func (c *chatModel) setCodeLang(lang string) {
 func newChat() chatModel {
 	in := textarea.New()
 	in.Placeholder = "ask the tutor…"
-	in.Prompt = "│ "
+	in.Prompt = "┃ "
+	in.FocusedStyle.Prompt = chatPromptFocus
+	in.BlurredStyle.Prompt = chatPromptBlur
 	in.ShowLineNumbers = false
 	in.CharLimit = 0
 	in.SetHeight(chatInputRows)
@@ -103,10 +105,10 @@ func (c *chatModel) relayout() {
 	if c.h < 7 {
 		inputH = 1 // tiny panes: give the transcript what little there is
 	}
-	c.input.SetWidth(c.w - 2) // room for the "│ " prompt
+	c.input.SetWidth(c.w - 2) // room for the "┃ " prompt
 	c.input.SetHeight(inputH)
 
-	vpH := c.h - inputH
+	vpH := c.h - inputH - 1 // -1 for the separator rule above the input
 	if c.busy != "" {
 		vpH--
 	}
@@ -562,11 +564,21 @@ func pasteChat(c *chatModel) string {
 }
 
 func (c chatModel) view() string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	parts = append(parts, c.vp.View())
 	if c.busy != "" {
 		parts = append(parts, c.busyLine())
 	}
-	parts = append(parts, c.input.View())
+	parts = append(parts, c.inputRule(), c.input.View())
 	return strings.Join(parts, "\n")
+}
+
+// inputRule is the dim horizontal separator drawn between the transcript and
+// the typing area, spanning the pane width.
+func (c chatModel) inputRule() string {
+	w := c.w
+	if w < 1 {
+		w = 1
+	}
+	return chatInputRule.Render(strings.Repeat("─", w))
 }

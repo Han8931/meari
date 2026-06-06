@@ -195,6 +195,13 @@ func (m *Model) SetValue(s string) {
 // Value returns the current buffer contents.
 func (m Model) Value() string { return m.ta.Value() }
 
+// NormalMode reports whether the editor is in Vim Normal mode with no operator
+// or count pending — a safe point for a parent to intercept a leader key (e.g.
+// ",n") without stealing a keystroke that belongs to a multi-key Vim command.
+func (m Model) NormalMode() bool {
+	return m.vim && m.mode == modeNormal && m.pending == 0 && m.count == 0
+}
+
 // SetLanguage selects the syntax highlighter used when rendering the buffer.
 // Empty keeps the historical default: Python.
 func (m *Model) SetLanguage(lang string) {
