@@ -54,6 +54,10 @@ The 3-pane terminal vault: **notes** (left, grouped by subject) │ **editor** (
 - `:new <title>` — create a blank note
 - `:essay` — study the open note: write an answer in the editor, then `:grade` to check
   it; `:answer` reveals a model answer; `:done` ends the study
+- `:backlinks` — toggle the "↩ Linked mentions" panel under the editor, listing the
+  notes whose `[[wikilinks]]` point at the open note (Obsidian-style backlinks)
+- `:tutor` — hand off to the coding tutor without quitting (the coding TUI's `:vault`
+  comes back); the process stays up and your curriculum session resumes
 
 ### Vault in the browser — `meari serve`
 
@@ -149,6 +153,8 @@ type a question and press `Enter` to ask the tutor.
 
 - `:topic <subject>` / `:subject <subject>` — switch subject; no argument opens a
   picker. Keeps your current level.
+- `:vault` — switch to the notes vault (the `meari notes` UI) without quitting; `:tutor`
+  from there switches back, and your coding session resumes where you left off.
 - `:progress` — progress summary (completion bars + activity).
 - `:clear` — clear the chat transcript. `:clear progress` / `:clear drafts` wipe saved
   history / drafts (each confirms first).

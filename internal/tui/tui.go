@@ -96,6 +96,7 @@ type Model struct {
 	height int
 	focus  pane
 	phase  phase
+	exit   SwitchTarget // set by :vault so Run can report a mode switch to the shell
 
 	sidebar    sidebarModel
 	editor     editor.Model
@@ -191,11 +192,40 @@ type Model struct {
 }
 
 // Run constructs the model and runs the full-screen program.
-func Run(d Deps) error {
+// SwitchTarget is how a TUI tells the shell loop (main.runShell) what to do when
+// it exits: quit the process, or hand off to the other TUI.
+type SwitchTarget int
+
+const (
+	StayQuit SwitchTarget = iota
+	SwitchToVault
+	SwitchToTutor
+)
+
+// Outcome is returned by Run/RunVault: where to go next, plus enough of the
+// tutor's session (Topic/Curriculum) to resume it without the setup wizard.
+type Outcome struct {
+	Target     SwitchTarget
+	Topic      string
+	Curriculum bool
+}
+
+func Run(d Deps) (Outcome, error) {
 	m := newModel(d)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	_, err := p.Run()
-	return err
+	final, err := p.Run()
+	out := Outcome{}
+	if fm, ok := final.(Model); ok {
+		// A curriculum session resumes via Curriculum (which restores the exact
+		// topic from saved progress); only a custom-topic session resumes via
+		// Topic. In curriculum mode fm.topic holds the current challenge title,
+		// so it must NOT be used as a resume topic.
+		out = Outcome{Target: fm.exit, Curriculum: fm.curriculum}
+		if !fm.curriculum {
+			out.Topic = fm.topic
+		}
+	}
+	return out, err
 }
 
 func newModel(d Deps) Model {
@@ -674,8 +704,11 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "config":
 		return m, m.openConfig()
+	case "vault", "notes":
+		m.exit = SwitchToVault
+		return m, m.quit() // saves the draft, then the shell loop opens the vault
 	case "learn", "essay", "grade":
-		m.flash(":" + fields[0] + " lives in the learning vault — quit and run `meari notes` (or `meari serve`)")
+		m.flash(":" + fields[0] + " lives in the vault — type :vault to switch to it")
 		return m, nil
 	default:
 		m.flash("unknown command: :" + raw + "  (try :help)")
@@ -917,6 +950,7 @@ func helpView() string {
 		"  :fold              fold/unfold the left tree pane",
 		"  :compact / :wide   shrink/grow the editor (frees chat space)",
 		"  :answer            reveal a model solution for the open challenge",
+		"  :vault             switch to the notes vault (Obsidian-style)",
 		"  :progress          progress summary",
 		"  :copy [code|all]   copy the tutor's last reply / its code / everything",
 		"  :paste             paste the clipboard into the chat input",

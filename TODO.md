@@ -21,7 +21,7 @@ this file tracks concrete, actionable items. Check things off as they land.
 ## Vault & knowledge graph
 
 - [ ] `[[wikilink]]` autocomplete in the editor
-- [ ] Backlinks panel
+- [x] Backlinks panel (vault `:backlinks` — "↩ Linked mentions" under the editor)
 - [ ] Tag support (`#tag` / frontmatter tags) + tag browser in the left pane
 - [ ] Link graph view (start with an ASCII/adjacency summary)
 
@@ -39,6 +39,8 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## Recently done
 
+- [x] `:vault` / `:tutor` — hop between the coding TUI and the notes vault in one
+      process (no relaunch); vault gains an Obsidian-style backlinks panel (`:backlinks`)
 - [x] Go curriculum: added Constants & iota, Recursion, Generics, Sorting, Panic &
       recover, and Number parsing topics (drawn from gobyexample.com)
 - [x] Clickable "▸ Check answer" button in the coding TUI title bar (runs the tests)

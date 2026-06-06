@@ -30,6 +30,7 @@ type VaultModel struct {
 
 	width, height int
 	focus         pane
+	exit          SwitchTarget // set by :tutor so RunVault can report a mode switch
 
 	sidebar sidebarModel
 	editor  editor.Model
@@ -55,10 +56,21 @@ type VaultModel struct {
 	studyMode   bool
 	studyPrompt string
 
+	// Backlinks ("notes that link here") for the open note, shown as a footer
+	// under the editor (Obsidian-style). showBacklinks toggles the panel.
+	backlinks     []core.NoteMeta
+	showBacklinks bool
+
 	// global ex-command line (":" from the notes pane)
 	cmdMode bool
 	cmdLine textinput.Model
 	cmdHist editor.CmdHistory
+
+	// Vim-style chords mirroring the coding TUI: pendingWindow is set after
+	// Ctrl-W (the next h/j/k/l picks a pane by direction); pendingLeader is set
+	// after "," in the editor's Normal mode (",n" folds the sidebar).
+	pendingWindow bool
+	pendingLeader bool
 
 	// editorBias shifts the editor/chat split (":wide" grows the editor,
 	// ":compact" grows the chat), sharing the classic TUI's step/clamp.
@@ -82,12 +94,17 @@ type VaultModel struct {
 	sidebarW, editorW, chatW, contentH int
 }
 
-// RunVault constructs and runs the vault terminal UI over svc.
-func RunVault(svc *core.Service, cfg config.Config) error {
+// RunVault constructs and runs the vault terminal UI over svc. The Outcome tells
+// the shell loop (main.runShell) whether to quit or hand off to the coding TUI.
+func RunVault(svc *core.Service, cfg config.Config) (Outcome, error) {
 	m := newVaultModel(svc, cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	_, err := p.Run()
-	return err
+	final, err := p.Run()
+	out := Outcome{}
+	if fm, ok := final.(VaultModel); ok {
+		out = Outcome{Target: fm.exit}
+	}
+	return out, err
 }
 
 func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
@@ -97,6 +114,7 @@ func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
 		svc:              svc,
 		cfg:              cfg,
 		curPath:          curPath,
+		showBacklinks:    true,
 		sidebarCollapsed: cfg.UI.SidebarFolded,
 		sidebar:          newSidebar(),
 		chat:             newChat(),
@@ -165,8 +183,16 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentTitle = msg.note.Title
 		*m.curPath = msg.note.Path
 		m.editor.SetValue(msg.note.Body)
+		m.backlinks = nil // drop the previous note's backlinks until the fetch returns
 		m.rebuildSidebar()
-		return m, m.setFocus(paneEditor)
+		return m, tea.Batch(m.setFocus(paneEditor), vBacklinksCmd(m.svc, m.current))
+
+	case vBacklinksMsg:
+		if msg.path == m.current {
+			m.backlinks = msg.links
+			m.layout() // the footer height may have changed
+		}
+		return m, nil
 
 	case vGeneratedMsg:
 		m.pending--
@@ -231,17 +257,34 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.cmdMode {
 		return m.updateCmdLine(msg)
 	}
+
+	// Ctrl-W starts a window command; the next key chooses a pane by direction
+	// (Vim window-style), mirroring the coding TUI.
+	if m.pendingWindow {
+		m.pendingWindow = false
+		switch msg.String() {
+		case "h", "left", "k", "up", "shift+tab":
+			return m, m.focusDir(-1)
+		case "l", "right", "j", "down", "tab", "ctrl+w":
+			return m, m.focusDir(1)
+		}
+		return m, nil // unknown window command: ignore, like Vim
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "ctrl+w":
-		// Cycle focus notes -> editor -> chat -> notes (skipping a folded pane).
-		next := pane((int(m.focus) + 1) % 3)
-		if m.sidebarCollapsed && next == paneSidebar {
-			next = paneEditor
-		}
-		return m, m.setFocus(next)
+		// Focus moves via the Vim window chord (Ctrl-W then h/l); bare Tab is left
+		// for the panes (e.g. indenting in the editor).
+		m.pendingWindow = true
+		return m, nil
 	}
+
+	// A leader chord lives for exactly one keystroke: clear it here so a stray
+	// "," can never carry across a focus change or non-editor key.
+	leader := m.pendingLeader
+	m.pendingLeader = false
 
 	switch m.focus {
 	case paneSidebar:
@@ -260,6 +303,25 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case paneEditor:
+		// Leader chord ",n" folds the sidebar — but only in Vim Normal mode, so
+		// it never disturbs typing or a pending multi-key Vim command.
+		if leader {
+			if msg.String() == "n" {
+				return m.cmdFold()
+			}
+			// Not the fold chord: replay the swallowed "," (its Normal-mode
+			// repeat-find), then deliver the key that followed it.
+			comma := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{','}}
+			tm, _ := m.editor.Update(comma)
+			m.editor = tm.(editor.Model)
+			tm, cmd := m.editor.Update(msg)
+			m.editor = tm.(editor.Model)
+			return m, cmd
+		}
+		if msg.String() == "," && m.editor.NormalMode() {
+			m.pendingLeader = true
+			return m, nil
+		}
 		tm, cmd := m.editor.Update(msg)
 		m.editor = tm.(editor.Model)
 		return m, cmd
@@ -279,6 +341,23 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// focusDir moves focus left (d<0) or right (d>0) between panes, clamped to the
+// visible panes — a folded sidebar isn't a target. Mirrors the coding TUI.
+func (m *VaultModel) focusDir(d int) tea.Cmd {
+	lo := int(paneSidebar)
+	if m.sidebarCollapsed {
+		lo = int(paneEditor)
+	}
+	n := int(m.focus) + d
+	if n < lo {
+		n = lo
+	}
+	if n > int(paneChat) {
+		n = int(paneChat)
+	}
+	return m.setFocus(pane(n))
 }
 
 // handleMouse routes wheel events to the pane under the cursor (scrolling never
@@ -423,11 +502,26 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, m.setFocus(paneChat) // land where the pasted text is
 	case "done":
 		return m.endEssay()
+	case "backlinks", "links":
+		m.showBacklinks = !m.showBacklinks
+		m.layout()
+		if m.showBacklinks {
+			m.flash("backlinks panel on")
+			if m.current != "" {
+				return m, vBacklinksCmd(m.svc, m.current)
+			}
+		} else {
+			m.flash("backlinks panel off")
+		}
+		return m, nil
+	case "tutor", "code":
+		m.exit = SwitchToTutor
+		return m, tea.Quit // the shell loop opens the coding TUI
 	case "q", "quit":
 		return m, tea.Quit
 	default:
 		m.flash("unknown command: :" + raw +
-			"  (try :learn · :new · :essay · :grade · :answer · :done · :fold · :compact · :wide · :q)")
+			"  (try :learn · :new · :essay · :grade · :answer · :done · :backlinks · :tutor · :fold · :compact · :wide · :q)")
 		return m, nil
 	}
 }
@@ -736,7 +830,8 @@ func (m *VaultModel) layout() {
 	}
 
 	m.sidebar.setSize(m.sidebarW, m.contentH)
-	m.editor.SetSize(m.editorW, max(1, m.contentH-1-len(m.essayHeaderLines(m.editorW))))
+	reserved := 1 + len(m.essayHeaderLines(m.editorW)) + len(m.backlinkFooterLines(m.editorW))
+	m.editor.SetSize(m.editorW, max(1, m.contentH-reserved))
 	m.chat.setSize(m.chatW, m.contentH)
 }
 
@@ -803,7 +898,35 @@ func (m VaultModel) editorPaneView(w int) string {
 	for _, ln := range m.essayHeaderLines(w) {
 		out += "\n" + promptHeaderStyle.MaxWidth(w).Render(ln)
 	}
-	return out + "\n" + m.editor.View()
+	out += "\n" + m.editor.View()
+	for _, ln := range m.backlinkFooterLines(w) {
+		out += "\n" + ln
+	}
+	return out
+}
+
+// backlinkFooterLines renders the "↩ Linked mentions" panel under the editor for
+// the open note (Obsidian-style). Empty in study mode, when toggled off via
+// :backlinks, or when nothing links here.
+func (m VaultModel) backlinkFooterLines(w int) []string {
+	if m.studyMode || !m.showBacklinks || len(m.backlinks) == 0 {
+		return nil
+	}
+	avail := max(8, w-2)
+	lines := []string{backlinkHeaderStyle.Render(truncate("↩ Linked mentions ("+itoa(len(m.backlinks))+")", avail))}
+	const maxShown = 5
+	for i, n := range m.backlinks {
+		if i >= maxShown {
+			lines = append(lines, hintStyle.Render(truncate("  … +"+itoa(len(m.backlinks)-maxShown)+" more", avail)))
+			break
+		}
+		title := n.Title
+		if title == "" {
+			title = n.Path
+		}
+		lines = append(lines, truncate("  • "+title, avail))
+	}
+	return lines
 }
 
 func (m VaultModel) titleView() string {
@@ -827,10 +950,13 @@ func (m VaultModel) statusView() string {
 	if m.notice != "" && time.Since(m.noticeAt) < noticeTTL {
 		return statusBar.Width(m.width).Render(left + "   " + noticeStyle.Render(m.notice))
 	}
-	hints := "⌃w focus · : cmds · :learn <topic> · enter open · ⌃s save · ⌃c quit"
-	if m.studyMode {
+	hints := "⌃w h·l focus · : cmds · :learn <topic> · enter open · ⌃s save · ⌃c quit"
+	switch {
+	case m.pendingWindow:
+		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
+	case m.studyMode:
 		hints = ":grade check answer · :answer see a model answer · :done finish"
-	} else if m.focus == paneChat {
+	case m.focus == paneChat:
 		hints = "enter send · ⌥o/:copy copy reply · ⌃f/⌃b scroll"
 	}
 	return statusBar.Width(m.width).Render(left + "   " + hintStyle.Render(hints))
@@ -884,6 +1010,10 @@ func itoa(n int) string {
 type (
 	vNotesMsg     struct{ notes []core.NoteMeta }
 	vOpenedMsg    struct{ note core.Note }
+	vBacklinksMsg struct {
+		path  string
+		links []core.NoteMeta
+	}
 	vGeneratedMsg struct{ meta core.NoteMeta }
 	vSavedMsg     struct{ meta core.NoteMeta }
 	vEssayMsg     struct{ res core.EssayResult }
@@ -911,6 +1041,18 @@ func vOpenCmd(svc *core.Service, path string) tea.Cmd {
 			return vErrMsg{kind: "open", err: err}
 		}
 		return vOpenedMsg{note: n}
+	}
+}
+
+// vBacklinksCmd fetches the notes that link to path. Backlinks are advisory, so
+// an error just yields an empty panel rather than a visible failure.
+func vBacklinksCmd(svc *core.Service, path string) tea.Cmd {
+	return func() tea.Msg {
+		links, err := svc.Backlinks(path)
+		if err != nil {
+			return vBacklinksMsg{path: path, links: nil}
+		}
+		return vBacklinksMsg{path: path, links: links}
 	}
 }
 

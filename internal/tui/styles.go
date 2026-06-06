@@ -106,6 +106,8 @@ var (
 	// promptHeaderStyle renders the pinned challenge/essay statement above the
 	// editor, styled like a code comment.
 	promptHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
+	// backlinkHeaderStyle titles the "↩ Linked mentions" panel under the editor.
+	backlinkHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("79")).Bold(true)
 	chatOkStyle       = lipgloss.NewStyle().Foreground(doneColor).Bold(true)             // match the sidebar "done" green
 	chatFailStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("210")).Bold(true) // soft red, easier on the eyes than 203
 )

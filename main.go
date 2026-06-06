@@ -85,26 +85,75 @@ func runTUI() error {
 		cfg.Editor.Keybindings = "default"
 	}
 
-	store, err := drafts.New(cfg.WorkspaceDir)
+	deps, svc, err := buildDeps(cfg, wd, *cfgPath)
 	if err != nil {
 		return err
+	}
+	deps.Topic = *topicFlag
+	deps.Curriculum = *currFlag
+	return runShell(tui.SwitchToTutor, deps, svc, cfg)
+}
+
+// buildDeps constructs the shared engine both TUIs use — the tutor, draft store,
+// progress, and the vault-backed core.Service — so the coding TUI and the vault
+// TUI can hand off to each other (:vault / :tutor) in one process.
+func buildDeps(cfg config.Config, wd, cfgPath string) (tui.Deps, *core.Service, error) {
+	store, err := drafts.New(cfg.WorkspaceDir)
+	if err != nil {
+		return tui.Deps{}, nil, err
 	}
 	prog, err := progress.Load(cfg.DataDir)
 	if err != nil {
-		return err
+		return tui.Deps{}, nil, err
 	}
 	tut := tutor.New(cfg.AI)
-
-	return tui.Run(tui.Deps{
+	v, err := vault.Open(cfg.VaultDir)
+	if err != nil {
+		return tui.Deps{}, nil, err
+	}
+	svc := core.New(v, tut)
+	deps := tui.Deps{
 		Tutor:      tut,
 		Store:      store,
 		Progress:   prog,
 		Cfg:        cfg,
-		Topic:      *topicFlag,
-		Curriculum: *currFlag,
-		ConfigPath: *cfgPath,
+		ConfigPath: cfgPath,
 		BaseDir:    wd,
-	})
+	}
+	return deps, svc, nil
+}
+
+// runShell runs the coding tutor and the vault TUIs in one process. It starts in
+// `start` mode and, each time a TUI exits, either quits or hands off to the other
+// (when the user typed :vault / :tutor), so they feel like one app. The tutor's
+// session (topic/curriculum) is carried back so re-entry skips the setup wizard.
+func runShell(start tui.SwitchTarget, deps tui.Deps, svc *core.Service, cfg config.Config) error {
+	mode := start
+	for {
+		switch mode {
+		case tui.SwitchToTutor:
+			out, err := tui.Run(deps)
+			if err != nil {
+				return err
+			}
+			if out.Target != tui.SwitchToVault {
+				return nil
+			}
+			deps.Topic, deps.Curriculum = out.Topic, out.Curriculum
+			mode = tui.SwitchToVault
+		case tui.SwitchToVault:
+			out, err := tui.RunVault(svc, cfg)
+			if err != nil {
+				return err
+			}
+			if out.Target != tui.SwitchToTutor {
+				return nil
+			}
+			mode = tui.SwitchToTutor
+		default:
+			return nil
+		}
+	}
 }
 
 // runServe starts the local web UI over the same vault and tutor as the TUI.
@@ -225,7 +274,7 @@ func runNotes(args []string) error {
 	defFlag := fs.Bool("default", false, "force default (non-Vim) keybindings")
 	_ = fs.Parse(args)
 
-	cfg, _, err := loadConfig(*cfgPath)
+	cfg, wd, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}
@@ -236,10 +285,12 @@ func runNotes(args []string) error {
 		cfg.Editor.Keybindings = "default"
 	}
 
-	v, err := vault.Open(cfg.VaultDir)
+	deps, svc, err := buildDeps(cfg, wd, *cfgPath)
 	if err != nil {
 		return err
 	}
-	svc := core.New(v, tutor.New(cfg.AI))
-	return tui.RunVault(svc, cfg)
+	// Start in the vault; :tutor hands off to the coding TUI (resuming any
+	// saved curriculum session).
+	deps.Curriculum = true
+	return runShell(tui.SwitchToVault, deps, svc, cfg)
 }
