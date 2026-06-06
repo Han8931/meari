@@ -40,6 +40,14 @@ var (
 	hintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	errStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
 
+	// checkButtonText / checkButton render the clickable "run the tests" control
+	// in the title bar. Clicking it is equivalent to Ctrl-S / :submit; its screen
+	// bounds (for hit-testing the click) come from Model.checkButtonBounds.
+	checkButtonText = " ▸ Check answer "
+	checkButton     = lipgloss.NewStyle().Bold(true).
+			Foreground(lipgloss.Color("232")).
+			Background(lipgloss.Color("79"))
+
 	// Sidebar row styles and colors. selectedBg paints the cursor bar when the
 	// pane is focused; selectedBlurredBg is the dimmed bar shown when the pane has
 	// lost focus (the way ranger/lf fade an inactive pane's selection). doneColor
@@ -70,9 +78,17 @@ var (
 	chatBusyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("79")).Italic(true)
 
 	// Input-area styles. A dim rule (chatInputRule) separates the transcript
-	// from the typing area, and the "┃ " prompt prefix is painted bright cyan
-	// when the pane is focused (matching the "you" badge) and dim when it isn't,
-	// so it's always obvious where typing happens.
+	// from the typing area, the whole typing area sits on a soft grey wash
+	// (chatInputBG) so it reads as a distinct field, and the "> " prompt prefix
+	// is painted bright cyan when the pane is focused (matching the "you" badge)
+	// and dim when it isn't, so it's always obvious where typing happens.
+	//
+	// chatInputBGSeq is the raw SGR that opens chatInputBG. The textarea sprays
+	// reset codes (\e[0m) mid-line, each of which would drop the background, so
+	// inputView re-asserts this sequence after every reset to keep the wash
+	// solid across the full width (see chat.go inputView).
+	chatInputBG     = lipgloss.Color("237")
+	chatInputBGSeq  = "\x1b[48;5;237m"
 	chatInputRule   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	chatPromptFocus = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
 	chatPromptBlur  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))

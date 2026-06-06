@@ -511,6 +511,15 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.phase == phaseSetup || m.overlay != overlayNone || m.cmdMode {
 		return m, nil
 	}
+
+	// Clicking the title-bar "Check answer" button runs the tests (same as Ctrl-S
+	// / :submit). Hit-test it before the pane routing, since it lives on row 0.
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		if x0, x1, ok := m.checkButtonBounds(); ok && msg.Y == 0 && msg.X >= x0 && msg.X < x1 {
+			return m, m.startRun()
+		}
+	}
+
 	p, ok := m.paneAt(msg.X, msg.Y)
 	if !ok {
 		return m, nil
@@ -920,6 +929,7 @@ func helpView() string {
 		"  : (left pane)      open this command prompt",
 		"  ⌃w then h/l        move focus between panes",
 		"  mouse click        focus the pane under the cursor",
+		"  click ▸Check answer run the tests (title bar; same as ⌃s / :submit)",
 		"  ⌃r / ⌃n            run tests / next challenge (in the editor, ⌃r is Vim redo;",
 		"                     run with ⌃s or :submit there)",
 		"  chat ⌃f ⌃b ⌃d ⌃u   page / half-page scroll",
@@ -1039,6 +1049,11 @@ func (m Model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	if msg.String() == "esc" {
+		// At the first step there's nothing to go back to, so Esc leaves the
+		// app — letting users bail straight out of the launch screen.
+		if len(m.setupHistory) == 0 {
+			return m, tea.Quit
+		}
 		m.back()
 		return m, nil
 	}
@@ -1056,6 +1071,9 @@ func (m Model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Selection steps.
 	opts := m.setupOptions()
 	switch msg.String() {
+	case "q":
+		// "q" quits from any selection step (it's never typed here).
+		return m, tea.Quit
 	case "j", "down":
 		if m.setupCursor < len(opts)-1 {
 			m.setupCursor++
@@ -1793,7 +1811,11 @@ func (m Model) setupView() string {
 		body = m.setupMenu()
 	}
 
-	hint := "↑/↓ or j/k to move · enter to choose · esc to go back · ctrl+c to quit"
+	hint := "↑/↓ or j/k to move · enter to choose · esc to go back · q to quit"
+	if len(m.setupHistory) == 0 {
+		// First step: nothing to go back to, so esc / q both leave the app.
+		hint = "↑/↓ or j/k to move · enter to choose · q / esc to quit"
+	}
 	if m.setupStep == stepTopic {
 		hint = "type, then enter · esc to go back · ctrl+c to quit"
 	}
@@ -1901,7 +1923,59 @@ func (m Model) titleView() string {
 	if m.deps.Tutor.Offline() {
 		t += "  (offline)"
 	}
+
+	// Right-align the clickable "Check answer" button when one is shown, filling
+	// the gap so the title bar background spans the full width.
+	if x0, _, ok := m.checkButtonBounds(); ok {
+		left := fitWidth(t, x0-1) // inner cols 1..x0-1 (titleBar pads 1 on the left)
+		return titleBar.Width(m.width).Render(left + checkButton.Render(checkButtonText))
+	}
 	return titleBar.Width(m.width).Render(t)
+}
+
+// checkButtonBounds returns the half-open screen-column range [x0, x1) on row 0
+// occupied by the "Check answer" button, and ok=false when it isn't drawn (no
+// active challenge, a modal/command line is up, or the window is too narrow).
+func (m Model) checkButtonBounds() (x0, x1 int, ok bool) {
+	if m.phase != phaseReady || m.cmdMode || m.overlay != overlayNone {
+		return 0, 0, false
+	}
+	if m.current.ID == "" {
+		return 0, 0, false
+	}
+	w := lipgloss.Width(checkButtonText)
+	x0 = m.width - 1 - w // titleBar pads 1 on the right, so the button ends at width-2
+	x1 = m.width - 1
+	if x0 < 8 { // keep room for at least a little title text
+		return 0, 0, false
+	}
+	return x0, x1, true
+}
+
+// fitWidth pads s with spaces (or truncates it with an ellipsis) so it occupies
+// exactly w display cells. Used to place a right-aligned element on a line.
+func fitWidth(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if cur := lipgloss.Width(s); cur <= w {
+		return s + strings.Repeat(" ", w-cur)
+	}
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > w-1 { // leave one cell for the ellipsis
+			break
+		}
+		b.WriteRune(r)
+		used += rw
+	}
+	out := b.String() + "…"
+	if pad := w - lipgloss.Width(out); pad > 0 {
+		out += strings.Repeat(" ", pad)
+	}
+	return out
 }
 
 func (m Model) statusView() string {

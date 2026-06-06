@@ -6,8 +6,15 @@
 provider = "ollama"
 base_url = "http://localhost:11434/v1"   # uncomment for Ollama
 model = "qwen3-coder-next:latest"                       # e.g. "llama3.1" for Ollama
-# Name of the env var holding the API key. Ollama needs no key.
+# Two ways to provide the API key (Ollama needs none):
+#   1. api_key_env — the NAME of an environment variable holding your key,
+#      e.g. run  export OPENAI_API_KEY=sk-...  in your shell. This is NOT the
+#      key itself, just the variable to read it from.
+#   2. api_key — paste the key directly here. Easiest, but it then lives in
+#      this file in plaintext, so prefer api_key_env if you can.
+# The env var wins when both are set.
 api_key_env = "OPENAI_API_KEY"
+# api_key = "sk-..."
 
 [editor]
 # keybindings: "vim" | "default"

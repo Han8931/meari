@@ -74,9 +74,21 @@ func (c *chatModel) setCodeLang(lang string) {
 func newChat() chatModel {
 	in := textarea.New()
 	in.Placeholder = "ask the tutor…"
-	in.Prompt = "┃ "
+	// Show the "> " prompt only on the first line; blank the wrapped/extra rows
+	// so the typing area reads as one prompt, not a column of them.
+	in.SetPromptFunc(2, func(line int) string {
+		if line == 0 {
+			return "> "
+		}
+		return "  "
+	})
 	in.FocusedStyle.Prompt = chatPromptFocus
 	in.BlurredStyle.Prompt = chatPromptBlur
+	// The default CursorLine style forces a black background, which would punch
+	// a dark band through the grey wash on whichever line the cursor sits on.
+	// Match it to the wash so the typing line blends in (see inputView).
+	in.FocusedStyle.CursorLine = in.FocusedStyle.CursorLine.Background(chatInputBG)
+	in.BlurredStyle.CursorLine = in.BlurredStyle.CursorLine.Background(chatInputBG)
 	in.ShowLineNumbers = false
 	in.CharLimit = 0
 	in.SetHeight(chatInputRows)
@@ -105,7 +117,7 @@ func (c *chatModel) relayout() {
 	if c.h < 7 {
 		inputH = 1 // tiny panes: give the transcript what little there is
 	}
-	c.input.SetWidth(c.w - 2) // room for the "┃ " prompt
+	c.input.SetWidth(c.w - 2) // room for the "> " prompt
 	c.input.SetHeight(inputH)
 
 	vpH := c.h - inputH - 1 // -1 for the separator rule above the input
@@ -569,8 +581,31 @@ func (c chatModel) view() string {
 	if c.busy != "" {
 		parts = append(parts, c.busyLine())
 	}
-	parts = append(parts, c.inputRule(), c.input.View())
+	parts = append(parts, c.inputRule(), c.inputView())
 	return strings.Join(parts, "\n")
+}
+
+// inputView renders the typing area on a full-width grey wash. The textarea
+// sprays reset codes (\e[0m) mid-line — after a placeholder, between segments,
+// around its own padding — and every reset drops the background, so a plain
+// outer Background()/Width() wrap leaves uncolored gaps wherever the cursor
+// isn't. Instead we re-assert chatInputBGSeq after each reset and pad every
+// line out to the pane width ourselves, so the wash stays solid regardless of
+// cursor position or focus.
+func (c chatModel) inputView() string {
+	w := c.w
+	if w < 1 {
+		w = 1
+	}
+	lines := strings.Split(c.input.View(), "\n")
+	for i, line := range lines {
+		styled := chatInputBGSeq + strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+chatInputBGSeq)
+		if pad := w - ansi.StringWidth(line); pad > 0 {
+			styled += strings.Repeat(" ", pad)
+		}
+		lines[i] = styled + "\x1b[0m"
+	}
+	return strings.Join(lines, "\n")
 }
 
 // inputRule is the dim horizontal separator drawn between the transcript and

@@ -74,7 +74,7 @@ with built-in content; configure an AI provider for generated lessons and gradin
 ┌ notes ──────┐┌──────── editor ─────────┐┌──── chat / study ────┐
 │ ▸ math/     ││ # Derivatives           ││ lesson  …             │
 │   limits    ││ A derivative measures…  ││ tutor   …             │
-│ ▸ spanish/  ││ [[Limits]] first.       ││ › ask the tutor…      │
+│ ▸ spanish/  ││ [[Limits]] first.       ││ > ask the tutor…      │
 └─────────────┘└─────────────────────────┘└───────────────────────┘
 ```
 
@@ -119,7 +119,8 @@ type a question and press `Enter` to ask the tutor.
   repeatedly grows the chat pane up to ~60% of the width (`:wide` gives it back to the
   editor) — in both TUIs.
 - An animated **progress line** ("⠹ tutor thinking…") shows inside the pane while the
-  AI works, and the input area is **three rows tall** so longer questions wrap visibly.
+  AI works. The input area sits in a **shaded grey field** under a `>` prompt and is
+  **three rows tall** so longer questions wrap visibly.
 - The transcript is **per-topic**: switching topics/notes gives you a clean pane for the
   new one, and returning to a previous topic restores its chat and study history.
 - Replies **stream in live**, and every question carries the **current context** — the
@@ -321,8 +322,3 @@ desktop build (Wails/Tauri) stays a thin later step.
 - `Tab` and `Ctrl-W` are reserved for pane navigation, so they can't be typed into the
   editor.
 
-## Todo
-
-- Vim keybinding erros (w / p ...)
-- LLM connection issue for compatible
-- Answer check button

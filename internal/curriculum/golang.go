@@ -9,34 +9,96 @@ package curriculum
 func goBeginner() []Module {
 	return []Module{
 		{
-			Name: "Imperative programming",
+			Name: "Getting started",
 			Topics: []Topic{
 				{
-					ID:    "go-b-vars",
-					Title: "Print & variables",
-					Lesson: `Go is compiled and statically typed. A program is a package; execution starts
-at func main in package main. You print with the fmt package.
+					ID:    "go-b-hello",
+					Title: "Hello, Go",
+					Lesson: `Welcome to Go! Go is a small, compiled, statically typed language made at Google
+for building fast, reliable tools and servers. "Compiled" means your code is
+turned into a standalone executable before it runs; "statically typed" means
+every value has a fixed type the compiler checks for you, catching many mistakes
+before the program even starts.
 
-Declare variables three ways:
-    var name string = "Ada"   // explicit type
-    var age = 36              // type inferred from the value
-    height := 1.7            // short declaration (only inside functions)
+Every Go file belongs to a package. A runnable program lives in package main and
+begins at the function main:
+    package main
 
-Every type has a zero value used when you declare without assigning: 0 for
-numbers, "" for strings, false for bool. An unused local variable is a compile
-error — Go keeps code clean.
+    import "fmt"
 
-fmt.Println prints values separated by spaces; fmt.Printf uses format verbs:
-    %v the value, %T its type, %d an integer, %s a string, %q a quoted string.
-    fmt.Printf("%s is %d\n", name, age)   // Ada is 36
-fmt.Sprintf returns the formatted string instead of printing it.
+    func main() {
+        fmt.Println("Hello, Go!")
+    }
 
-How challenges work: the editor gives you a function stub like
-    func Describe(name string, age int) string {
+Normally you'd run that with  go run hello.go  (compile and run) or build a
+binary with  go build. The fmt package handles formatted I/O — fmt.Println
+prints a line of text.
+
+In these lessons you don't write the package or main — that scaffolding is taken
+care of. Instead the editor hands you one small function to complete:
+    func Greeting() string {
         return ""
     }
-Fill in the body and return the result — the tests call your function and
-check its return value.`,
+Fill in the body so it returns the right value; hidden tests then call your
+function and check what comes back. Click "Check answer" (or press Ctrl-S) to
+run them.`,
+					Challenge: Challenge{
+						Prompt:      "Write Greeting() string that returns the text \"Hello, Go!\".",
+						StarterCode: "func Greeting() string {\n\treturn \"\"\n}\n",
+						Solution:    "func Greeting() string {\n\treturn \"Hello, Go!\"\n}\n",
+						Tests: []string{
+							`if Greeting() != "Hello, Go!" { t.Fatalf("got %q, want \"Hello, Go!\"", Greeting()) }`,
+						},
+					},
+				},
+				{
+					ID:    "go-b-values",
+					Title: "Values & types",
+					Lesson: `Before writing much code it helps to know Go's basic value types. Because Go is
+statically typed, every value is one specific type, and the compiler won't
+silently mix them.
+
+The everyday built-in types are:
+    int      whole numbers like 42 or -7    (also sized: int8, int32, int64…)
+    float64  numbers with a fraction, 3.14
+    string   text in double quotes, "hello"  (immutable)
+    bool     true or false
+
+You can compute directly with literal values:
+    1 + 1          // 2          integer arithmetic
+    7.0 / 2.0      // 3.5        floating-point division
+    "go" + "pher"  // "gopher"   + joins two strings
+    3 > 2          // true       a comparison yields a bool
+
+Go won't add an int to a float64 for you — you convert one first (a later topic).
+That strictness is on purpose: it keeps surprising bugs out of your programs.`,
+					Challenge: Challenge{
+						Prompt:      "Write Greet(name string) string returning \"Hello, <name>!\" — for example Greet(\"Ada\") is \"Hello, Ada!\". Join the pieces with the + operator.",
+						StarterCode: "func Greet(name string) string {\n\treturn \"\"\n}\n",
+						Solution:    "func Greet(name string) string {\n\treturn \"Hello, \" + name + \"!\"\n}\n",
+						Tests: []string{
+							`if Greet("Ada") != "Hello, Ada!" { t.Fatalf("got %q", Greet("Ada")) }`,
+							`if Greet("Go") != "Hello, Go!" { t.Fatal("Greet(\"Go\") should be \"Hello, Go!\"") }`,
+						},
+					},
+				},
+				{
+					ID:    "go-b-vars",
+					Title: "Variables",
+					Lesson: `A variable is named storage for a value. Go gives you three ways to declare one:
+    var name string = "Ada"   // explicit type
+    var age = 36              // type inferred from the value
+    height := 1.7             // short form (only inside a function)
+
+The := short form is the one you'll use most inside functions. Every type also
+has a zero value, used when you declare without assigning: 0 for numbers, "" for
+strings, false for bool. An unused local variable is a compile error — Go keeps
+code tidy.
+
+To build text from values, fmt.Printf prints using format verbs, and fmt.Sprintf
+returns the result as a string instead of printing it:
+    %v the value, %T its type, %d an integer, %s a string, %q a quoted string
+    fmt.Sprintf("%s is %d", name, age)   // "Ada is 36"`,
 					Challenge: Challenge{
 						Prompt:      "Write Describe(name string, age int) string returning e.g. \"Ada is 36 years old\". Use fmt.Sprintf.",
 						StarterCode: "import \"fmt\"\n\nfunc Describe(name string, age int) string {\n\treturn \"\"\n}\n",
@@ -44,6 +106,41 @@ check its return value.`,
 						Tests: []string{
 							`if Describe("Ada", 36) != "Ada is 36 years old" { t.Fatalf("got %q", Describe("Ada", 36)) }`,
 							`if Describe("Sam", 7) != "Sam is 7 years old" { t.Fatal("Sam") }`,
+						},
+					},
+				},
+				{
+					ID:    "go-b-consts",
+					Title: "Constants & iota",
+					Lesson: `Go's const declares a value fixed at compile time. A constant can be typed or
+"untyped" — an untyped constant adapts to whatever numeric type the expression
+needs, so the same 3 works as an int or a float64:
+    const greeting = "hi"
+    const pi = 3.14159
+    const shift = 1 << 20      // 1048576
+
+iota counts up automatically inside a const block — this is how Go writes enums.
+Each line increments iota, starting from 0:
+    const (
+        Sun = iota   // 0
+        Mon          // 1
+        Tue          // 2
+    )
+
+You can skip or scale values, since iota is just the line's index in the block:
+    const (
+        _  = iota
+        KB = 1 << (10 * iota)   // 1024
+        MB                      // 1048576
+    )`,
+					Challenge: Challenge{
+						Prompt:      "The weekday constants Sun..Sat (0..6) are defined for you with iota. Write IsWeekend(d int) bool returning true only for Sun or Sat.",
+						StarterCode: "const (\n\tSun = iota\n\tMon\n\tTue\n\tWed\n\tThu\n\tFri\n\tSat\n)\n\nfunc IsWeekend(d int) bool {\n\treturn false\n}\n",
+						Solution:    "const (\n\tSun = iota\n\tMon\n\tTue\n\tWed\n\tThu\n\tFri\n\tSat\n)\n\nfunc IsWeekend(d int) bool {\n\treturn d == Sun || d == Sat\n}\n",
+						Tests: []string{
+							`if Sat != 6 { t.Fatalf("Sat = %d, want 6 (iota counts from 0)", Sat) }`,
+							`if !IsWeekend(Sun) || !IsWeekend(Sat) { t.Fatal("Sun and Sat are weekend days") }`,
+							`if IsWeekend(Wed) { t.Fatal("Wed is a weekday") }`,
 						},
 					},
 				},
@@ -159,8 +256,12 @@ A switch can also match values directly: switch day { case "Sat", "Sun": ... }`,
     for i := 0; i < n; i++ { ... }   // classic counter
     for cond { ... }                 // like while
     for { ... }                      // infinite (use break to leave)
-(There is also "for ... range" for walking collections — you'll meet it when
-collections are introduced.)
+
+A fourth form, "for ... range", walks a sequence and hands you each position and
+value — useful for text now, and for slices and maps later:
+    for i, c := range "hi" {         // i = 0,1   c = each character
+        fmt.Println(i, c)
+    }
 
 break leaves the loop; continue skips to the next iteration:
     for i := 1; i <= 100; i++ {
@@ -498,8 +599,10 @@ func goIntermediate() []Module {
 				{
 					ID:    "go-i-functions",
 					Title: "Functions & multiple returns",
-					Lesson: `A function lists its parameters and return types. Parameters of the same type
-can share it:
+					Lesson: `Functions are how you name a reusable piece of behavior and build a program from
+small, testable pieces — which is exactly what each challenge here asks you to
+write. A function lists its parameters and return types, and parameters of the
+same type can share it:
     func add(a, b int) int { return a + b }
 
 Go functions can return more than one value — used constantly for (result,
@@ -552,30 +655,29 @@ accident — the type system encodes meaning.`,
 				{
 					ID:    "go-i-firstclass",
 					Title: "First-class functions",
-					Lesson: `Functions in Go are values: you can store them in variables, pass them as
-arguments, and return them. This enables flexible, reusable code.
+					Lesson: `Functions in Go are values: you can store one in a variable, pass it as an
+argument, and return it from another function. That lets you parameterize
+behavior instead of hard-coding it.
     op := func(a, b int) int { return a + b }
     fmt.Println(op(2, 3))   // 5
 
-A function that takes another function can apply behavior supplied by the
-caller:
-    func apply(xs []int, f func(int) int) []int {
-        out := make([]int, 0, len(xs))
-        for _, x := range xs {
-            out = append(out, f(x))
-        }
-        return out
+A function that returns a function can combine behaviors. Here "twice" runs any
+int->int function two times in a row:
+    func twice(f func(int) int) func(int) int {
+        return func(x int) int { return f(f(x)) }
     }
+    inc := func(x int) int { return x + 1 }
+    twice(inc)(0)   // 2
 
-You can name a function type (type BinOp func(int, int) int) to make signatures
-read clearly.`,
+You can name a function type (type IntFunc func(int) int) to make such
+signatures read clearly.`,
 					Challenge: Challenge{
-						Prompt:      "Write Apply(nums []int, f func(int) int) []int returning a new slice with f applied to each element, in order.",
-						StarterCode: "func Apply(nums []int, f func(int) int) []int {\n\treturn nil\n}\n",
-						Solution:    "func Apply(nums []int, f func(int) int) []int {\n\tout := make([]int, 0, len(nums))\n\tfor _, n := range nums {\n\t\tout = append(out, f(n))\n\t}\n\treturn out\n}\n",
+						Prompt:      "Write Compose(f, g func(int) int) func(int) int returning a function that applies g first, then f — so Compose(f, g)(x) equals f(g(x)).",
+						StarterCode: "func Compose(f, g func(int) int) func(int) int {\n\treturn nil\n}\n",
+						Solution:    "func Compose(f, g func(int) int) func(int) int {\n\treturn func(x int) int {\n\t\treturn f(g(x))\n\t}\n}\n",
 						Tests: []string{
-							`got := Apply([]int{1, 2, 3}, func(x int) int { return x * x }); if !reflect.DeepEqual(got, []int{1, 4, 9}) { t.Fatalf("got %v", got) }`,
-							`got := Apply([]int{}, func(x int) int { return x }); if !reflect.DeepEqual(got, []int{}) { t.Fatal("empty") }`,
+							`inc := func(x int) int { return x + 1 }; dbl := func(x int) int { return x * 2 }; if got := Compose(inc, dbl)(5); got != 11 { t.Fatalf("inc(dbl(5)) = %d, want 11", got) }`,
+							`sq := func(x int) int { return x * x }; neg := func(x int) int { return -x }; if Compose(neg, sq)(3) != -9 { t.Fatal("neg(sq(3)) should be -9") }`,
 						},
 					},
 				},
@@ -604,6 +706,63 @@ are independent.`,
 						Tests: []string{
 							`a := MakeAdder(10); if a(5) != 15 || a(3) != 18 { t.Fatal("running total") }`,
 							`a := MakeAdder(0); b := MakeAdder(0); a(100); if b(1) != 1 { t.Fatal("closures must be independent") }`,
+						},
+					},
+				},
+				{
+					ID:    "go-i-recursion",
+					Title: "Recursion",
+					Lesson: `A function that calls itself is recursive. Every recursion needs a base case
+that stops the calls and a recursive case that moves toward it:
+    func fact(n int) int {
+        if n == 0 {            // base case
+            return 1
+        }
+        return n * fact(n-1)   // recursive case
+    }
+    fact(4)   // 4*3*2*1 = 24
+
+Without a reachable base case the calls never stop and the program overflows the
+stack. Many problems have a natural recursive shape — factorials, tree walks,
+and divide-and-conquer — though a plain loop is often just as clear.`,
+					Challenge: Challenge{
+						Prompt:      "Write Fact(n int) int that computes n! recursively, with Fact(0) == 1.",
+						StarterCode: "func Fact(n int) int {\n\treturn 0\n}\n",
+						Solution:    "func Fact(n int) int {\n\tif n == 0 {\n\t\treturn 1\n\t}\n\treturn n * Fact(n-1)\n}\n",
+						Tests: []string{
+							`if Fact(0) != 1 { t.Fatalf("0! = %d, want 1", Fact(0)) }`,
+							`if Fact(5) != 120 { t.Fatalf("5! = %d, want 120", Fact(5)) }`,
+							`if Fact(7) != 5040 { t.Fatal("7! should be 5040") }`,
+						},
+					},
+				},
+				{
+					ID:    "go-i-generics",
+					Title: "Generics",
+					Lesson: `Generics let one function work with many types via type parameters, written in
+square brackets after the name. A constraint says what the type must support:
+    func Max[T cmp.Ordered](a, b T) T {
+        if a > b {
+            return a
+        }
+        return b
+    }
+    Max(3, 9)       // 9     (T inferred as int)
+    Max("a", "b")   // "b"   (T inferred as string)
+
+The constraint cmp.Ordered (from the standard "cmp" package, Go 1.21+) means
+"any type whose values support < and >", so the same Max works for ints, floats,
+and strings. Other common constraints are "any" (any type at all) and
+"comparable" (types you can compare with == and !=). The compiler usually infers
+the type argument from the call, so you rarely write Max[int](...) explicitly.`,
+					Challenge: Challenge{
+						Prompt:      "Write a generic Max[T cmp.Ordered](a, b T) T returning the larger of a and b. Import the \"cmp\" package for the constraint; it should work for ints, floats, and strings.",
+						StarterCode: "import \"cmp\"\n\nfunc Max[T cmp.Ordered](a, b T) T {\n\tvar zero T\n\treturn zero\n}\n",
+						Solution:    "import \"cmp\"\n\nfunc Max[T cmp.Ordered](a, b T) T {\n\tif a > b {\n\t\treturn a\n\t}\n\treturn b\n}\n",
+						Tests: []string{
+							`if Max(3, 9) != 9 { t.Fatalf("Max(3, 9) = %d, want 9", Max(3, 9)) }`,
+							`if Max(-2, -7) != -2 { t.Fatal("Max(-2, -7) should be -2") }`,
+							`if Max("apple", "pear") != "pear" { t.Fatal("Max of strings should be \"pear\"") }`,
 						},
 					},
 				},
@@ -735,6 +894,35 @@ comma-ok form. Maps are reference types — assigning one doesn't copy it.`,
 						},
 					},
 				},
+				{
+					ID:    "go-i-range",
+					Title: "Range over collections",
+					Lesson: `"for ... range" walks the elements of a built-in collection, handing you a
+position and a value on each pass — it's how you iterate without managing an
+index by hand. Over a slice you get the index and the element:
+    nums := []int{10, 20, 30}
+    for i, n := range nums {
+        // i = 0,1,2   n = 10,20,30
+    }
+
+Use _ to ignore the half you don't need:
+    for _, n := range nums { sum += n }   // values only
+    for i := range nums { ... }           // indexes only
+
+Over a map you get key, value (in no guaranteed order); over a string you get the
+byte index and the decoded rune:
+    for k, v := range counts { ... }
+    for i, r := range "go" { ... }        // r is a rune`,
+					Challenge: Challenge{
+						Prompt:      "Write SumValues(m map[string]int) int returning the sum of all the map's values (0 for an empty map). Iterate with range.",
+						StarterCode: "func SumValues(m map[string]int) int {\n\treturn 0\n}\n",
+						Solution:    "func SumValues(m map[string]int) int {\n\ttotal := 0\n\tfor _, v := range m {\n\t\ttotal += v\n\t}\n\treturn total\n}\n",
+						Tests: []string{
+							`if SumValues(map[string]int{"a": 1, "b": 2, "c": 3}) != 6 { t.Fatalf("got %d, want 6", SumValues(map[string]int{"a": 1, "b": 2, "c": 3})) }`,
+							`if SumValues(map[string]int{}) != 0 { t.Fatal("an empty map should sum to 0") }`,
+						},
+					},
+				},
 			},
 		},
 	}
@@ -748,7 +936,9 @@ func goAdvanced() []Module {
 				{
 					ID:    "go-a-structs",
 					Title: "Structs",
-					Lesson: `A struct groups named fields into a single value type:
+					Lesson: `So far you've mostly computed with built-in types. Real programs also MODEL
+things — a user, a rectangle, an order — by defining their own types. A struct is
+Go's main tool for that: it groups named fields into a single value type:
     type Rect struct {
         W, H int
     }
@@ -776,12 +966,13 @@ you can build one with a composite literal:
 returns the JSON bytes:
     b, err := json.Marshal(value)
 
-Only exported (capitalized) fields are encoded. Struct tags rename fields in
-the output — written in back-quotes after the field type (shown here with
-parentheses):
+Only exported (capitalized) fields are encoded. A struct tag — written in
+back-quotes right after the field's type — renames a field in the output. Here
+the fields are tagged json:"x" and json:"y" (the editor stub below shows the
+real back-quote syntax):
     type Point struct {
-        X int  (json:"x")
-        Y int  (json:"y")
+        X int   // tag: json:"x"
+        Y int   // tag: json:"y"
     }
 Marshalling Point{1, 2} then yields {"x":1,"y":2}. json.Unmarshal goes the
 other way, filling a struct from JSON bytes.`,
@@ -966,6 +1157,88 @@ extra detail. Good app errors say what failed and preserve the cause.`,
 							`got, err := ParsePort("8080"); if err != nil || got != 8080 { t.Fatalf("8080 -> %d %v", got, err) }`,
 							`_, err := ParsePort("70000"); if !errors.Is(err, ErrInvalidPort) { t.Fatalf("want ErrInvalidPort, got %v", err) }`,
 							`_, err := ParsePort("abc"); if err == nil || !strings.Contains(err.Error(), "parse port") { t.Fatalf("want contextual parse error, got %v", err) }`,
+						},
+					},
+				},
+				{
+					ID:    "go-a-sorting",
+					Title: "Sorting",
+					Lesson: `The sort package orders slices in place. The helpers sort.Ints, sort.Float64s,
+and sort.Strings cover the common cases:
+    xs := []int{3, 1, 2}
+    sort.Ints(xs)            // [1 2 3]
+
+For anything else, sort.Slice takes a "less" function comparing two indices;
+sort.SliceStable keeps the original order of elements that compare equal:
+    sort.SliceStable(people, func(i, j int) bool {
+        return people[i].Age < people[j].Age
+    })
+
+Go 1.21+ also has the generic slices.Sort and slices.SortFunc, which are shorter
+for ordered element types. Note these sort in place — they mutate the slice you
+pass rather than returning a new one.`,
+					Challenge: Challenge{
+						Prompt:      "Write SortByLen(words []string) []string that sorts words by length, shortest first, keeping the input order among equal lengths (a stable sort). Return the slice.",
+						StarterCode: "func SortByLen(words []string) []string {\n\treturn words\n}\n",
+						Solution:    "import \"sort\"\n\nfunc SortByLen(words []string) []string {\n\tsort.SliceStable(words, func(i, j int) bool {\n\t\treturn len(words[i]) < len(words[j])\n\t})\n\treturn words\n}\n",
+						Tests: []string{
+							`if got := SortByLen([]string{"ccc", "a", "bb"}); !reflect.DeepEqual(got, []string{"a", "bb", "ccc"}) { t.Fatalf("got %v", got) }`,
+							`if got := SortByLen([]string{"bb", "aa", "c"}); !reflect.DeepEqual(got, []string{"c", "bb", "aa"}) { t.Fatalf("stable order broken: got %v", got) }`,
+						},
+					},
+				},
+				{
+					ID:    "go-a-recover",
+					Title: "Panic & recover",
+					Lesson: `panic stops normal flow and unwinds the stack; a deferred function can call
+recover to halt the unwinding and handle it. The classic use is turning an
+unexpected panic into an ordinary error at an API boundary:
+    func safe() (err error) {
+        defer func() {
+            if r := recover(); r != nil {
+                err = fmt.Errorf("recovered: %v", r)
+            }
+        }()
+        mightPanic()
+        return nil
+    }
+
+recover only does anything inside a deferred function, and a named return value
+lets the deferred code set what the function returns. Don't use panic for
+ordinary errors — return them — but recover is handy at the top of a handler so
+one bad request can't crash the whole server.`,
+					Challenge: Challenge{
+						Prompt:      "Write SafeDiv(a, b int) (int, error). Return a/b, but recover from the divide-by-zero panic and return a non-nil error instead of crashing.",
+						StarterCode: "func SafeDiv(a, b int) (int, error) {\n\treturn a / b, nil\n}\n",
+						Solution:    "import \"fmt\"\n\nfunc SafeDiv(a, b int) (result int, err error) {\n\tdefer func() {\n\t\tif r := recover(); r != nil {\n\t\t\terr = fmt.Errorf(\"recovered: %v\", r)\n\t\t}\n\t}()\n\treturn a / b, nil\n}\n",
+						Tests: []string{
+							`if got, err := SafeDiv(10, 2); err != nil || got != 5 { t.Fatalf("10/2 -> %d, %v", got, err) }`,
+							`if _, err := SafeDiv(1, 0); err == nil { t.Fatal("divide by zero should return an error, not panic") }`,
+						},
+					},
+				},
+				{
+					ID:    "go-a-strconv",
+					Title: "Number parsing",
+					Lesson: `Text from files, flags, and HTTP requests arrives as strings; the strconv
+package converts to and from numbers. Atoi/Itoa cover base-10 ints:
+    n, err := strconv.Atoi("42")   // 42, nil
+    s := strconv.Itoa(42)          // "42"
+
+ParseInt, ParseFloat, and ParseBool give more control (base, bit size) and, like
+Atoi, return an error you must check — bad input is normal, not exceptional:
+    f, err := strconv.ParseFloat("3.14", 64)
+
+Always handle the error: a failed parse returns the zero value plus a non-nil
+err describing the bad input.`,
+					Challenge: Challenge{
+						Prompt:      "Write SumCSV(s string) (int, error) that splits s on commas, parses each trimmed field as an int with strconv, and returns their sum. Return the error if any field is not a valid integer.",
+						StarterCode: "func SumCSV(s string) (int, error) {\n\treturn 0, nil\n}\n",
+						Solution:    "import (\n\t\"strconv\"\n\t\"strings\"\n)\n\nfunc SumCSV(s string) (int, error) {\n\ttotal := 0\n\tfor _, part := range strings.Split(s, \",\") {\n\t\tn, err := strconv.Atoi(strings.TrimSpace(part))\n\t\tif err != nil {\n\t\t\treturn 0, err\n\t\t}\n\t\ttotal += n\n\t}\n\treturn total, nil\n}\n",
+						Tests: []string{
+							`if n, err := SumCSV("1,2,3"); err != nil || n != 6 { t.Fatalf("1,2,3 -> %d, %v", n, err) }`,
+							`if n, err := SumCSV(" 10, 20 "); err != nil || n != 30 { t.Fatalf("with spaces -> %d, %v", n, err) }`,
+							`if _, err := SumCSV("1,x,3"); err == nil { t.Fatal("a non-numeric field should return an error") }`,
 						},
 					},
 				},
@@ -1172,8 +1445,9 @@ recovery from panics:
         }
     }()
 
-Defer arguments are evaluated immediately (when the defer runs, not when called):
-    defer fmt.Println("t", t)   // t captured at defer time
+A deferred call's ARGUMENTS are evaluated right away, when the defer statement is
+reached — only the call itself is postponed to return time:
+    defer fmt.Println("t", t)   // the value of t is captured here, not at return
 
 Use defer for cleanup at function entry - it's cleaner than multiple close()
 calls at every return path.`,
