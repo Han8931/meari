@@ -9,7 +9,9 @@ package tui
 
 import (
 	"context"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -302,6 +304,14 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case vSavedMsg:
 		// Refresh the list in case the title/subject changed; keep editing.
 		return m, vListCmd(m.svc)
+
+	case vPublishedMsg:
+		m.pending--
+		m.chat.append(roleOK, "✓ published "+itoa(msg.res.Notes)+" notes to "+msg.res.Dir+
+			"\n\nShare it with git: commit that folder and push. Recipients drop it into "+
+			"their "+core.CourseDir+"/ directory (or point [vault] course_dir at the clone) to study it.")
+		m.flash("course published: " + msg.res.Dir)
+		return m, nil
 
 	case streamChunkMsg:
 		return m.handleStreamChunk(msg)
@@ -1014,7 +1024,7 @@ func (m VaultModel) confirmDelete(it sidebarItem) (tea.Model, tea.Cmd) {
 var vaultExCmds = []string{
 	"answer", "backlinks", "code", "compact", "copy", "course", "done", "essay",
 	"export", "fold", "gen", "grade", "learn", "lesson", "links", "new",
-	"paste", "q", "quit", "revise", "sidebar", "tutor", "wide", "yank",
+	"paste", "publish", "q", "quit", "revise", "sidebar", "tutor", "wide", "yank",
 }
 
 // runEx dispatches a vault ex-command (without the leading colon).
@@ -1055,6 +1065,8 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdCourse(args)
 	case "revise":
 		return m.cmdRevise(args)
+	case "publish":
+		return m.cmdPublish(args)
 	case "answer":
 		return m.revealAnswer()
 	case "copy", "yank":
@@ -1442,6 +1454,30 @@ func (m VaultModel) cmdRevise(feedback string) (tea.Model, tea.Cmd) {
 		ch <- vCourseDoneMsg{meta: meta, err: err}
 	}()
 	return m, listenCourse(ch)
+}
+
+// cmdPublish copies the open course — its manifest plus every linked topic
+// note — into the publish directory as a self-contained folder, meant to be
+// shared through a git repository. ":publish <dir>" overrides the configured
+// destination. The original course stays put; publishing again refreshes the
+// shared copy.
+func (m VaultModel) cmdPublish(args string) (tea.Model, tea.Cmd) {
+	key, ok := courseKeyOf(m.current)
+	if !ok {
+		m.flash("open a course first (its course.md, or any of its lessons) — then :publish")
+		return m, nil
+	}
+	dest := strings.TrimSpace(args)
+	if dest == "" {
+		dest = m.cfg.PublishDir
+	} else if strings.HasPrefix(dest, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			dest = filepath.Join(home, dest[2:])
+		}
+	}
+	m.pending++
+	m.loadKind = "publishing course"
+	return m, vPublishCmd(m.svc, key, dest)
 }
 
 // courseKeyOf maps a note path inside meari-course/<X>/ to that course's
@@ -1857,8 +1893,9 @@ type (
 		meta core.CourseMeta
 		err  error
 	}
-	vSavedMsg  struct{ meta core.NoteMeta }
-	vEssayMsg  struct{ res core.EssayResult }
+	vSavedMsg     struct{ meta core.NoteMeta }
+	vPublishedMsg struct{ res core.PublishResult }
+	vEssayMsg     struct{ res core.EssayResult }
 	vAnswerMsg struct{ text string }
 	vErrMsg    struct {
 		kind string
@@ -1950,6 +1987,17 @@ func vSaveCmd(svc *core.Service, path, body string) tea.Cmd {
 			return vErrMsg{kind: "save", err: err}
 		}
 		return vSavedMsg{meta: meta}
+	}
+}
+
+// vPublishCmd copies the course into dest as a shareable, self-contained folder.
+func vPublishCmd(svc *core.Service, key, dest string) tea.Cmd {
+	return func() tea.Msg {
+		res, err := svc.PublishCourse(key, dest)
+		if err != nil {
+			return vErrMsg{kind: "publish", err: err}
+		}
+		return vPublishedMsg{res: res}
 	}
 }
 

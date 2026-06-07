@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -303,6 +305,47 @@ func TestVaultFinderLeaderChords(t *testing.T) {
 	m = tm.(VaultModel)
 	if m.finderMode != "grep" {
 		t.Fatalf(",fg finder mode = %q, want grep", m.finderMode)
+	}
+}
+
+func TestVaultPublishCommand(t *testing.T) {
+	m := newTestVaultModel(t)
+	dest := t.TempDir()
+	m.cfg.PublishDir = dest
+
+	// Without a course open, :publish only flashes guidance.
+	tm, cmd := m.runEx("publish")
+	m = tm.(VaultModel)
+	if cmd != nil || !strings.Contains(m.notice, "open a course first") {
+		t.Fatalf(":publish without a course: notice = %q", m.notice)
+	}
+
+	// Author a minimal course: a topic note plus a manifest linking it.
+	vSaveCmd(m.svc, "Algo/BST.md", "# BST\n\nOrdered keys.\n")()
+	vSaveCmd(m.svc, core.CourseDir+"/Trees/course.md", "## Basics\n- [[BST]]\n")()
+	m.current = core.CourseDir + "/Trees/course.md"
+
+	tm, cmd = m.runEx("publish")
+	m = tm.(VaultModel)
+	if cmd == nil {
+		t.Fatal(":publish with a course open should run")
+	}
+	msg, ok := cmd().(vPublishedMsg)
+	if !ok {
+		t.Fatalf("expected vPublishedMsg, got %#v", cmd())
+	}
+	if msg.res.Dir != filepath.Join(dest, "Trees") || msg.res.Notes != 2 {
+		t.Fatalf("publish result = %+v", msg.res)
+	}
+	tm, _ = m.Update(msg)
+	m = tm.(VaultModel)
+	if !strings.Contains(m.chat.view(), "published 2 notes") {
+		t.Fatalf("publish confirmation missing from chat:\n%s", m.chat.view())
+	}
+	for _, f := range []string{"course.md", "BST.md"} {
+		if _, err := os.Stat(filepath.Join(dest, "Trees", f)); err != nil {
+			t.Errorf("published file missing: %s (%v)", f, err)
+		}
 	}
 }
 

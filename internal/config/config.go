@@ -27,6 +27,7 @@ type Config struct {
 	VaultDir     string `toml:"-"` // resolved note-vault dir (see VaultConfig.Dir)
 	ExportsDir   string `toml:"-"` // where :export writes chat transcripts
 	CourseDir    string `toml:"-"` // where meari-courses live (see VaultConfig.CourseDir)
+	PublishDir   string `toml:"-"` // where :publish copies shareable courses (see VaultConfig.PublishDir)
 }
 
 // VaultConfig locates the learner's markdown note vault.
@@ -40,6 +41,10 @@ type VaultConfig struct {
 	// default <baseDir>/meari-course — in the app directory, so generated
 	// study material stays out of the notes vault. Same path rules as Dir.
 	CourseDir string `toml:"course_dir"`
+	// PublishDir is where :publish copies a course for sharing — point it at
+	// a git repository to publish courses through git. Empty means the
+	// default <baseDir>/meari-publish. Same path rules as Dir.
+	PublishDir string `toml:"publish_dir"`
 }
 
 // AIConfig selects the model backend. All providers are reached through the
@@ -161,6 +166,17 @@ func Load(path, baseDir string) (Config, error) {
 		cfg.CourseDir = courseDir
 	} else {
 		cfg.CourseDir = filepath.Join(baseDir, "meari-course")
+	}
+	// :publish copies a shareable course here; point publish_dir at a git
+	// repository to share courses through git.
+	if cfg.Vault.PublishDir != "" {
+		publishDir, err := resolveVaultDir(cfg.Vault.PublishDir, baseDir)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.PublishDir = publishDir
+	} else {
+		cfg.PublishDir = filepath.Join(baseDir, "meari-publish")
 	}
 
 	// Normalize unknown values back to safe defaults.

@@ -56,6 +56,8 @@ load; the header just stays in the body):
 dir = "~/Documents/my-notes"   # "~/" expands; relative paths are rooted at meari
 # course_dir = "..."           # where generated courses live; default:
 #                              # <app dir>/meari-course — outside your vault
+# publish_dir = "..."          # where :publish copies shareable courses; default:
+#                              # <app dir>/meari-publish — point it at a git repo
 ```
 
 ### AI providers (OpenAI-compatible)
@@ -156,8 +158,8 @@ first (`▸` folded / `▾` unfolded), files indented beneath them, the open not
   it; `:answer` reveals a model answer; `:done` ends the study
 - `:backlinks` — toggle the "↩ Linked mentions" panel under the editor, listing the
   notes whose `[[wikilinks]]` point at the open note (Obsidian-style backlinks)
-- `:course` / `:revise` — build or polish a course from the open note (see
-  [Courses](#courses-course--revise))
+- `:course` / `:revise` / `:publish` — build, polish, or share a course from the
+  open note (see [Courses](#courses-course--revise))
 - `:export` — write the current chat transcript to `exports/chat-<note>-<time>.md`
   in the app directory (works in the tutor too)
 - `:tutor` — hand off to the coding tutor without quitting (the coding TUI's `:vault`
@@ -211,6 +213,17 @@ off" work exactly like the built-in curricula.
 
 Re-running `:course` on the same note with the **same title** rebuilds the course in
 place (progress kept); a **different title** creates a separate course alongside it.
+
+**Sharing a course** — with the course's manifest or any of its lessons open,
+**`:publish`** copies the course into `meari-publish/<Title>/` in the app directory
+(set `publish_dir` under `[vault]` to point somewhere else, e.g. a git repo;
+`:publish <dir>` overrides it once). The copy is **self-contained**: linked topic
+notes that live elsewhere in your vault are copied in alongside the manifest, so
+the folder works without your vault. Your original course stays put — `:publish`
+again refreshes the shared copy. To share: `git init`/commit/push the publish
+directory. A recipient drops the course folder into their own `meari-course/`
+directory (or points `course_dir` at the clone) and studies it with `:topic` in
+the tutor, exactly like their own courses.
 
 ## The coding tutor (`meari -tutor`)
 
