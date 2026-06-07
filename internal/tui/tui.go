@@ -161,10 +161,9 @@ type Model struct {
 	// Vim window-command style.
 	pendingWindow bool
 
-	// Chat drag-scroll state: a left press on the chat anchors dragY; motion
-	// with the button held scrolls the transcript by the row delta.
+	// Chat drag-selection state: a left press on the chat anchors a selection;
+	// motion with the button held sweeps it out (Alt-C copies).
 	dragChat bool
-	dragY    int
 
 	// pendingLeader is set after "," in the editor's Normal mode; it starts a
 	// leader chord. "n" folds the sidebar; any other key replays the swallowed
@@ -537,6 +536,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "alt+o", "ø", "Ø":
 			m.flash(copyChat(&m.chat, ""))
 			return m, nil
+		// Copy the mouse drag-selection: Alt+C / Option+C (macOS sends "ç").
+		case "alt+c", "ç", "Ç":
+			m.flash(copySelection(&m.chat))
+			return m, nil
 		// Paste the system clipboard into the chat input: Alt+V / Option+V
 		// (macOS sends "√" for Option+V). Cmd+V also works — the terminal
 		// delivers it as a bracketed paste straight into the input.
@@ -614,26 +617,50 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Left click: focus the pane under the cursor; on the chat it also anchors
-	// a drag, so pulling the mouse up/down scrolls the transcript. (For TEXT
-	// selection use the terminal's bypass: Option+drag on macOS, Shift+drag on
-	// Linux — mouse reporting is skipped entirely there.)
+	// a text SELECTION, so dragging sweeps out transcript text to copy with
+	// Alt-C (scrolling stays on the wheel and Ctrl-F/B). The terminal's native
+	// bypass still works too: Option+drag on macOS, Shift+drag on Linux —
+	// mouse reporting is skipped entirely there.
 	switch msg.Action {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
 			m.dragChat = p == paneChat
-			m.dragY = msg.Y
+			if m.dragChat {
+				lx, ly := m.chatLocal(msg.X, msg.Y)
+				m.chat.startSelect(lx, ly)
+			} else {
+				m.chat.clearSelect()
+			}
 			return m, m.setFocus(p)
 		}
 	case tea.MouseActionMotion:
 		if m.dragChat && msg.Button == tea.MouseButtonLeft {
-			m.chat.scrollBy(m.dragY - msg.Y)
-			m.dragY = msg.Y
+			lx, ly := m.chatLocal(msg.X, msg.Y)
+			m.chat.dragSelect(lx, ly)
 			return m, nil
 		}
 	case tea.MouseActionRelease:
 		m.dragChat = false
 	}
 	return m, nil
+}
+
+// chatLocal converts a terminal cell to chat-viewport-local coordinates: past
+// the title row, each box's border cell, and the panes left of the chat. In
+// the horizontal layout the chat is the top box of the right column.
+func (m Model) chatLocal(x, y int) (int, int) {
+	sidebarSpan := m.sidebarW + 2
+	if m.sidebarCollapsed {
+		sidebarSpan = 0
+	}
+	if m.horizontal {
+		return x - (sidebarSpan + 1), y - 2
+	}
+	editorSpan := m.editorW + 2
+	if m.editorW == 0 {
+		editorSpan = 0
+	}
+	return x - (sidebarSpan + editorSpan + 1), y - 2
 }
 
 // paneAt maps a terminal cell to the pane drawn there, accounting for the title
@@ -2458,7 +2485,7 @@ func (m Model) statusView() string {
 	case m.focus == paneChat && m.chatCentric():
 		hints = "enter chat · :submit grade your answer · ⌥o/:copy copy · ⌃f/⌃b page · :view code"
 	case m.focus == paneChat:
-		hints = "enter send · ⌥o/:copy copy reply · ⌃f/⌃b page · ⌃d/⌃u half · wheel scrolls"
+		hints = "enter send · drag+⌥c copy selection · ⌥o/:copy copy reply · ⌃f/⌃b page"
 	case m.focus == paneSidebar:
 		hints = "j/k move · enter open · : cmds (:help) · ⌃r run · ⌃c quit"
 	}

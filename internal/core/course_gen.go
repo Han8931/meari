@@ -238,8 +238,14 @@ func (s *Service) buildTopic(ctx context.Context, courseTitle, folder string,
 			Body:    body,
 		}
 	} else if revise && n.Source == "meari-course" {
-		// Maintenance: previously generated lessons get their links
-		// re-verified too. The learner's own notes are still never rewritten.
+		// Maintenance: previously generated lessons can be polished during
+		// :revise (including useful tables/diagrams), then their links are
+		// re-verified. The learner's own notes are still never rewritten.
+		report("✎ %s polishing lesson: %s", label, n.Title)
+		if body, err := s.tutor.ReviseCourseLesson(ctx, courseTitle, t, n.Body, seedBody, linkable); err == nil && strings.TrimSpace(body) != "" && body != n.Body {
+			n.Body = body
+			changed = true
+		}
 		if body, dead := stripDeadLinks(n.Body, linkOK); dead > 0 {
 			report("✂ %s: unlinked %d dead reference(s) in %s", label, dead, n.Title)
 			n.Body = body

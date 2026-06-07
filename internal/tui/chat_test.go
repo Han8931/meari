@@ -164,6 +164,68 @@ func TestChatCodeBlocksWrapInsteadOfClip(t *testing.T) {
 	}
 }
 
+func TestChatDragSelectExtractsText(t *testing.T) {
+	forceColorTUI(t)
+	c := newChat()
+	c.setSize(40, 12)
+	c.append(roleTutor, "alpha beta gamma\nsecond line here")
+	// contentLines: 0 = " tutor " badge, 1-2 = the body lines.
+
+	// Sweep from the start of body line 1 to column 4 of line 2 (inclusive).
+	c.startSelect(0, 1)
+	if _, ok := c.selectionText(); ok {
+		t.Fatal("a plain press (no motion) should not select anything")
+	}
+	c.dragSelect(4, 2)
+	got, ok := c.selectionText()
+	if !ok {
+		t.Fatal("drag should produce a selection")
+	}
+	if got != "alpha beta gamma\nsecon" {
+		t.Fatalf("selection = %q, want %q", got, "alpha beta gamma\nsecon")
+	}
+
+	// The selected span is repainted in the selection color (the highlight
+	// runs through the row's padding, terminal-style).
+	view := c.overlaySelection(c.vp.View())
+	if !strings.Contains(view, "\x1b[38;5;231;48;5;24malpha beta gamma") {
+		t.Fatalf("selection overlay missing:\n%q", view)
+	}
+
+	// A reversed drag (bottom-up) selects the same text.
+	c.startSelect(4, 2)
+	c.dragSelect(0, 1)
+	if got, _ := c.selectionText(); got != "alpha beta gamma\nsecon" {
+		t.Fatalf("reversed selection = %q", got)
+	}
+
+	// A fresh press clears the previous selection.
+	c.startSelect(0, 1)
+	if _, ok := c.selectionText(); ok {
+		t.Fatal("new press should clear the selection")
+	}
+}
+
+func TestChatSelectionSingleLineAndClamp(t *testing.T) {
+	c := newChat()
+	c.setSize(40, 12)
+	c.append(roleTutor, "alpha beta gamma")
+
+	// Mid-line sweep on one row, head cell included.
+	c.startSelect(6, 1)
+	c.dragSelect(9, 1)
+	if got, _ := c.selectionText(); got != "beta" {
+		t.Fatalf("single-line selection = %q, want beta", got)
+	}
+
+	// Coordinates beyond the transcript clamp instead of panicking.
+	c.startSelect(-3, -5)
+	c.dragSelect(999, 999)
+	if _, ok := c.selectionText(); !ok {
+		t.Fatal("clamped select-all should still produce text")
+	}
+}
+
 func TestVaultCompactGrowsChat(t *testing.T) {
 	m := newTestVaultModel(t)
 	before := m.chatW

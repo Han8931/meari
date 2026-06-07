@@ -125,6 +125,12 @@ examples and code, and deepen what it says rather than writing generic prose abo
 the subject. Extend beyond the note only where the topic requires it.
 A few short sections of clear prose, optionally one worked example. Do not restate
 the title as an H1 — start with the explanation.
+Use visual structure when it improves understanding: include a compact markdown
+table for comparisons, mappings, trade-offs, formulas, or step summaries; include
+a Mermaid diagram in a fenced mermaid block, or a small ASCII diagram, for flows, hierarchies,
+state changes, data structures, timelines, or cause/effect relationships. Do not
+force a visual when prose is clearer, but prefer one whenever the lesson has
+relationships or processes the learner should see at a glance.
 You may wrap a concept in [[wikilinks]] ONLY when it is one of these existing notes:
 ` + clampRunes(strings.Join(linkable, ", "), 1500) + `
 Everything else stays plain text — never invent a link. Respond with ONLY the markdown body.` + t.levelClause()
@@ -132,6 +138,36 @@ Everything else stays plain text — never invent a link. Respond with ONLY the 
 	if sourceContext != "" {
 		user += "\n\nTHE SOURCE NOTE (the learner's own material — your starting point):\n---\n" +
 			clampRunes(sourceContext, 4000) + "\n---"
+	}
+	return t.chat(ctx, system, user)
+}
+
+// ReviseCourseLesson polishes an existing generated lesson during :revise.
+// It preserves the topic's meaning but improves clarity, including useful
+// visual structure when that would make relationships easier to understand.
+func (t *Tutor) ReviseCourseLesson(ctx context.Context, courseTitle string, topic OutlineTopic, lesson, sourceContext string, linkable []string) (string, error) {
+	if t.offline {
+		return lesson, nil
+	}
+	system := `You are revising one existing LESSON of the course "` + courseTitle + `" as a markdown
+note for a self-directed learner. Preserve the lesson's intent, factual content,
+and useful examples, but improve clarity, structure, and learnability.
+Use visual structure when it improves understanding: add or refine a compact
+markdown table for comparisons, mappings, trade-offs, formulas, or step summaries;
+add or refine a Mermaid diagram in a fenced mermaid block, or a small ASCII diagram, for flows,
+hierarchies, state changes, data structures, timelines, or cause/effect
+relationships. Do not force a visual when prose is clearer, but prefer one
+whenever the lesson has relationships or processes the learner should see at a
+glance.
+Do not restate the title as an H1 — start with the explanation.
+You may wrap a concept in [[wikilinks]] ONLY when it is one of these existing notes:
+` + clampRunes(strings.Join(linkable, ", "), 1500) + `
+Everything else stays plain text — never invent a link. Respond with ONLY the revised markdown body.` + t.levelClause()
+	user := "Topic: " + topic.Title + "\nIt must cover: " + topic.Summary +
+		"\n\nExisting lesson:\n---\n" + clampRunes(lesson, 5000) + "\n---"
+	if sourceContext != "" {
+		user += "\n\nTHE SOURCE NOTE (the learner's own material — keep the revision grounded):\n---\n" +
+			clampRunes(sourceContext, 3000) + "\n---"
 	}
 	return t.chat(ctx, system, user)
 }

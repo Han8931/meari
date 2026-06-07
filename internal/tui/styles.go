@@ -112,6 +112,11 @@ var (
 
 	chatSystemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
 
+	// chatSelStyle paints the mouse drag-selection over the transcript (the
+	// sidebar's selection colors, so "selected" reads the same app-wide);
+	// Alt-C copies the selected text.
+	chatSelStyle = lipgloss.NewStyle().Foreground(selectedFg).Background(selectedBg)
+
 	// noticeStyle renders transient command feedback in the status bar (copy
 	// confirmations, resize/fold notices, unknown commands…).
 	noticeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))

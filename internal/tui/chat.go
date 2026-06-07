@@ -65,6 +65,22 @@ type chatModel struct {
 	inputHist []string
 	histPos   int
 	draft     string
+
+	// Mouse drag-selection over the transcript (copied with Alt-C). Coordinates
+	// are content-based — line index into contentLines and display-cell column —
+	// so the selection survives scrolling. contentLines mirrors what reflow
+	// loaded into the viewport.
+	sel          chatSelection
+	contentLines []string
+}
+
+// chatSelection is a span of transcript cells between the press anchor and the
+// dragged head. active stays false until the mouse actually moves, so a plain
+// click only clears the previous selection.
+type chatSelection struct {
+	active               bool
+	anchorLine, anchorCol int
+	headLine, headCol     int
 }
 
 // setCodeLang sets the default language for unlabeled code fences and
@@ -110,6 +126,7 @@ func newChat() chatModel {
 // optional busy line above it, and the transcript in the remaining rows.
 func (c *chatModel) setSize(w, h int) {
 	c.w, c.h = w, h
+	c.clearSelect() // a re-wrap moves every line; old coordinates are meaningless
 	c.relayout()
 	c.reflow()
 }
@@ -172,6 +189,137 @@ func (c *chatModel) scrollBy(n int) {
 	}
 }
 
+// --- mouse drag-selection ---
+
+// selPoint maps pane-local viewport coordinates to content coordinates,
+// clamped to the transcript.
+func (c chatModel) selPoint(x, y int) (line, col int) {
+	if y < 0 {
+		y = 0
+	}
+	if c.vp.Height > 0 && y >= c.vp.Height {
+		y = c.vp.Height - 1
+	}
+	line = c.vp.YOffset + y
+	if n := len(c.contentLines); line >= n {
+		line = n - 1
+	}
+	if line < 0 {
+		line = 0
+	}
+	if x < 0 {
+		x = 0
+	}
+	return line, x
+}
+
+// startSelect anchors a selection at a left press (pane-local coordinates).
+// The previous selection is dropped; nothing is selected until the drag moves.
+func (c *chatModel) startSelect(x, y int) {
+	line, col := c.selPoint(x, y)
+	c.sel = chatSelection{anchorLine: line, anchorCol: col, headLine: line, headCol: col}
+}
+
+// dragSelect extends the selection to the dragged position. Dragging past the
+// top/bottom edge scrolls the transcript along, terminal-style.
+func (c *chatModel) dragSelect(x, y int) {
+	if y < 0 {
+		c.vp.ScrollUp(1)
+	} else if y >= c.vp.Height {
+		c.vp.ScrollDown(1)
+	}
+	c.sel.headLine, c.sel.headCol = c.selPoint(x, y)
+	c.sel.active = true
+}
+
+func (c *chatModel) clearSelect() { c.sel = chatSelection{} }
+
+// selBounds orders the selection's endpoints top-to-bottom, left-to-right.
+func (c chatModel) selBounds() (l1, c1, l2, c2 int) {
+	l1, c1 = c.sel.anchorLine, c.sel.anchorCol
+	l2, c2 = c.sel.headLine, c.sel.headCol
+	if l2 < l1 || (l1 == l2 && c2 < c1) {
+		l1, c1, l2, c2 = l2, c2, l1, c1
+	}
+	return l1, c1, l2, c2
+}
+
+// selectionText extracts the selected cells as plain text (ANSI stripped,
+// per-line trailing padding trimmed), the head cell included.
+func (c chatModel) selectionText() (string, bool) {
+	if !c.sel.active || len(c.contentLines) == 0 {
+		return "", false
+	}
+	l1, c1, l2, c2 := c.selBounds()
+	var parts []string
+	for ln := l1; ln <= l2 && ln < len(c.contentLines); ln++ {
+		row := c.contentLines[ln]
+		w := ansi.StringWidth(row)
+		lo, hi := 0, w
+		if ln == l1 {
+			lo = c1
+		}
+		if ln == l2 && c2+1 < hi {
+			hi = c2 + 1
+		}
+		if lo >= hi {
+			parts = append(parts, "")
+			continue
+		}
+		parts = append(parts, strings.TrimRight(ansi.Strip(ansi.Cut(row, lo, hi)), " "))
+	}
+	text := strings.Join(parts, "\n")
+	if strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// overlaySelection repaints the selected span of the rendered viewport rows in
+// the selection color so the drag is visible while it happens.
+func (c chatModel) overlaySelection(view string) string {
+	if !c.sel.active {
+		return view
+	}
+	l1, c1, l2, c2 := c.selBounds()
+	rows := strings.Split(view, "\n")
+	for r := range rows {
+		abs := c.vp.YOffset + r
+		if abs < l1 || abs > l2 {
+			continue
+		}
+		row := rows[r]
+		w := ansi.StringWidth(row)
+		lo, hi := 0, w
+		if abs == l1 {
+			lo = c1
+		}
+		if abs == l2 && c2+1 < hi {
+			hi = c2 + 1
+		}
+		if lo >= hi || lo >= w {
+			continue
+		}
+		rows[r] = ansi.Cut(row, 0, lo) +
+			chatSelStyle.Render(ansi.Strip(ansi.Cut(row, lo, hi))) +
+			ansi.Cut(row, hi, w)
+	}
+	return strings.Join(rows, "\n")
+}
+
+// copySelection copies the drag-selected transcript text (Alt-C) and returns a
+// status notice describing the outcome.
+func copySelection(c *chatModel) string {
+	text, ok := c.selectionText()
+	if !ok {
+		return "nothing selected — drag over the transcript first, then ⌥c"
+	}
+	if err := copyToClipboard(text); err != nil {
+		return "✓ sent selection to the terminal clipboard (OSC 52) — native clipboard unavailable: " + err.Error()
+	}
+	return "✓ copied selection (" + itoa(len([]rune(text))) + " chars)"
+}
+
 // snapshot returns the transcript blocks so a parent can stash them away when
 // the learner switches topics.
 func (c *chatModel) snapshot() []chatBlock { return c.blocks }
@@ -209,6 +357,7 @@ func (c *chatModel) reflow() {
 		}
 		b.WriteString(c.renderBlock(blk))
 	}
+	c.contentLines = strings.Split(b.String(), "\n")
 	c.vp.SetContent(b.String())
 }
 
@@ -732,7 +881,7 @@ func pasteChat(c *chatModel) string {
 
 func (c chatModel) view() string {
 	parts := make([]string, 0, 4)
-	parts = append(parts, c.vp.View())
+	parts = append(parts, c.overlaySelection(c.vp.View()))
 	if c.busy != "" {
 		parts = append(parts, c.busyLine())
 	}

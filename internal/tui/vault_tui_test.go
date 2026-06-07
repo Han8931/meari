@@ -200,6 +200,146 @@ func TestVaultEscStopsStreamingTutorReply(t *testing.T) {
 	}
 }
 
+func TestVaultFileFinderOpensSelectedNote(t *testing.T) {
+	m := newTestVaultModel(t)
+	vSaveCmd(m.svc, "math/Algebra.md", "# Algebra\n\nSymbols.\n")()
+	vSaveCmd(m.svc, "physics/Waves.md", "# Waves\n\nOscillation.\n")()
+	tm, _ := m.Update(vListCmd(m.svc)())
+	m = tm.(VaultModel)
+
+	tm, _ = m.openFinder("file")
+	m = tm.(VaultModel)
+	m.finderInput.SetValue("alg")
+	m.refreshFinderResults()
+	if len(m.finderResults) == 0 {
+		t.Fatal("expected file finder matches")
+	}
+	if got := m.finderResults[0].path; got != "math/Algebra.md" {
+		t.Fatalf("top file result = %q, want math/Algebra.md", got)
+	}
+
+	tm, cmd := m.updateFinder(tea.KeyMsg{Type: tea.KeyEnter})
+	m = tm.(VaultModel)
+	if cmd == nil {
+		t.Fatal("enter should open the selected note")
+	}
+	opened, ok := cmd().(vOpenedMsg)
+	if !ok {
+		t.Fatalf("expected vOpenedMsg, got %T", cmd())
+	}
+	tm, _ = m.Update(opened)
+	m = tm.(VaultModel)
+	if m.current != "math/Algebra.md" {
+		t.Fatalf("current = %q, want math/Algebra.md", m.current)
+	}
+	if !m.expanded["math"] {
+		t.Fatal("opening from finder should unfold the note's directory")
+	}
+}
+
+func TestVaultContentFinderShowsSnippetAndOpensNote(t *testing.T) {
+	m := newTestVaultModel(t)
+	vSaveCmd(m.svc, "math/Linear Algebra.md", "# Linear Algebra\n\nEigenvalues measure a linear map.\n")()
+	vSaveCmd(m.svc, "history/Rome.md", "# Rome\n\nRepublic and empire.\n")()
+	tm, _ := m.Update(vListCmd(m.svc)())
+	m = tm.(VaultModel)
+
+	tm, _ = m.openFinder("grep")
+	m = tm.(VaultModel)
+	m.finderInput.SetValue("eigen")
+	m.refreshFinderResults()
+	if len(m.finderResults) == 0 {
+		t.Fatal("expected content finder matches")
+	}
+	first := m.finderResults[0]
+	if first.path != "math/Linear Algebra.md" {
+		t.Fatalf("top grep result = %q, want math/Linear Algebra.md", first.path)
+	}
+	if !strings.Contains(first.context, "Eigenvalues") {
+		t.Fatalf("grep context should include matching line, got %q", first.context)
+	}
+
+	tm, cmd := m.updateFinder(tea.KeyMsg{Type: tea.KeyEnter})
+	m = tm.(VaultModel)
+	if cmd == nil {
+		t.Fatal("enter should open the selected content match")
+	}
+	opened := cmd().(vOpenedMsg)
+	tm, _ = m.Update(opened)
+	m = tm.(VaultModel)
+	if m.current != "math/Linear Algebra.md" {
+		t.Fatalf("current = %q, want math/Linear Algebra.md", m.current)
+	}
+}
+
+func TestVaultFinderLeaderChords(t *testing.T) {
+	v, err := vault.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tut := tutor.New(config.AIConfig{Provider: "openai"})
+	m := newVaultModel(core.New(v, tut), config.Config{Editor: config.EditorConfig{Keybindings: "vim"}})
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = tm.(VaultModel)
+	m.setFocus(paneEditor)
+
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{','}})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m = tm.(VaultModel)
+	if m.finderMode != "file" {
+		t.Fatalf(",ff finder mode = %q, want file", m.finderMode)
+	}
+
+	tm, _ = m.updateFinder(tea.KeyMsg{Type: tea.KeyEsc})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{','}})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	m = tm.(VaultModel)
+	if m.finderMode != "grep" {
+		t.Fatalf(",fg finder mode = %q, want grep", m.finderMode)
+	}
+}
+
+// On a fresh vault no note is open and focus starts on the sidebar — the
+// finder chords must still work (regression: they were editor-pane-only).
+func TestVaultFinderOpensFromSidebarOnFreshVault(t *testing.T) {
+	v, err := vault.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tut := tutor.New(config.AIConfig{Provider: "openai"})
+	m := newVaultModel(core.New(v, tut), config.Config{Editor: config.EditorConfig{Keybindings: "vim"}})
+	tm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = tm.(VaultModel)
+	if m.focus != paneSidebar {
+		t.Fatalf("fresh vault should focus the sidebar, got %v", m.focus)
+	}
+
+	for _, r := range ",ff" {
+		tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = tm.(VaultModel)
+	}
+	if m.finderMode != "file" {
+		t.Fatalf(",ff from the sidebar: finder mode = %q, want file", m.finderMode)
+	}
+
+	tm, _ = m.updateFinder(tea.KeyMsg{Type: tea.KeyEsc})
+	m = tm.(VaultModel)
+	for _, r := range ",fg" {
+		tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = tm.(VaultModel)
+	}
+	if m.finderMode != "grep" {
+		t.Fatalf(",fg from the sidebar: finder mode = %q, want grep", m.finderMode)
+	}
+}
+
 func TestVaultViewRenders(t *testing.T) {
 	m := newTestVaultModel(t)
 	out := m.View()

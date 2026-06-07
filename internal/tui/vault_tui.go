@@ -96,16 +96,23 @@ type VaultModel struct {
 	cmdHist editor.CmdHistory
 	cmdComp editor.CmdCompleter // Tab completion over vaultExCmds
 
+	// Fuzzy finder modal. finderMode is "file" for ,ff and "grep" for ,fg.
+	finderMode    string
+	finderInput   textinput.Model
+	finderCursor  int
+	finderResults []finderResult
+
 	// Vim-style chords mirroring the coding TUI: pendingWindow is set after
 	// Ctrl-W (the next h/j/k/l picks a pane by direction); pendingLeader is set
-	// after "," in the editor's Normal mode (",n" folds the sidebar).
+	// after "," in the editor's Normal mode (",n" folds the sidebar, ",ff"/",fg"
+	// open the fuzzy finder).
 	pendingWindow bool
 	pendingLeader bool
+	pendingFind   bool
 
-	// Chat drag-scroll state: a left press on the chat anchors dragY; motion
-	// with the button held scrolls the transcript by the row delta.
+	// Chat drag-selection state: a left press on the chat anchors a selection;
+	// motion with the button held sweeps it out (Alt-C copies).
 	dragChat bool
-	dragY    int
 
 	// editorBias shifts the editor/chat split (":wide" grows the editor,
 	// ":compact" grows the chat), sharing the classic TUI's step/clamp.
@@ -127,6 +134,12 @@ type VaultModel struct {
 	noticeAt time.Time
 
 	sidebarW, editorW, chatW, contentH int
+}
+
+type finderResult struct {
+	path    string
+	title   string
+	context string
 }
 
 // RunVault constructs and runs the vault terminal UI over svc. The Outcome tells
@@ -176,6 +189,10 @@ func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
 	cl := textinput.New()
 	cl.Prompt = ":"
 	m.cmdLine = cl
+
+	fi := textinput.New()
+	fi.Prompt = "› "
+	m.finderInput = fi
 
 	if m.sidebarCollapsed {
 		m.focus = paneEditor
@@ -357,6 +374,9 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc && m.streaming {
 		return m.stopStream()
 	}
+	if m.finderMode != "" {
+		return m.updateFinder(msg)
+	}
 	if m.cmdMode {
 		return m.updateCmdLine(msg)
 	}
@@ -386,11 +406,37 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// A leader chord lives for exactly one keystroke: clear it here so a stray
 	// "," can never carry across a focus change or non-editor key.
+	findLeader := m.pendingFind
+	m.pendingFind = false
 	leader := m.pendingLeader
 	m.pendingLeader = false
 
+	// The ",f?" finder chord completes from ANY pane — the finder must be
+	// reachable on a fresh vault, where focus starts on the sidebar with no
+	// note open.
+	if findLeader {
+		switch msg.String() {
+		case "f":
+			return m.openFinder("file")
+		case "g":
+			return m.openFinder("grep")
+		}
+		return m, nil
+	}
+
 	switch m.focus {
 	case paneSidebar:
+		// The leader chords work from the sidebar too: ",ff"/",fg" open the
+		// finder, ",n" folds the pane — same keys as the editor's Normal mode.
+		if leader {
+			switch msg.String() {
+			case "n":
+				return m.cmdFold()
+			case "f":
+				m.pendingFind = true
+			}
+			return m, nil
+		}
 		// A pending delete confirmation eats the next key: y deletes, anything
 		// else cancels.
 		if len(m.confirmDel) > 0 {
@@ -445,6 +491,9 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.pendingNode = true
 			}
 			return m, nil
+		case ",":
+			m.pendingLeader = true
+			return m, nil
 		}
 		var enter bool
 		m.sidebar, enter = m.sidebar.Update(msg)
@@ -467,8 +516,12 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Leader chord ",n" folds the sidebar — but only in Vim Normal mode, so
 		// it never disturbs typing or a pending multi-key Vim command.
 		if leader {
-			if msg.String() == "n" {
+			switch msg.String() {
+			case "n":
 				return m.cmdFold()
+			case "f":
+				m.pendingFind = true
+				return m, nil
 			}
 			// Not the fold chord: replay the swallowed "," (its Normal-mode
 			// repeat-find), then deliver the key that followed it.
@@ -500,11 +553,30 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "alt+o", "ø", "Ø":
 			m.flash(copyChat(&m.chat, ""))
 			return m, nil
+		// Copy the mouse drag-selection: Alt+C / Option+C (macOS sends "ç").
+		case "alt+c", "ç", "Ç":
+			m.flash(copySelection(&m.chat))
+			return m, nil
 		// Paste the system clipboard into the chat input: Alt+V / Option+V
 		// (macOS sends "√" for Option+V). Cmd+V also works — the terminal
 		// delivers it as a bracketed paste straight into the input.
 		case "alt+v", "√":
 			m.flash(pasteChat(&m.chat))
+			return m, nil
+		}
+		// The leader chords work from the chat's Vim Normal mode too (never
+		// from Insert, where "," must type a comma).
+		if leader {
+			switch msg.String() {
+			case "n":
+				return m.cmdFold()
+			case "f":
+				m.pendingFind = true
+			}
+			return m, nil
+		}
+		if m.chat.inNormal() && msg.String() == "," {
+			m.pendingLeader = true
 			return m, nil
 		}
 		// The input's Vim Normal mode (Esc): ":" opens the command line right
@@ -575,26 +647,42 @@ func (m VaultModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Left click: focus the pane under the cursor; on the chat it also anchors
-	// a drag, so pulling the mouse up/down scrolls the transcript. (For TEXT
-	// selection use the terminal's bypass: Option+drag on macOS, Shift+drag on
-	// Linux — mouse reporting is skipped entirely there.)
+	// a text SELECTION, so dragging sweeps out transcript text to copy with
+	// Alt-C (scrolling stays on the wheel and Ctrl-F/B). The terminal's native
+	// bypass still works too: Option+drag on macOS, Shift+drag on Linux —
+	// mouse reporting is skipped entirely there.
 	switch msg.Action {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
 			m.dragChat = p == paneChat
-			m.dragY = msg.Y
+			if m.dragChat {
+				lx, ly := m.chatLocal(msg.X, msg.Y)
+				m.chat.startSelect(lx, ly)
+			} else {
+				m.chat.clearSelect()
+			}
 			return m, m.setFocus(p)
 		}
 	case tea.MouseActionMotion:
 		if m.dragChat && msg.Button == tea.MouseButtonLeft {
-			m.chat.scrollBy(m.dragY - msg.Y)
-			m.dragY = msg.Y
+			lx, ly := m.chatLocal(msg.X, msg.Y)
+			m.chat.dragSelect(lx, ly)
 			return m, nil
 		}
 	case tea.MouseActionRelease:
 		m.dragChat = false
 	}
 	return m, nil
+}
+
+// chatLocal converts a terminal cell to chat-viewport-local coordinates: past
+// the title row, each box's border cell, and the panes left of the chat.
+func (m VaultModel) chatLocal(x, y int) (int, int) {
+	sidebarSpan := m.sidebarW + 2
+	if m.sidebarCollapsed {
+		sidebarSpan = 0
+	}
+	return x - (sidebarSpan + m.editorW + 2 + 1), y - 2
 }
 
 // paneAt maps a terminal cell to the pane drawn there: row 0 is the title bar,
@@ -683,6 +771,172 @@ func (m *VaultModel) closeCmdLine() {
 	m.cmdLine.Prompt = ":"
 	m.promptMode = ""
 	m.promptOld = ""
+}
+
+func (m VaultModel) openFinder(mode string) (tea.Model, tea.Cmd) {
+	m.finderMode = mode
+	m.finderCursor = 0
+	m.finderInput.SetValue("")
+	m.finderInput.CursorEnd()
+	m.finderInput.Focus()
+	m.refreshFinderResults()
+	return m, nil
+}
+
+func (m VaultModel) updateFinder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.finderMode = ""
+		m.finderInput.Blur()
+		return m, nil
+	case tea.KeyEnter:
+		if len(m.finderResults) == 0 {
+			return m, nil
+		}
+		if m.finderCursor < 0 || m.finderCursor >= len(m.finderResults) {
+			m.finderCursor = 0
+		}
+		p := m.finderResults[m.finderCursor].path
+		m.finderMode = ""
+		m.finderInput.Blur()
+		m.expandTo(p)
+		return m, vOpenCmd(m.svc, p)
+	case tea.KeyUp:
+		if m.finderCursor > 0 {
+			m.finderCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.finderCursor < len(m.finderResults)-1 {
+			m.finderCursor++
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.finderInput, cmd = m.finderInput.Update(msg)
+	m.refreshFinderResults()
+	if m.finderCursor >= len(m.finderResults) {
+		m.finderCursor = clampMin(len(m.finderResults)-1, 0)
+	}
+	return m, cmd
+}
+
+func (m *VaultModel) refreshFinderResults() {
+	q := strings.TrimSpace(m.finderInput.Value())
+	switch m.finderMode {
+	case "file":
+		m.finderResults = m.findFileResults(q)
+	case "grep":
+		m.finderResults = m.findGrepResults(q)
+	default:
+		m.finderResults = nil
+	}
+	if m.finderCursor >= len(m.finderResults) {
+		m.finderCursor = clampMin(len(m.finderResults)-1, 0)
+	}
+}
+
+func (m VaultModel) findFileResults(q string) []finderResult {
+	type scored struct {
+		result finderResult
+		score  int
+	}
+	rows := make([]scored, 0, len(m.notes))
+	for _, n := range m.notes {
+		title := n.Title
+		if title == "" {
+			title = strings.TrimSuffix(path.Base(n.Path), path.Ext(n.Path))
+		}
+		score := 0
+		if q != "" {
+			var ok bool
+			score, ok = fuzzyScore(q, title+" "+n.Path)
+			if !ok {
+				continue
+			}
+		}
+		rows = append(rows, scored{
+			result: finderResult{path: n.Path, title: title, context: n.Path},
+			score:  score,
+		})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].score != rows[j].score {
+			return rows[i].score > rows[j].score
+		}
+		return strings.ToLower(rows[i].result.path) < strings.ToLower(rows[j].result.path)
+	})
+	out := make([]finderResult, 0, min(len(rows), 40))
+	for i := 0; i < len(rows) && i < 40; i++ {
+		out = append(out, rows[i].result)
+	}
+	return out
+}
+
+func (m VaultModel) findGrepResults(q string) []finderResult {
+	q = strings.ToLower(strings.TrimSpace(q))
+	if q == "" {
+		return nil
+	}
+	var out []finderResult
+	for _, meta := range m.notes {
+		n, err := m.svc.OpenNote(meta.Path)
+		if err != nil {
+			continue
+		}
+		title := n.Title
+		if title == "" {
+			title = meta.Title
+		}
+		if title == "" {
+			title = strings.TrimSuffix(path.Base(meta.Path), path.Ext(meta.Path))
+		}
+		for i, line := range strings.Split(n.Body, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || !strings.Contains(strings.ToLower(trimmed), q) {
+				continue
+			}
+			out = append(out, finderResult{
+				path:    meta.Path,
+				title:   title,
+				context: itoa(i+1) + ": " + trimmed,
+			})
+			if len(out) >= 40 {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func fuzzyScore(query, candidate string) (int, bool) {
+	q := []rune(strings.ToLower(query))
+	c := []rune(strings.ToLower(candidate))
+	if len(q) == 0 {
+		return 0, true
+	}
+	qi := 0
+	score := 0
+	streak := 0
+	for i, r := range c {
+		if qi >= len(q) {
+			break
+		}
+		if r != q[qi] {
+			streak = 0
+			continue
+		}
+		score += 10 + streak*4
+		if i == 0 || c[i-1] == '/' || c[i-1] == '-' || c[i-1] == '_' || c[i-1] == ' ' {
+			score += 6
+		}
+		streak++
+		qi++
+	}
+	if qi != len(q) {
+		return 0, false
+	}
+	return score - len(c)/8, true
 }
 
 // openNodePrompt opens the status-row input for a node operation: "add"
@@ -1323,6 +1577,7 @@ func (m *VaultModel) layout() {
 	}
 
 	m.sidebar.setSize(m.sidebarW, m.contentH)
+	m.finderInput.Width = max(20, m.width-18)
 	reserved := 1 + len(m.essayHeaderLines(m.editorW)) + len(m.backlinkFooterLines(m.editorW))
 	m.editor.SetSize(m.editorW, max(1, m.contentH-reserved))
 	m.chat.setSize(m.chatW, m.contentH)
@@ -1345,7 +1600,11 @@ func (m VaultModel) View() string {
 		row = lipgloss.JoinHorizontal(lipgloss.Top, sb, ed, ch)
 	}
 	frame := lipgloss.JoinVertical(lipgloss.Left, m.titleView(), row, m.statusView())
-	return lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(frame)
+	frame = lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(frame)
+	if m.finderMode != "" {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.finderView())
+	}
+	return frame
 }
 
 func (m VaultModel) box(p pane, w, h int, content string) string {
@@ -1396,6 +1655,61 @@ func (m VaultModel) editorPaneView(w int) string {
 		out += "\n" + ln
 	}
 	return out
+}
+
+func (m VaultModel) finderView() string {
+	title := "Find files"
+	hint := ",ff · type to filter · enter open · esc close"
+	empty := "no notes"
+	if m.finderMode == "grep" {
+		title = "Find contents"
+		hint = ",fg · type to search contents · enter open · esc close"
+		empty = "type to search note contents"
+	}
+
+	w := clampRange(m.width-10, 40, 92)
+	if m.width < 50 {
+		w = clampMin(m.width-4, 24)
+	}
+	inner := clampMin(w-6, 12)
+	maxRows := min(len(m.finderResults), 12)
+
+	var b strings.Builder
+	b.WriteString(titleBar.Render(" " + title + " "))
+	b.WriteString("\n\n")
+	b.WriteString(m.finderInput.View())
+	b.WriteString("\n\n")
+	if len(m.finderResults) == 0 {
+		b.WriteString(hintStyle.Render(empty))
+	} else {
+		for i := 0; i < maxRows; i++ {
+			r := m.finderResults[i]
+			label := r.title
+			if r.context != "" {
+				label += "  " + r.context
+			}
+			label = truncate(label, inner-2)
+			if i == m.finderCursor {
+				b.WriteString(selectedRow.Width(inner).Render("▸ " + label))
+			} else {
+				b.WriteString("  " + label)
+			}
+			if i < maxRows-1 {
+				b.WriteString("\n")
+			}
+		}
+		if len(m.finderResults) > maxRows {
+			b.WriteString("\n" + hintStyle.Render("  +"+itoa(len(m.finderResults)-maxRows)+" more"))
+		}
+	}
+	b.WriteString("\n\n")
+	b.WriteString(hintStyle.Render(hint))
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("39")).
+		Padding(1, 2).
+		Width(w).
+		Render(b.String())
 }
 
 // backlinkFooterLines renders the "↩ Linked mentions" panel under the editor for
@@ -1468,9 +1782,11 @@ func (m VaultModel) statusView() string {
 	case m.studyMode:
 		hints = ":grade check answer · :answer see a model answer · :done finish"
 	case m.focus == paneSidebar:
-		hints = "j/k move · enter open/fold dir · space mark · m node ops · : cmds"
+		hints = "j/k move · enter open · ,ff find · space mark · m node ops · : cmds"
+	case m.focus == paneEditor:
+		hints = ",ff files · ,fg contents · ,n fold notes · ⌃s save"
 	case m.focus == paneChat:
-		hints = "enter send · ⌥o/:copy copy reply · ⌃f/⌃b scroll"
+		hints = "enter send · drag+⌥c copy selection · ⌥o/:copy copy reply · ⌃f/⌃b scroll"
 	}
 	return statusBar.Width(m.width).Render(left + "   " + hintStyle.Render(hints))
 }

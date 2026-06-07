@@ -10,8 +10,8 @@ this file tracks concrete, actionable items. Check things off as they land.
 - [ ] Word/line count + reading time in the editor status bar
 - [x] Answer check button — clickable "▸ Check answer" in the coding TUI title bar
 - [ ] `meari check` — suggest the exact fix when key/model/base-url is wrong
-- [ ] Diagram creation during course creating
 - [ ] URL go
+- [ ] Mouse visual block
 
 ## Study & learning
 
@@ -29,7 +29,7 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## AI tutor
 
-- [ ] Visual mode AI: "Explain this selection" — explain/expand selected editor text inline
+- [ ] Visual mode AI in the vault mode: "Explain this selection" — explain/expand selected editor text inline
 - [ ] Lesson regeneration — "go deeper" / "simplify" the current lesson note
 - [ ] Citations / source mode — store references in lesson frontmatter
 
