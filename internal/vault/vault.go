@@ -304,6 +304,16 @@ func DeriveRelPath(subject, title string) string {
 	return filepath.ToSlash(filepath.Join(dir, name+".md"))
 }
 
+// CleanFilename strips path-unsafe characters from one path component, for
+// callers composing folder/file names from titles (the same sanitizing
+// DeriveRelPath applies).
+func CleanFilename(s string) string {
+	if c := sanitizeFilename(s); c != "" {
+		return c
+	}
+	return "Untitled"
+}
+
 var filenameUnsafe = regexp.MustCompile(`[/\\:*?"<>|]+`)
 
 // sanitizeFilename strips characters that are illegal in path components while

@@ -896,7 +896,7 @@ var (
 	visualSelStyle    = lipgloss.NewStyle().Background(lipgloss.Color("24")).Foreground(lipgloss.Color("231"))
 	visualCursorStyle = lipgloss.NewStyle().Reverse(true)
 	visualGutterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	visualBadge       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("135")).Padding(0, 1)
+	visualBadge       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("75")).Padding(0, 1)
 )
 
 // visualView renders the buffer with the active selection highlighted. The

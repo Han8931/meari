@@ -119,8 +119,8 @@ func TestHighlightMarkdownEmphasisAndLists(t *testing.T) {
 		{0, "\x1b[3m*italic*\x1b[0m", "italic span"},
 		{0, "\x1b[1m**bold**\x1b[0m", "bold span"},
 		{0, "\x1b[1;3m***both***\x1b[0m", "bold-italic span"},
-		{2, "\x1b[38;5;176m-\x1b[0m item one", "dash bullet tinted"},
-		{3, "\x1b[38;5;176m*\x1b[0m nested", "star bullet tinted"},
+		{2, "\x1b[38;5;75m-\x1b[0m item one", "dash bullet tinted"},
+		{3, "\x1b[38;5;75m*\x1b[0m nested", "star bullet tinted"},
 		{3, "\x1b[1m**bold**\x1b[0m inside", "inline styling inside a list item"},
 	} {
 		if !strings.Contains(rows[c.row], c.want) {
@@ -208,7 +208,7 @@ func TestHighlightMarkdownQuoteSpansRows(t *testing.T) {
 	if rows[3] != "plain after blank" {
 		t.Errorf("blank row should end the quote: %q", rows[3])
 	}
-	if !strings.Contains(rows[5], "\x1b[38;5;176m-\x1b[0m list interrupts") {
+	if !strings.Contains(rows[5], "\x1b[38;5;75m-\x1b[0m list interrupts") {
 		t.Errorf("a list item should interrupt the quote: %q", rows[5])
 	}
 	if got := stripANSI(out); got != src {

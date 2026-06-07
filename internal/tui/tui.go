@@ -36,9 +36,10 @@ type Deps struct {
 	Tutor      *tutor.Tutor
 	Store      *drafts.Store
 	Progress   *progress.State
+	Svc        *core.Service // the vault engine, for vault-built courses
 	Cfg        config.Config
 	Topic      string // from --topic; empty means prompt for it at startup
-	Curriculum bool   // from --curriculum; start in guided curriculum mode
+	Curriculum bool   // from -tutor; start in guided curriculum mode
 	ConfigPath string // path to config.toml, for the :config command
 	BaseDir    string // working dir, for reloading config after :config
 }
@@ -148,9 +149,19 @@ type Model struct {
 	// negative favors the chat (":compact"). Applied in layout(); 0 is the default.
 	editorBias int
 
+	// view selects the screen (":view"): "auto" follows the topic kind — essay
+	// topics hide the editor so the lesson, conversation, and answer all live
+	// in the chat pane; "chat"/"code" force it either way.
+	view string
+
 	// pendingWindow is set after Ctrl-W; the next key (h/j/k/l) picks a pane,
 	// Vim window-command style.
 	pendingWindow bool
+
+	// Chat drag-scroll state: a left press on the chat anchors dragY; motion
+	// with the button held scrolls the transcript by the row delta.
+	dragChat bool
+	dragY    int
 
 	// pendingLeader is set after "," in the editor's Normal mode; it starts a
 	// leader chord. "n" folds the sidebar; any other key replays the swallowed
@@ -251,16 +262,21 @@ func newModel(d Deps) Model {
 		deps:             d,
 		horizontal:       d.Cfg.Horizontal(),
 		sidebarCollapsed: d.Cfg.UI.SidebarFolded,
+		view:             d.Cfg.UI.View,
 		sidebar:          newSidebar(),
-		editor:           editor.New("", d.Cfg.VimEditor(), save).WithGlobalCmds(tutorExCmds),
-		chat:             newChat(),
-		topicInput:       ti,
-		cmdLine:          cl,
-		curID:            curID,
-		challenges:       map[string]tutor.Challenge{},
-		chatByKey:        map[string][]chatBlock{},
-		histByKey:        map[string][]tutor.ChatTurn{},
-		spin:             sp,
+		editor: editor.New("", d.Cfg.VimEditor(), save).
+			WithGlobalCmds(tutorExCmds).
+			WithArgCompleter(func(input string) []string {
+				return topicArgCandidates(d.Svc, input)
+			}),
+		chat:       newChat(),
+		topicInput: ti,
+		cmdLine:    cl,
+		curID:      curID,
+		challenges: map[string]tutor.Challenge{},
+		chatByKey:  map[string][]chatBlock{},
+		histByKey:  map[string][]tutor.ChatTurn{},
+		spin:       sp,
 	}
 	m.editor.SetShowLineNumbers(d.Cfg.LineNumbers())
 	m.seedOrder()
@@ -521,7 +537,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.flash(pasteChat(&m.chat))
 			return m, nil
 		}
-		if msg.Type == tea.KeyEnter {
+		// The input's Vim Normal mode (Esc): ":" opens the command line right
+		// from the chat; Enter doesn't send while in it.
+		if m.chat.inNormal() && msg.String() == ":" {
+			return m.openCmdLine()
+		}
+		if msg.Type == tea.KeyEnter && !m.chat.inNormal() {
 			return m.submitChat()
 		}
 		var cmd tea.Cmd
@@ -585,9 +606,25 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Left click: focus the pane under the cursor.
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-		return m, m.setFocus(p)
+	// Left click: focus the pane under the cursor; on the chat it also anchors
+	// a drag, so pulling the mouse up/down scrolls the transcript. (For TEXT
+	// selection use the terminal's bypass: Option+drag on macOS, Shift+drag on
+	// Linux — mouse reporting is skipped entirely there.)
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.Button == tea.MouseButtonLeft {
+			m.dragChat = p == paneChat
+			m.dragY = msg.Y
+			return m, m.setFocus(p)
+		}
+	case tea.MouseActionMotion:
+		if m.dragChat && msg.Button == tea.MouseButtonLeft {
+			m.chat.scrollBy(m.dragY - msg.Y)
+			m.dragY = msg.Y
+			return m, nil
+		}
+	case tea.MouseActionRelease:
+		m.dragChat = false
 	}
 	return m, nil
 }
@@ -606,20 +643,26 @@ func (m Model) paneAt(x, y int) (pane, bool) {
 		sidebarSpan = 0
 	}
 	if m.horizontal {
-		// sidebar on the left; chat stacked over the editor on the right.
+		// sidebar on the left; chat stacked over the editor on the right (the
+		// editor row is absent in the chat-centric view).
 		if x < sidebarSpan {
 			return paneSidebar, true
 		}
-		if y < 1+m.chatH+2 {
+		if m.editorH == 0 || y < 1+m.chatH+2 {
 			return paneChat, true
 		}
 		return paneEditor, true
 	}
-	// vertical: sidebar | editor | chat, each box +2 columns for its border.
+	// vertical: sidebar | editor | chat, each box +2 columns for its border;
+	// a hidden editor occupies no columns at all.
+	editorSpan := m.editorW + 2
+	if m.editorW == 0 {
+		editorSpan = 0
+	}
 	switch {
 	case x < sidebarSpan:
 		return paneSidebar, true
-	case x < sidebarSpan+m.editorW+2:
+	case x < sidebarSpan+editorSpan:
 		return paneEditor, true
 	default:
 		return paneChat, true
@@ -649,7 +692,7 @@ func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyShiftTab {
 			dir = -1
 		}
-		if s, ok := m.cmdComp.Next(m.cmdLine.Value(), tutorExCmds, dir); ok {
+		if s, ok := m.cmdComp.Next(m.cmdLine.Value(), m.exCandidates(), dir); ok {
 			m.cmdLine.SetValue(s)
 			m.cmdLine.CursorEnd()
 		}
@@ -690,9 +733,48 @@ func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // tutorExCmds lists every command runEx accepts (aliases included), sorted,
 // for Tab completion in the command prompt.
 var tutorExCmds = []string{
-	"answer", "clear", "compact", "config", "copy", "course", "fold", "help",
-	"notes", "paste", "progress", "sidebar", "subject", "topic", "vault",
-	"wide", "yank",
+	"answer", "clear", "compact", "config", "copy", "course", "export", "fold",
+	"help", "notes", "paste", "progress", "q", "quit", "run", "sidebar",
+	"subject", "submit", "topic", "vault", "view", "wide", "yank",
+}
+
+// exCandidates returns the command line's Tab-completion candidates: command
+// names — or, once a course verb is typed, its argument completed against the
+// built-in languages and vault courses (":topic nos⇥" → the full course id).
+func (m Model) exCandidates() []string {
+	if c := topicArgCandidates(m.deps.Svc, m.cmdLine.Value()); c != nil {
+		return c
+	}
+	return tutorExCmds
+}
+
+// topicArgCandidates completes a course verb's argument: for "topic …" (and
+// aliases) it returns "topic <id>" for every built-in language and vault
+// course, nil for any other input. Shared by the global prompt and the
+// editor's ":" line (via WithArgCompleter).
+func topicArgCandidates(svc *core.Service, input string) []string {
+	if strings.HasPrefix(input, "view ") {
+		return []string{"view auto", "view chat", "view code"}
+	}
+	for _, verb := range []string{"topic ", "course ", "subject "} {
+		if !strings.HasPrefix(input, verb) {
+			continue
+		}
+		ids := append([]string{}, curriculum.Languages()...)
+		if svc != nil {
+			if metas, err := svc.ListCourses(); err == nil {
+				for _, c := range metas {
+					ids = append(ids, c.ID)
+				}
+			}
+		}
+		out := make([]string, len(ids))
+		for i, id := range ids {
+			out[i] = verb + id
+		}
+		return out
+	}
+	return nil
 }
 
 // runEx dispatches an ex-command (without the leading colon), from either the
@@ -709,18 +791,27 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdClear(fields[1:])
 	case "fold", "sidebar":
 		return m.cmdFold()
+	case "view":
+		return m.cmdView(fields[1:])
 	case "compact":
 		return m.cmdResizeEditor(-editorBiasStep)
 	case "wide":
 		return m.cmdResizeEditor(editorBiasStep)
 	case "answer":
 		return m.cmdAnswer()
+	case "submit", "run":
+		// Submission without the Ctrl-S chord: works from any pane (the
+		// editor's own ":submit" already handles the editing case).
+		return m, m.startRun()
 	case "copy", "yank":
 		what := ""
 		if len(fields) > 1 {
 			what = fields[1]
 		}
 		m.flash(copyChat(&m.chat, what))
+		return m, nil
+	case "export":
+		m.flash(exportChat(&m.chat, m.deps.Cfg.ExportsDir, m.topic))
 		return m, nil
 	case "paste":
 		m.flash(pasteChat(&m.chat))
@@ -733,6 +824,8 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "config":
 		return m, m.openConfig()
+	case "q", "quit":
+		return m, m.quit() // saves drafts/progress on the way out
 	case "vault", "notes":
 		m.exit = SwitchToVault
 		return m, m.quit() // saves the draft, then the shell loop opens the vault
@@ -745,29 +838,102 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 	}
 }
 
-// cmdTopic switches to another course. With no argument it opens the picker.
+// cmdTopic switches to another course. With no argument it opens the picker;
+// multi-word names are taken whole (":topic nosql databases").
 func (m Model) cmdTopic(args []string) (tea.Model, tea.Cmd) {
 	if len(args) == 0 {
 		m.overlay = overlayPicker
-		m.pickerCursor = courseIndex(m.lang)
+		m.pickerCursor = 0
+		for i, id := range m.courseNames() {
+			if id == m.lang {
+				m.pickerCursor = i
+				break
+			}
+		}
 		return m, nil
 	}
-	return m.switchCourse(strings.ToLower(args[0]))
+	return m.switchCourse(strings.ToLower(strings.Join(args, " ")))
 }
 
 // switchCourse enters the curriculum for course at the learner's current level
-// (defaulting to beginner), or reports an error if there's no such course.
+// (defaulting to beginner). Built-in languages are tried first, then the
+// vault's meari-courses (by id or title); unknown names list both.
 func (m Model) switchCourse(course string) (tea.Model, tea.Cmd) {
-	if !curriculum.HasCurriculum(course) {
-		m.flash("no course \"" + course + "\" — try: " + strings.Join(curriculum.Languages(), ", "))
+	if curriculum.HasCurriculum(course) {
+		level := m.level
+		if level == "" {
+			level = curriculum.Beginner
+		}
+		m.chat.append(roleSystem, "— now learning "+titleCase(course)+" ("+level+") —")
+		return m, m.loadCurriculum(course, level, "")
+	}
+	if vc, err := m.loadVaultCourse(course); err == nil {
+		m.chat.append(roleSystem, "— now studying "+vc.Lang+" ("+vc.Level+") —")
+		return m, m.installCurriculum(vc, "")
+	}
+	// Generated course ids are long ("nosql-databases-a-beginner-s-…"): a
+	// unique case-insensitive substring of the id or title is enough.
+	if m.deps.Svc != nil {
+		if metas, err := m.deps.Svc.ListCourses(); err == nil {
+			q := strings.ToLower(course)
+			var hits []core.CourseMeta
+			for _, c := range metas {
+				if strings.Contains(strings.ToLower(c.ID), q) ||
+					strings.Contains(strings.ToLower(c.Title), q) {
+					hits = append(hits, c)
+				}
+			}
+			if len(hits) == 1 {
+				if vc, err := m.loadVaultCourse(hits[0].ID); err == nil {
+					m.chat.append(roleSystem, "— now studying "+hits[0].Title+" ("+vc.Level+") —")
+					return m, m.installCurriculum(vc, "")
+				}
+			}
+			if len(hits) > 1 {
+				var names []string
+				for _, c := range hits {
+					names = append(names, c.ID)
+				}
+				m.flash("\"" + course + "\" matches several courses: " + strings.Join(names, ", "))
+				return m, nil
+			}
+		}
+	}
+	m.flash("no course \"" + course + "\" — try: " + strings.Join(m.courseNames(), ", "))
+	return m, nil
+}
+
+// courseNames lists everything :topic accepts: built-in languages plus the
+// vault's meari-courses.
+func (m Model) courseNames() []string {
+	ids, _ := m.pickerEntries()
+	return ids
+}
+
+// cmdView switches the screen: "chat" hides the editor (the lesson,
+// conversation, and your answer all live in the chat pane), "code" forces the
+// three-pane screen, "auto" (default) follows the topic kind.
+func (m Model) cmdView(args []string) (tea.Model, tea.Cmd) {
+	if len(args) == 0 {
+		eff := "code"
+		if m.chatCentric() {
+			eff = "chat"
+		}
+		m.flash("view: " + m.view + " (" + eff + " here) — :view auto|chat|code")
 		return m, nil
 	}
-	level := m.level
-	if level == "" {
-		level = curriculum.Beginner
+	v := strings.ToLower(args[0])
+	if v != "auto" && v != "chat" && v != "code" {
+		m.flash("usage: :view auto|chat|code")
+		return m, nil
 	}
-	m.chat.append(roleSystem, "— now learning "+titleCase(course)+" ("+level+") —")
-	return m, m.loadCurriculum(course, level, "")
+	m.view = v
+	m.layout()
+	m.flash("view: " + v)
+	if m.chatCentric() && m.focus == paneEditor {
+		return m, m.setFocus(paneChat)
+	}
+	return m, nil
 }
 
 // cmdAnswer reveals a model solution for the current challenge. The learner
@@ -888,12 +1054,12 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch m.overlay {
 	case overlayPicker:
-		courses := curriculum.Languages()
+		ids, _ := m.pickerEntries()
 		switch msg.String() {
 		case "esc", "q":
 			m.overlay = overlayNone
 		case "j", "down":
-			if m.pickerCursor < len(courses)-1 {
+			if m.pickerCursor < len(ids)-1 {
 				m.pickerCursor++
 			}
 		case "k", "up":
@@ -902,7 +1068,7 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			m.overlay = overlayNone
-			return m.switchCourse(courses[m.pickerCursor])
+			return m.switchCourse(ids[m.pickerCursor])
 		}
 	case overlayProgress, overlayHelp:
 		switch msg.String() {
@@ -936,16 +1102,35 @@ func (m Model) overlayView() string {
 	return ""
 }
 
-func (m Model) pickerView() string {
-	courses := curriculum.Languages()
-	var b strings.Builder
-	for i, c := range courses {
-		if i == m.pickerCursor {
-			b.WriteString(selectedRow.Render("▸ " + titleCase(c)))
-		} else {
-			b.WriteString("  " + titleCase(c))
+// pickerEntries returns everything the course picker offers: the built-in
+// languages, then the vault's meari-courses. ids are what :topic accepts;
+// labels are for display.
+func (m Model) pickerEntries() (ids, labels []string) {
+	for _, l := range curriculum.Languages() {
+		ids = append(ids, l)
+		labels = append(labels, titleCase(l))
+	}
+	if m.deps.Svc != nil {
+		if metas, err := m.deps.Svc.ListCourses(); err == nil {
+			for _, c := range metas {
+				ids = append(ids, c.ID)
+				labels = append(labels, c.Title+"  "+hintStyle.Render("(vault course)"))
+			}
 		}
-		if i < len(courses)-1 {
+	}
+	return ids, labels
+}
+
+func (m Model) pickerView() string {
+	_, labels := m.pickerEntries()
+	var b strings.Builder
+	for i, l := range labels {
+		if i == m.pickerCursor {
+			b.WriteString(selectedRow.Render("▸ " + l))
+		} else {
+			b.WriteString("  " + l)
+		}
+		if i < len(labels)-1 {
 			b.WriteString("\n")
 		}
 	}
@@ -1045,16 +1230,6 @@ func modalCard(title, body, hint string) string {
 		Padding(1, 3).
 		Width(56).
 		Render(inner)
-}
-
-// courseIndex returns the position of course in the supported list, or 0.
-func courseIndex(course string) int {
-	for i, c := range curriculum.Languages() {
-		if c == course {
-			return i
-		}
-	}
-	return 0
 }
 
 // setupOptions returns the selectable options for the current selection step
@@ -1342,20 +1517,45 @@ func (m *Model) openSelected() tea.Cmd {
 
 // loadCurriculum enters curriculum mode for (lang, level), indexes its topics,
 // and starts at startID (or the first unfinished topic when startID is empty).
+// lang may also name a vault-built course (its id/title), so a saved course
+// session resumes through the same path as the built-ins.
 func (m *Model) loadCurriculum(lang, level, startID string) tea.Cmd {
 	c, ok := curriculum.For(lang, level)
+	if !ok {
+		if vc, err := m.loadVaultCourse(lang); err == nil {
+			c, ok = vc, true
+		}
+	}
 	if !ok {
 		m.chat.append(roleSystem, "⚠ No curriculum for "+lang+" / "+level+".")
 		return nil
 	}
+	return m.installCurriculum(c, startID)
+}
+
+// loadVaultCourse loads a meari-course by id/title and converts it to the
+// runnable curriculum form.
+func (m *Model) loadVaultCourse(key string) (curriculum.Curriculum, error) {
+	if m.deps.Svc == nil {
+		return curriculum.Curriculum{}, fmt.Errorf("no vault service")
+	}
+	c, err := m.deps.Svc.LoadCourse(key)
+	if err != nil {
+		return curriculum.Curriculum{}, err
+	}
+	return c.Curriculum(), nil
+}
+
+// installCurriculum makes c the active curriculum and starts a topic.
+func (m *Model) installCurriculum(c curriculum.Curriculum, startID string) tea.Cmd {
 	m.curriculum = true
-	m.lang, m.level = lang, level
+	m.lang, m.level = c.Lang, c.Level
 	m.curr = c
 	m.topicByID = map[string]curriculum.Topic{}
 	for _, t := range c.Topics() {
 		m.topicByID[t.ID] = t
 	}
-	m.deps.Tutor.SetLevel(level)
+	m.deps.Tutor.SetLevel(c.Level)
 
 	start := m.firstIncompleteTopic()
 	if startID != "" {
@@ -1419,12 +1619,16 @@ func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
 	m.deps.Progress.SetLast(m.curr.Lang, m.curr.Level, t.ID, t.Title)
 	_ = m.deps.Progress.Save()
 
+	lang := m.curr.Lang
+	if t.Lang != "" {
+		lang = t.Lang // vault courses mix kinds: code topics vs essay topics
+	}
 	ch := tutor.Challenge{
 		ID:          t.ID,
 		Prompt:      t.Challenge.Prompt,
 		StarterCode: t.Challenge.StarterCode,
 		Tests:       t.Challenge.Tests,
-		Lang:        m.curr.Lang,
+		Lang:        lang,
 	}
 	m.current = ch
 	*m.curID = ch.ID
@@ -1441,6 +1645,12 @@ func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
 	// as a comment, where it stays visible regardless of chat length.
 	if m.switchChatContext("topic:" + t.ID) {
 		m.chat.append(roleLesson, t.Title+"\n\n"+t.Lesson)
+		// The chat-centric view has no editor to pin the prompt above, so the
+		// task statement joins the transcript right after the lesson.
+		if m.chatCentric() && strings.TrimSpace(ch.Prompt) != "" {
+			m.chat.append(roleSystem, "✎ Your task: "+ch.Prompt+
+				"\n\nType your answer below — enter chats, :submit grades it.")
+		}
 	}
 	if stale {
 		m.chat.append(roleSystem, staleDraftNotice)
@@ -1478,10 +1688,22 @@ func (m *Model) startRun() tea.Cmd {
 		return nil
 	}
 	code := m.editor.Value()
+	if m.chatCentric() {
+		// Chat-centric view: the answer is whatever sits in the chat input
+		// (Enter still chats; :submit grades). It joins the transcript as the
+		// learner's turn, like any spoken answer.
+		text, ok := m.chat.submit()
+		if !ok {
+			m.flash("type your answer in the chat input, then :submit")
+			return nil
+		}
+		m.chat.append(roleUser, text)
+		code = text
+	}
 	_ = m.deps.Store.Save(m.current.ID, code)
-	m.chat.append(roleSystem, "▶ running tests…")
+	m.chat.append(roleSystem, "▶ checking your answer…")
 	m.pending++
-	m.loadKind = "running tests"
+	m.loadKind = "checking"
 	return runCmd(m.current.Lang, code, m.current)
 }
 
@@ -1660,6 +1882,9 @@ func (m *Model) focusDir(d int) tea.Cmd {
 		lo = int(paneEditor)
 	}
 	n := int(m.focus) + d
+	if m.chatCentric() && n == int(paneEditor) {
+		n += d // the hidden editor isn't a focus target either
+	}
 	if n < lo {
 		n = lo
 	}
@@ -1670,8 +1895,12 @@ func (m *Model) focusDir(d int) tea.Cmd {
 }
 
 // setFocus moves keyboard focus, blurring the old input and focusing the new so
-// exactly one component captures keys / blinks a cursor at a time.
+// exactly one component captures keys / blinks a cursor at a time. Focus aimed
+// at a hidden editor lands on the chat (its stand-in in the chat-centric view).
 func (m *Model) setFocus(p pane) tea.Cmd {
+	if p == paneEditor && m.chatCentric() {
+		p = paneChat
+	}
 	m.editor.Blur()
 	m.chat.blur()
 	m.sidebar.focused = false
@@ -1732,6 +1961,19 @@ func (m *Model) rebuildSidebar() {
 
 // --- layout ---
 
+// chatCentric reports whether the screen should drop the editor: an explicit
+// :view override wins, otherwise essay topics read best as a conversation —
+// the answer is typed in the chat input and graded with :submit.
+func (m Model) chatCentric() bool {
+	switch m.view {
+	case "chat":
+		return true
+	case "code":
+		return false
+	}
+	return m.current.Lang == "essay"
+}
+
 func (m *Model) layout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
@@ -1743,6 +1985,8 @@ func (m *Model) layout() {
 	if m.contentH < 1 {
 		m.contentH = 1
 	}
+
+	chatOnly := m.chatCentric() // the editor pane is hidden entirely
 
 	if m.horizontal {
 		// (sidebar) | (content on top, input on the bottom). Each visible column
@@ -1762,48 +2006,65 @@ func (m *Model) layout() {
 			m.sidebarW = clampMin(contentW*m.deps.Cfg.SidebarPct(22)/100, 14)
 			m.rightW = clampMin(contentW-m.sidebarW, 20)
 		}
-		// The two stacked boxes cost 4 border rows vs the sidebar's 2, so their
-		// combined content height is contentH-2.
-		rightContent := m.contentH - 2
-		if rightContent < 2 {
-			rightContent = 2
+		if chatOnly {
+			// One right box instead of two: the chat takes the whole column.
+			m.chatH = m.contentH
+			m.editorH = 0
+		} else {
+			// The two stacked boxes cost 4 border rows vs the sidebar's 2, so
+			// their combined content height is contentH-2.
+			rightContent := m.contentH - 2
+			if rightContent < 2 {
+				rightContent = 2
+			}
+			// In this stacked layout the editor sits below the chat, so :compact /
+			// :wide trade height between them rather than width.
+			chatPct := clampRange(m.deps.Cfg.ChatPct(55)-m.editorBias, 30, 85)
+			m.chatH = clampMin(rightContent*chatPct/100, 3)
+			m.editorH = clampMin(rightContent-m.chatH, 3)
 		}
-		// In this stacked layout the editor sits below the chat, so :compact /
-		// :wide trade height between them rather than width.
-		chatPct := clampRange(m.deps.Cfg.ChatPct(55)-m.editorBias, 30, 85)
-		m.chatH = clampMin(rightContent*chatPct/100, 3)
-		m.editorH = clampMin(rightContent-m.chatH, 3)
 
 		m.sidebar.setSize(m.sidebarW, m.contentH)
 		m.chat.setSize(m.rightW, m.chatH)
-		m.editor.SetSize(m.rightW, max(1, m.editorH-1-len(m.promptHeaderLines(m.rightW))))
+		if m.editorH > 0 {
+			m.editor.SetSize(m.rightW, max(1, m.editorH-1-len(m.promptHeaderLines(m.rightW))))
+		}
 		return
 	}
 
 	// vertical: (sidebar) | editor | chat. Each visible box eats 2 border
-	// columns: 6 with the sidebar, 4 when it's folded away.
+	// columns: 6 with the sidebar, 4 when it's folded away — minus 2 again in
+	// the chat-centric view, which drops the editor box.
 	borders := 6
 	if m.sidebarCollapsed {
 		borders = 4
+	}
+	if chatOnly {
+		borders -= 2
 	}
 	contentW := m.width - borders
 	if contentW < 3 {
 		contentW = 3
 	}
-	// The configured split is the base; :compact / :wide shift it live.
-	chatPct := clampRange(m.deps.Cfg.ChatPct(30)-m.editorBias, 15, 75)
 	if m.sidebarCollapsed {
 		m.sidebarW = 0
-		m.chatW = clampMin(contentW*chatPct/100, 16)
-		m.editorW = clampMin(contentW-m.chatW, 10)
 	} else {
 		m.sidebarW = clampMin(contentW*m.deps.Cfg.SidebarPct(22)/100, 12)
+	}
+	if chatOnly {
+		m.editorW = 0
+		m.chatW = clampMin(contentW-m.sidebarW, 16)
+	} else {
+		// The configured split is the base; :compact / :wide shift it live.
+		chatPct := clampRange(m.deps.Cfg.ChatPct(30)-m.editorBias, 15, 75)
 		m.chatW = clampMin(contentW*chatPct/100, 16)
 		m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
 	}
 
 	m.sidebar.setSize(m.sidebarW, m.contentH)
-	m.editor.SetSize(m.editorW, max(1, m.contentH-1-len(m.promptHeaderLines(m.editorW))))
+	if m.editorW > 0 {
+		m.editor.SetSize(m.editorW, max(1, m.contentH-1-len(m.promptHeaderLines(m.editorW))))
+	}
 	m.chat.setSize(m.chatW, m.contentH)
 }
 
@@ -1825,10 +2086,13 @@ func (m Model) View() string {
 
 	var row string
 	if m.horizontal {
-		// sidebar on the left; content (chat) above the input (editor) on the right.
-		ch := m.box(paneChat, m.rightW, m.chatH, m.chat.view())
-		ed := m.box(paneEditor, m.rightW, m.editorH, m.editorPaneView(m.rightW))
-		right := lipgloss.JoinVertical(lipgloss.Left, ch, ed)
+		// sidebar on the left; content (chat) above the input (editor) on the
+		// right — the editor box disappears in the chat-centric view.
+		right := m.box(paneChat, m.rightW, m.chatH, m.chat.view())
+		if m.editorH > 0 {
+			ed := m.box(paneEditor, m.rightW, m.editorH, m.editorPaneView(m.rightW))
+			right = lipgloss.JoinVertical(lipgloss.Left, right, ed)
+		}
 		if m.sidebarCollapsed {
 			row = right
 		} else {
@@ -1836,14 +2100,15 @@ func (m Model) View() string {
 			row = lipgloss.JoinHorizontal(lipgloss.Top, sb, right)
 		}
 	} else {
-		ed := m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW))
 		ch := m.box(paneChat, m.chatW, m.contentH, m.chat.view())
-		if m.sidebarCollapsed {
-			row = lipgloss.JoinHorizontal(lipgloss.Top, ed, ch)
-		} else {
-			sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
-			row = lipgloss.JoinHorizontal(lipgloss.Top, sb, ed, ch)
+		panes := []string{ch}
+		if m.editorW > 0 {
+			panes = []string{m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW)), ch}
 		}
+		if !m.sidebarCollapsed {
+			panes = append([]string{m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())}, panes...)
+		}
+		row = lipgloss.JoinHorizontal(lipgloss.Top, panes...)
 	}
 
 	frame := lipgloss.JoinVertical(lipgloss.Left, m.titleView(), row, m.statusView())
@@ -2063,6 +2328,8 @@ func (m Model) statusView() string {
 	switch {
 	case m.pendingWindow:
 		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
+	case m.focus == paneChat && m.chatCentric():
+		hints = "enter chat · :submit grade your answer · ⌥o/:copy copy · ⌃f/⌃b page · :view code"
 	case m.focus == paneChat:
 		hints = "enter send · ⌥o/:copy copy reply · ⌃f/⌃b page · ⌃d/⌃u half · wheel scrolls"
 	case m.focus == paneSidebar:

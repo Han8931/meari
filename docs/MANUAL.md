@@ -12,6 +12,7 @@ quick start, see the [README](../README.md).
   - [The notes tree](#the-notes-tree)
   - [Commands & study](#commands--study)
   - [Markdown highlighting](#markdown-highlighting)
+- [Courses (`:course` / `:revise`)](#courses-course--revise)
 - [The coding tutor (`meari -tutor`)](#the-coding-tutor-meari--tutor)
 - [The chat pane (both TUIs)](#the-chat-pane-both-tuis)
 - [The editor (center pane)](#the-editor-center-pane)
@@ -53,6 +54,8 @@ load; the header just stays in the body):
 ```toml
 [vault]
 dir = "~/Documents/my-notes"   # "~/" expands; relative paths are rooted at meari
+# course_dir = "..."           # where generated courses live; default:
+#                              # <app dir>/meari-course — outside your vault
 ```
 
 ### AI providers (OpenAI-compatible)
@@ -153,6 +156,10 @@ first (`▸` folded / `▾` unfolded), files indented beneath them, the open not
   it; `:answer` reveals a model answer; `:done` ends the study
 - `:backlinks` — toggle the "↩ Linked mentions" panel under the editor, listing the
   notes whose `[[wikilinks]]` point at the open note (Obsidian-style backlinks)
+- `:course` / `:revise` — build or polish a course from the open note (see
+  [Courses](#courses-course--revise))
+- `:export` — write the current chat transcript to `exports/chat-<note>-<time>.md`
+  in the app directory (works in the tutor too)
 - `:tutor` — hand off to the coding tutor without quitting (the coding TUI's `:vault`
   comes back); the process stays up and your curriculum session resumes
 
@@ -163,6 +170,47 @@ highlighting when the fence names the language), `` `inline code` ``, `[[wikilin
 `> blockquotes` (spanning wrapped lines), `-`/`*`/`+` list markers, and `*italic*` /
 `**bold**` / `***both***`. Highlighting is color-only — it never shifts a character —
 and is stable while the cursor moves or the view scrolls.
+
+## Courses (`:course` / `:revise`)
+
+A course is a runnable curriculum built **from one of your notes**. In the vault,
+open the note and:
+
+- **`:course`** — a short interview opens in the chat pane (difficulty, scope —
+  just this note or its linked notes too — and a title; answer any subset or say
+  **"defaults"**: incremental ordering, comprehensive coverage of the note). The
+  build then streams its progress into the chat. `Esc` cancels the interview.
+- **`:course defaults`** — skip the interview entirely (also what offline does).
+- **`:revise [feedback]`** — with the course's manifest or any of its lessons open:
+  re-critique and rebuild it, optionally steered by free-form feedback
+  (`:revise make module 2 harder, add more code exercises`). Revision keeps the
+  course's id and folder, so your study progress survives.
+
+**The agentic pipeline** behind both: plan an outline from the note's actual
+content → critique it (coverage, grounding, order, granularity) → write lessons for
+gaps and author one exercise per topic → **verify**: every code exercise's reference
+solution runs against its tests in the real executor, failures are repaired (≤2
+rounds) or the topic demotes to an essay — a broken challenge never ships; essay
+prompts get one judge round; `[[wikilinks]]` that resolve to nothing are unlinked →
+a completeness critic adds whatever the outline missed as an `## Addenda` module.
+
+**On disk**, a course is plain markdown under `meari-course/<Title>/` in the **app
+directory** (not your notes vault — set `course_dir` under `[vault]` to move it):
+`course.md` is the manifest (`## Module` headings with `- [[topic]]` links you can
+reorder or delete by hand); generated lessons live next to it; topics that reuse
+your existing notes stay where they are, gaining only a `study:` frontmatter block.
+A topic note with no study block defaults to "explain this note" — so a hand-written
+manifest over existing notes is already a runnable course. Deleting the course's
+folder deletes the course.
+
+**Taking a course** happens in the tutor: `:topic` lists vault courses in the picker
+under the built-ins, and `:topic <name>` accepts the id, the title, any unique
+substring (`:topic nosql`), with Tab completing the argument. Code topics run the
+executor; essay topics are graded as prose; progress and "continue where you left
+off" work exactly like the built-in curricula.
+
+Re-running `:course` on the same note with the **same title** rebuilds the course in
+place (progress kept); a **different title** creates a separate course alongside it.
 
 ## The coding tutor (`meari -tutor`)
 
@@ -190,8 +238,16 @@ type a question and press `Enter` to ask the tutor.
 
 **Global commands** — type `:` in the left pane (or use the editor's `:` line):
 
-- `:topic <subject>` / `:subject <subject>` — switch subject; no argument opens a
-  picker. Keeps your current level.
+- `:topic <subject>` / `:subject <subject>` — switch subject (built-in or vault
+  course); no argument opens a picker. Accepts ids, titles, and unique substrings;
+  Tab completes the argument. Keeps your current level.
+- `:submit` / `:run` — check the current item from any pane (no Ctrl-S needed).
+- `:view auto|chat|code` — pick the screen. `auto` (default) follows the topic:
+  **essay topics hide the editor** — the lesson, conversation, and your answer all
+  live in the chat pane (type the answer in the chat input: `Enter` chats,
+  `:submit` grades it); code topics keep the three-pane screen. Config default:
+  `ui.view`.
+- `:export` — write the chat transcript to `exports/` in the app directory.
 - `:vault` — switch to the notes vault (the `meari -vault` UI) without quitting; `:tutor`
   from there switches back, and your coding session resumes where you left off.
 - `:progress` — progress summary (completion bars + activity).

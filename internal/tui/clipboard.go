@@ -2,9 +2,13 @@ package tui
 
 import (
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/atotto/clipboard"
 	osc52 "github.com/aymanbagabas/go-osc52/v2"
+
+	"meari/internal/vault"
 )
 
 // copyToClipboard puts text on the system clipboard two ways at once: the
@@ -24,4 +28,24 @@ var copyToClipboard = func(text string) error {
 // allow OSC 52 reads for security). A package variable so tests can stub it.
 var pasteFromClipboard = func() (string, error) {
 	return clipboard.ReadAll()
+}
+
+// exportChat writes the chat transcript to dir/chat-<label>-<timestamp>.md
+// (":export" in both TUIs) and returns the status-bar message.
+func exportChat(c *chatModel, dir, label string) string {
+	text, ok := c.transcript()
+	if !ok {
+		return "nothing to export yet — ask the tutor something first"
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "⚠ export failed: " + err.Error()
+	}
+	if label = vault.Slug(label); label == "untitled" {
+		label = "chat"
+	}
+	path := filepath.Join(dir, "chat-"+label+"-"+time.Now().Format("20060102-150405")+".md")
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return "⚠ export failed: " + err.Error()
+	}
+	return "exported chat to " + path
 }

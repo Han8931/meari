@@ -24,7 +24,7 @@ var (
 	titleBar = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("231")).
-			Background(lipgloss.Color("57")).
+			Background(lipgloss.Color("25")).
 			Padding(0, 1)
 
 	statusBar = lipgloss.NewStyle().
@@ -97,6 +97,9 @@ var (
 	chatInputRule   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	chatPromptFocus = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
 	chatPromptBlur  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	// chatPromptNormal marks the input's Vim Normal mode (Esc in the chat):
+	// green, matching the editor's NORMAL badge.
+	chatPromptNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 
 	// chatCodeGutter is the "│ " bar marking syntax-highlighted code blocks in
 	// tutor/lesson messages.

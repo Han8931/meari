@@ -54,3 +54,27 @@ func TestHighlightReassertsAmbientSGR(t *testing.T) {
 		t.Fatalf("plain text between tokens lost the cursor-line bg: %q", row)
 	}
 }
+
+// Fences in languages without dedicated rules (sql, js, …) still highlight
+// strings, numbers, and comments; prose languages stay untouched.
+func TestHighlightGenericLanguages(t *testing.T) {
+	withANSI(t)
+	sql := `SELECT * FROM users WHERE age > 21 -- adults only`
+	out := highlightSyntax("sql", sql)
+	if !strings.Contains(out, "\x1b[38;5;215m21\x1b[0m") {
+		t.Errorf("number not highlighted in sql: %q", out)
+	}
+	if !strings.Contains(out, "-- adults only") || !strings.Contains(out, "\x1b[3;38;5;244m") {
+		t.Errorf("comment not highlighted in sql: %q", out)
+	}
+	js := `console.log("hello", 42) // greet`
+	out = highlightSyntax("javascript", js)
+	if !strings.Contains(out, "\x1b[38;5;114m\"hello\"\x1b[0m") {
+		t.Errorf("string not highlighted in js: %q", out)
+	}
+	for _, lang := range []string{"essay", "plain", "physics", ""} {
+		if got := highlightSyntax(lang, sql); got != sql {
+			t.Errorf("prose lang %q altered: %q", lang, got)
+		}
+	}
+}

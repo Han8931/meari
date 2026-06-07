@@ -13,6 +13,7 @@ package core
 import (
 	"context"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -25,11 +26,16 @@ import (
 type Service struct {
 	vault *vault.Vault
 	tutor *tutor.Tutor
+	// coursesDir backs the meari-course/ mount (see mount.go): generated
+	// course material lives here, outside the notes vault.
+	coursesDir string
 }
 
-// New builds a Service over a vault and tutor.
+// New builds a Service over a vault and tutor. Courses default to living
+// inside the vault (the standalone layout); the app re-points them at the
+// project directory with SetCourseDir.
 func New(v *vault.Vault, t *tutor.Tutor) *Service {
-	return &Service{vault: v, tutor: t}
+	return &Service{vault: v, tutor: t, coursesDir: filepath.Join(v.Root(), CourseDir)}
 }
 
 // Offline reports whether the tutor is running on built-in content (no provider).
@@ -58,9 +64,10 @@ type EssayResult struct {
 
 // --- notes ---
 
-// ListNotes returns every note's metadata, sorted by path.
+// ListNotes returns every note's metadata — vault and course material — sorted
+// by path.
 func (s *Service) ListNotes() ([]NoteMeta, error) {
-	notes, err := s.vault.List()
+	notes, err := s.allNotes()
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +75,7 @@ func (s *Service) ListNotes() ([]NoteMeta, error) {
 	for _, n := range notes {
 		out = append(out, metaOf(n))
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }
 
@@ -81,8 +89,8 @@ type TreeEntry struct {
 	Dir  bool   `json:"dir"`
 }
 
-// Tree returns the vault's file structure — every directory (including empty
-// ones) and every note — sorted by path.
+// Tree returns the combined file structure — the vault's directories and
+// notes plus the meari-course/ mount — sorted by path.
 func (s *Service) Tree() ([]TreeEntry, error) {
 	notes, err := s.vault.List()
 	if err != nil {
@@ -94,28 +102,35 @@ func (s *Service) Tree() ([]TreeEntry, error) {
 	}
 	out := make([]TreeEntry, 0, len(dirs)+len(notes))
 	for _, d := range dirs {
+		if d == CourseDir || strings.HasPrefix(d, CourseDir+"/") {
+			continue // the mount serves these
+		}
 		out = append(out, TreeEntry{Path: d, Name: path.Base(d), Dir: true})
 	}
 	for _, n := range notes {
+		if _, ok := inMount(n.RelPath); ok {
+			continue
+		}
 		name := strings.TrimSuffix(path.Base(n.RelPath), path.Ext(n.RelPath))
 		out = append(out, TreeEntry{Path: n.RelPath, Name: name})
 	}
+	out = append(out, s.mountTree()...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }
 
 // Delete removes a note, or a directory and everything in it.
-func (s *Service) Delete(path string) error { return s.vault.Delete(path) }
+func (s *Service) Delete(path string) error { return s.deletePath(path) }
 
 // Rename moves a note or directory to a new vault-relative path.
-func (s *Service) Rename(oldPath, newPath string) error { return s.vault.Rename(oldPath, newPath) }
+func (s *Service) Rename(oldPath, newPath string) error { return s.renamePath(oldPath, newPath) }
 
 // MakeDir creates a directory, so structure can be laid out before notes exist.
-func (s *Service) MakeDir(path string) error { return s.vault.MakeDir(path) }
+func (s *Service) MakeDir(path string) error { return s.makeDirPath(path) }
 
 // OpenNote loads a single note by its vault-relative path.
 func (s *Service) OpenNote(path string) (Note, error) {
-	n, err := s.vault.Read(path)
+	n, err := s.readNote(path)
 	if err != nil {
 		return Note{}, err
 	}
@@ -125,7 +140,7 @@ func (s *Service) OpenNote(path string) (Note, error) {
 // SaveNote writes body to the note at path, preserving existing frontmatter or
 // creating a fresh note (deriving a sensible title) when none exists.
 func (s *Service) SaveNote(path, body string) (NoteMeta, error) {
-	n, err := s.vault.Read(path)
+	n, err := s.readNote(path)
 	if err != nil {
 		n = vault.Note{
 			RelPath: path,
@@ -134,7 +149,7 @@ func (s *Service) SaveNote(path, body string) (NoteMeta, error) {
 		}
 	}
 	n.Body = body
-	saved, err := s.vault.Write(n)
+	saved, err := s.writeNote(n)
 	if err != nil {
 		return NoteMeta{}, err
 	}
@@ -166,11 +181,11 @@ func (s *Service) GenerateLesson(ctx context.Context, request string) (NoteMeta,
 // path. Currently an in-memory scan of the vault; a SQLite index will back this
 // later without changing the signature.
 func (s *Service) Backlinks(path string) ([]NoteMeta, error) {
-	target, err := s.vault.Read(path)
+	target, err := s.readNote(path)
 	if err != nil {
 		return nil, err
 	}
-	notes, err := s.vault.List()
+	notes, err := s.allNotes()
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +208,7 @@ func (s *Service) Backlinks(path string) ([]NoteMeta, error) {
 // (case-insensitive), sorted by path. A simple substring scan for now.
 func (s *Service) Search(query string) ([]NoteMeta, error) {
 	q := strings.ToLower(strings.TrimSpace(query))
-	notes, err := s.vault.List()
+	notes, err := s.allNotes()
 	if err != nil {
 		return nil, err
 	}

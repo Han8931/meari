@@ -28,7 +28,7 @@ var (
 	mdHeadingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
 	mdCodeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
 	mdLinkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("79"))
-	mdBulletStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("176"))
+	mdBulletStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
 	mdItalicStyle  = lipgloss.NewStyle().Italic(true)
 	mdBoldStyle    = lipgloss.NewStyle().Bold(true)
 	mdBoldItalic   = lipgloss.NewStyle().Bold(true).Italic(true)

@@ -43,6 +43,11 @@ type chatModel struct {
 	blocks  []chatBlock
 	w, h    int
 	focused bool
+	// normal is the input's Vim Normal mode (Esc toggles in): motions and
+	// edits work on the draft, ":" opens the parent's command line, i/a
+	// return to typing. pendingOp holds the first key of dd/cc.
+	normal    bool
+	pendingOp rune
 
 	// busy is the label of the in-flight async op ("" = idle); busyTick drives
 	// the spinner animation, advanced by the parent's spinner tick.
@@ -64,6 +69,7 @@ type chatModel struct {
 // setCodeLang sets the default language for unlabeled code fences and
 // re-renders the transcript with the new highlighting.
 func (c *chatModel) setCodeLang(lang string) {
+	lang = chatFenceLang(lang)
 	if c.codeLang == lang {
 		return
 	}
@@ -156,6 +162,15 @@ func (c chatModel) busyLine() string {
 	return lipgloss.NewStyle().MaxWidth(c.w).Render(line)
 }
 
+// scrollBy moves the transcript by n lines (negative = up), for drag-scrolling.
+func (c *chatModel) scrollBy(n int) {
+	if n < 0 {
+		c.vp.ScrollUp(-n)
+	} else if n > 0 {
+		c.vp.ScrollDown(n)
+	}
+}
+
 // snapshot returns the transcript blocks so a parent can stash them away when
 // the learner switches topics.
 func (c *chatModel) snapshot() []chatBlock { return c.blocks }
@@ -204,7 +219,7 @@ func (c chatModel) renderBlock(blk chatBlock) string {
 	w := c.w
 	switch blk.role {
 	case roleUser:
-		return chatUserBadge.Render(" you ") + "\n" + chatBodyStyle.Width(w).Render(blk.text)
+		return chatUserBadge.Render(" you ") + "\n" + c.renderRichBody(blk.text)
 	case roleTutor:
 		return chatTutorBadge.Render(" tutor ") + "\n" + c.renderRichBody(blk.text)
 	case roleLesson:
@@ -224,11 +239,16 @@ func (c chatModel) renderBlock(blk chatBlock) string {
 func (c chatModel) renderRichBody(text string) string {
 	lines := strings.Split(text, "\n")
 	var out, prose, code []string
-	lang, inCode := "", false
+	lang, fenceMarker := "", ""
+	inCode := false
 
 	flushProse := func() {
 		if len(prose) > 0 {
-			out = append(out, chatBodyStyle.Width(c.w).Render(strings.Join(prose, "\n")))
+			// Tutor/lesson prose is markdown: style headings, **bold**,
+			// `code`, [[wikilinks]], bullets, and quotes before wrapping
+			// (lipgloss wraps ANSI-aware, so the colors survive the reflow).
+			md := editor.Highlight("markdown", strings.Join(prose, "\n"))
+			out = append(out, chatBodyStyle.Width(c.w).Render(md))
 			prose = nil
 		}
 	}
@@ -239,8 +259,12 @@ func (c chatModel) renderRichBody(text string) string {
 		if l == "" {
 			l = c.codeLang
 		}
-		if l == "" {
-			l = "plain"
+		// Inside a chat ``` fence the content IS code by construction, so an
+		// unlabeled fence (or a prose topic language like "essay") still gets
+		// the language-agnostic highlighting — strings, numbers, comments.
+		switch l {
+		case "", "plain", "text", "essay", "physics":
+			l = "code" // any non-prose tag routes to the generic rules
 		}
 		width := c.w - 2 // room for the "│ " gutter
 		if width < 4 {
@@ -273,14 +297,16 @@ func (c chatModel) renderRichBody(text string) string {
 
 	for _, ln := range lines {
 		trimmed := strings.TrimSpace(ln)
-		if strings.HasPrefix(trimmed, "```") {
+		if marker, info, ok := chatFenceOpen(trimmed); ok && (!inCode || marker == fenceMarker) {
 			flushIndented()
 			if inCode {
 				flushCode()
 				inCode = false
+				fenceMarker = ""
 			} else {
 				flushProse()
-				lang = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(trimmed, "```")))
+				lang = chatFenceLang(info)
+				fenceMarker = marker
 				inCode = true
 			}
 			continue // the fence markers themselves are not shown
@@ -306,8 +332,31 @@ func (c chatModel) renderRichBody(text string) string {
 	return strings.Join(out, "\n")
 }
 
+func chatFenceOpen(trimmed string) (marker, info string, ok bool) {
+	switch {
+	case strings.HasPrefix(trimmed, "```"):
+		return "```", strings.TrimSpace(strings.TrimPrefix(trimmed, "```")), true
+	case strings.HasPrefix(trimmed, "~~~"):
+		return "~~~", strings.TrimSpace(strings.TrimPrefix(trimmed, "~~~")), true
+	default:
+		return "", "", false
+	}
+}
+
+func chatFenceLang(info string) string {
+	info = strings.ToLower(strings.TrimSpace(info))
+	if info == "" {
+		return ""
+	}
+	field := strings.Fields(info)[0]
+	field = strings.Trim(field, "{}")
+	field = strings.TrimPrefix(field, ".")
+	return strings.Trim(field, " \t")
+}
+
 func (c *chatModel) focus() tea.Cmd {
 	c.focused = true
+	c.exitNormal() // focusing the pane means "I want to type"
 	return c.input.Focus()
 }
 
@@ -388,11 +437,112 @@ func (c chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		if c.histKey(msg) {
 			return c, nil
 		}
+		// A light Vim layer on the input: Esc enters Normal mode (j/k scroll
+		// the transcript, ":" — handled by the parent — opens the command
+		// line), i/a return to typing. Insert mode is the default and exactly
+		// the old behavior.
+		if c.normal {
+			c.normalKey(msg)
+			return c, nil
+		}
+		if msg.Type == tea.KeyEsc {
+			c.enterNormal()
+			return c, nil
+		}
 	}
 
 	var cmd tea.Cmd
 	c.input, cmd = c.input.Update(msg)
 	return c, cmd
+}
+
+// inNormal reports whether the input sits in Normal mode (the parent routes
+// ":" to the command line and withholds Enter-to-send while it does).
+func (c chatModel) inNormal() bool { return c.normal }
+
+func (c *chatModel) enterNormal() {
+	c.normal = true
+	c.input.FocusedStyle.Prompt = chatPromptNormal // green: "you're in Normal"
+}
+
+func (c *chatModel) exitNormal() {
+	c.normal = false
+	c.input.FocusedStyle.Prompt = chatPromptFocus
+}
+
+// normalKey handles one Normal-mode key, Vim-style over the DRAFT: motions
+// (h/l/j/k, w/b/e, 0/^/$), edits (x, D, dd, cc, C), and the Insert entries
+// (i/a/I/A). The transcript keeps its mode-independent keys: Ctrl-D/U/F/B
+// page it, the mouse wheel and drag scroll it.
+func (c *chatModel) normalKey(msg tea.KeyMsg) {
+	send := func(t tea.KeyType) { c.input, _ = c.input.Update(tea.KeyMsg{Type: t}) }
+	alt := func(r rune) {
+		c.input, _ = c.input.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: true})
+	}
+	switch msg.String() {
+	// --- enter Insert ---
+	case "i":
+		c.exitNormal()
+	case "a":
+		send(tea.KeyRight)
+		c.exitNormal()
+	case "I":
+		send(tea.KeyHome)
+		c.exitNormal()
+	case "A":
+		send(tea.KeyEnd)
+		c.exitNormal()
+	// --- motions ---
+	case "h", "left":
+		send(tea.KeyLeft)
+	case "l", "right":
+		send(tea.KeyRight)
+	case "j", "down":
+		send(tea.KeyDown)
+	case "k", "up":
+		send(tea.KeyUp)
+	case "w", "e":
+		alt('f') // the textarea's word-forward
+	case "b":
+		alt('b') // word-backward
+	case "0", "^":
+		send(tea.KeyHome)
+	case "$":
+		send(tea.KeyEnd)
+	// --- edits ---
+	case "x":
+		send(tea.KeyDelete)
+	case "D":
+		send(tea.KeyCtrlK) // delete to end of line
+	case "d": // dd: clear the current line (two-key chord)
+		if c.pendingOp == 'd' {
+			c.pendingOp = 0
+			send(tea.KeyHome)
+			send(tea.KeyCtrlK)
+			return
+		}
+		c.pendingOp = 'd'
+		return
+	case "c": // cc: change the line
+		if c.pendingOp == 'c' {
+			c.pendingOp = 0
+			send(tea.KeyHome)
+			send(tea.KeyCtrlK)
+			c.exitNormal()
+			return
+		}
+		c.pendingOp = 'c'
+		return
+	case "C":
+		send(tea.KeyCtrlK)
+		c.exitNormal()
+	// --- transcript jumps ---
+	case "g":
+		c.vp.GotoTop()
+	case "G":
+		c.vp.GotoBottom()
+	}
+	c.pendingOp = 0 // any other key cancels a half-typed dd/cc
 }
 
 // scrollKey handles transcript scrolling and reports whether it consumed the key.

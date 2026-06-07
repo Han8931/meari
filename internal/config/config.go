@@ -25,6 +25,8 @@ type Config struct {
 	WorkspaceDir string `toml:"-"`
 	DataDir      string `toml:"-"`
 	VaultDir     string `toml:"-"` // resolved note-vault dir (see VaultConfig.Dir)
+	ExportsDir   string `toml:"-"` // where :export writes chat transcripts
+	CourseDir    string `toml:"-"` // where meari-courses live (see VaultConfig.CourseDir)
 }
 
 // VaultConfig locates the learner's markdown note vault.
@@ -34,6 +36,10 @@ type VaultConfig struct {
 	// directory; a relative path is rooted at the meari base dir. Empty means
 	// the default <baseDir>/vault.
 	Dir string `toml:"dir"`
+	// CourseDir is where generated meari-courses live. Empty means the
+	// default <baseDir>/meari-course — in the app directory, so generated
+	// study material stays out of the notes vault. Same path rules as Dir.
+	CourseDir string `toml:"course_dir"`
 }
 
 // AIConfig selects the model backend. All providers are reached through the
@@ -89,6 +95,10 @@ type UIConfig struct {
 	// SidebarFolded starts the left pane folded away (the ":fold" state), so
 	// the editor and chat get the full width. Toggle live with :fold.
 	SidebarFolded bool `toml:"sidebar_folded"`
+	// View selects the tutor's screen: "auto" (default — essay topics get the
+	// chat-centric view, code topics the editor), "chat", or "code". Switch
+	// live with :view.
+	View string `toml:"view"`
 }
 
 // Default returns the built-in configuration used when no file is present.
@@ -140,6 +150,18 @@ func Load(path, baseDir string) (Config, error) {
 		return cfg, err
 	}
 	cfg.VaultDir = vaultDir
+	cfg.ExportsDir = filepath.Join(baseDir, "exports")
+	// Courses live in the app directory by default — generated study material
+	// stays out of the learner's notes vault. course_dir overrides.
+	if cfg.Vault.CourseDir != "" {
+		courseDir, err := resolveVaultDir(cfg.Vault.CourseDir, baseDir)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.CourseDir = courseDir
+	} else {
+		cfg.CourseDir = filepath.Join(baseDir, "meari-course")
+	}
 
 	// Normalize unknown values back to safe defaults.
 	if cfg.Editor.Keybindings != "vim" && cfg.Editor.Keybindings != "default" {
@@ -150,6 +172,9 @@ func Load(path, baseDir string) (Config, error) {
 	}
 	if cfg.UI.Layout != "vertical" && cfg.UI.Layout != "horizontal" {
 		cfg.UI.Layout = "vertical"
+	}
+	if cfg.UI.View != "chat" && cfg.UI.View != "code" {
+		cfg.UI.View = "auto"
 	}
 	// Pane ratios: 0 means "use the built-in default"; set values are clamped
 	// to ranges that keep every pane usable.
@@ -255,6 +280,9 @@ layout = "vertical"
 # chat_percent = 30
 # Start with the left pane folded away (toggle live with :fold).
 # sidebar_folded = false
+# view: "auto" (essay topics go chat-centric, code keeps the editor),
+# "chat", or "code". Switch live with :view.
+# view = "auto"
 
 [vault]
 # dir is where your markdown notes live, so the vault can sit outside the
@@ -262,6 +290,9 @@ layout = "vertical"
 # home; a relative path is rooted at the meari directory. Unset keeps the
 # default "vault" folder next to meari.
 # dir = "~/notes"
+# course_dir is where generated meari-courses live. Unset keeps the default
+# "meari-course" folder next to meari — outside the notes vault.
+# course_dir = "~/my-courses"
 `
 
 // EnsureFile writes the default config template to path if it does not yet

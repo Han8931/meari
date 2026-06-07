@@ -140,9 +140,12 @@ type Model struct {
 
 	// Tab completion for the ":" line. globalCmds are the parent's commands
 	// (the ones runCommand forwards via RunCommandMsg), completed alongside
-	// the editor's own; see WithGlobalCmds.
-	cmdComp    CmdCompleter
-	globalCmds []string
+	// the editor's own; see WithGlobalCmds. argCandidates (optional) lets the
+	// parent complete command ARGUMENTS: given the current input, it returns
+	// the full candidate list, or nil to fall back to command names.
+	cmdComp       CmdCompleter
+	globalCmds    []string
+	argCandidates func(input string) []string
 
 	action Action
 	done   bool
@@ -187,6 +190,19 @@ func New(starter string, vim bool, save SaveFunc) Model {
 // Tab-complete them too (on Enter they're dispatched via RunCommandMsg).
 func (m Model) WithGlobalCmds(names []string) Model {
 	m.globalCmds = names
+	return m
+}
+
+// CmdLineValue returns the ":" line's current input (for tests and parents
+// inspecting completion results).
+func (m Model) CmdLineValue() string { return m.cmd.Value() }
+
+// WithArgCompleter registers a parent hook that completes command ARGUMENTS
+// on the ":" line (e.g. ":topic nos⇥" → the full course id): given the
+// current input it returns the candidate list, or nil for the default
+// command-name completion.
+func (m Model) WithArgCompleter(fn func(input string) []string) Model {
+	m.argCandidates = fn
 	return m
 }
 
@@ -259,13 +275,13 @@ var (
 	// foreground color here becomes the block's fill: green in Normal, bright
 	// magenta in Insert — both always visible (the cursor is static, not blinking).
 	normalCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	insertCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("213"))
+	insertCursor = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 
 	keywordStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
 	typeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	stringStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("106"))
+	stringStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
 	commentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	numberStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("176"))
+	numberStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("215"))
 )
 
 // Open launches the editor as its own full-screen program, pre-filled with
@@ -772,9 +788,16 @@ func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // completed alongside them.
 var editorExCmds = []string{"config", "q", "quit", "submit", "w", "wq", "write"}
 
-// exCmdNames merges the editor's commands with the parent's for completion,
-// sorted so the Tab cycle runs alphabetically.
+// exCmdNames returns the ":" line's completion candidates: the parent's
+// argument completions when its hook claims the input, else the editor's
+// commands merged with the parent's, sorted so the Tab cycle runs
+// alphabetically.
 func (m Model) exCmdNames() []string {
+	if m.argCandidates != nil {
+		if c := m.argCandidates(m.cmd.Value()); c != nil {
+			return c
+		}
+	}
 	names := make([]string, 0, len(editorExCmds)+len(m.globalCmds))
 	names = append(names, editorExCmds...)
 	names = append(names, m.globalCmds...)
@@ -862,13 +885,15 @@ func highlightSyntax(lang, s string) string {
 		return highlightCode(s, pythonSyntax())
 	case "markdown", "md":
 		return highlightMarkdown(s, false, nil)
-	default:
-		// Prose and unknown languages pass through untouched. Highlighting
-		// markdown notes with code rules bolds ordinary words ("for", "and",
-		// "import"…) and the injected resets punch holes in the textarea's
-		// cursor-line background — the flickering artifacts that look like
-		// leftover text when the cursor moves.
+	case "physics", "plain", "text", "essay", "":
+		// Prose passes through untouched: code rules over prose bold ordinary
+		// words and punch holes in the textarea's cursor-line background.
 		return s
+	default:
+		// Unknown CODE languages (sql, js, bash, …) get the language-agnostic
+		// rules: strings, numbers, and comments color reliably in any syntax;
+		// keyword guessing doesn't.
+		return highlightCode(s, genericSyntax())
 	}
 }
 
@@ -889,6 +914,16 @@ func goSyntax() syntaxRules {
 		},
 		blockStart: "/*",
 		blockEnd:   "*/",
+	}
+}
+
+// genericSyntax colors what every language shares — strings, numbers, and the
+// common comment markers — so fences in unknown languages still read as code.
+func genericSyntax() syntaxRules {
+	return syntaxRules{
+		lineComments: []string{"//", "#", "--"},
+		blockStart:   "/*",
+		blockEnd:     "*/",
 	}
 }
 

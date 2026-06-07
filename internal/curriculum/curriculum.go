@@ -25,12 +25,27 @@ type Challenge struct {
 	Tests       []string // assertions: Python asserts, or Go test-body statements
 }
 
+// QuizQuestion is one multiple-choice item of a quiz step.
+type QuizQuestion struct {
+	Q       string   `json:"q"`
+	Choices []string `json:"choices"`
+	Answer  int      `json:"answer"` // index into Choices
+	Why     string   `json:"why"`    // shown after answering
+}
+
 // Topic is one unit of study with a baked lesson and challenge.
 type Topic struct {
-	ID        string // globally unique, e.g. "py-b-variables"
-	Title     string // short sidebar label
-	Lesson    string // explanation + worked example, shown in the chat pane
+	ID     string // globally unique, e.g. "py-b-variables"
+	Title  string // short sidebar label
+	Lesson string // explanation + worked example, shown in the chat pane
+	// Lang overrides the curriculum's language for this topic. Vault-built
+	// courses mix kinds — code topics carry "python"/"go", essay topics
+	// "essay", quiz steps "quiz" — while the built-in curricula leave it
+	// empty (inherit).
+	Lang      string
 	Challenge Challenge
+	// Quiz holds a quiz step's questions (Lang "quiz"); graded locally.
+	Quiz []QuizQuestion
 }
 
 // Module groups related topics under a heading.

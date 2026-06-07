@@ -33,13 +33,13 @@ type Result struct {
 
 // Run executes code+tests for the given language ("python" or "go"). Unknown or
 // empty languages default to Python (the historical behavior). Non-programming
-// curricula can use "physics" for prose exercises: a non-empty response counts
-// as submitted so the tutor can discuss it.
+// curricula use "physics" or "essay" for prose exercises: a non-empty response
+// counts as submitted so the tutor can discuss/grade it.
 func Run(lang, code string, tests []string) (Result, error) {
 	switch strings.ToLower(lang) {
 	case "go", "golang":
 		return runGo(code, tests)
-	case "physics":
+	case "physics", "essay":
 		return runReflection(code)
 	default:
 		return runPython(code, tests)

@@ -89,6 +89,43 @@ func TestChatHighlightsFencedCode(t *testing.T) {
 	}
 }
 
+func TestChatHighlightsUserFencedCode(t *testing.T) {
+	forceColorTUI(t)
+	c := newChat()
+	c.setSize(60, 12)
+	got := c.renderBlock(chatBlock{role: roleUser, text: "Why fails?\n```go\nfunc main() {}\n```"})
+	if !strings.Contains(got, editor.Highlight("go", "func main() {}")) {
+		t.Fatalf("user code fence should be syntax-highlighted:\n%q", got)
+	}
+}
+
+func TestChatFenceInfoStringUsesFirstLanguageToken(t *testing.T) {
+	forceColorTUI(t)
+	c := newChat()
+	c.setSize(60, 12)
+	got := c.renderRichBody("```go title=main.go\nfunc main() {}\n```")
+	if !strings.Contains(got, editor.Highlight("go", "func main() {}")) {
+		t.Fatalf("fence info string should use first language token:\n%q", got)
+	}
+	got = c.renderRichBody("```{.python}\ndef add(a, b):\n    return a + b\n```")
+	if !strings.Contains(got, editor.Highlight("python", "def add(a, b):")) {
+		t.Fatalf("braced class language should be recognized:\n%q", got)
+	}
+}
+
+func TestChatHighlightsTildeFences(t *testing.T) {
+	forceColorTUI(t)
+	c := newChat()
+	c.setSize(60, 12)
+	got := c.renderRichBody("~~~python\ndef add(a, b):\n    return a + b\n~~~")
+	if strings.Contains(got, "~~~") {
+		t.Fatalf("tilde fence markers should not be rendered:\n%q", got)
+	}
+	if !strings.Contains(got, editor.Highlight("python", "def add(a, b):")) {
+		t.Fatalf("tilde fence should be syntax-highlighted:\n%q", got)
+	}
+}
+
 func TestChatCodeBlocksWrapInsteadOfClip(t *testing.T) {
 	c := newChat()
 	c.setSize(24, 12)
@@ -455,5 +492,28 @@ func TestVaultPerNoteTutorHistorySeparate(t *testing.T) {
 	m = tm.(VaultModel)
 	if len(m.chatHist) != 1 || m.chatHist[0].Content != "about A" {
 		t.Fatalf("note A's tutor conversation should be restored, got %+v", m.chatHist)
+	}
+}
+
+// Tutor/lesson prose is markdown and must arrive styled in the transcript
+// (headings, bold, inline code, wikilinks) — not as flat body text.
+func TestChatRendersMarkdownProse(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(old)
+
+	c := newChat()
+	c.setSize(60, 20)
+	c.append(roleLesson, "# Heading\n\nuse **bold** and `code` with [[Link]]")
+	content := c.renderBlock(c.blocks[0])
+	for what, want := range map[string]string{
+		"heading":  "\x1b[1;38;5;81m# Heading",
+		"bold":     "\x1b[1m**bold**",
+		"code":     "\x1b[38;5;222m`code`",
+		"wikilink": "\x1b[38;5;79m[[Link]]",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("%s not styled in chat prose:\n%q", what, content)
+		}
 	}
 }

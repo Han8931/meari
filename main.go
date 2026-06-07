@@ -127,10 +127,12 @@ func buildDeps(cfg config.Config, wd, cfgPath string) (tui.Deps, *core.Service, 
 		return tui.Deps{}, nil, err
 	}
 	svc := core.New(v, tut)
+	svc.SetCourseDir(cfg.CourseDir) // courses live in the app dir, not the vault
 	deps := tui.Deps{
 		Tutor:      tut,
 		Store:      store,
 		Progress:   prog,
+		Svc:        svc,
 		Cfg:        cfg,
 		ConfigPath: cfgPath,
 		BaseDir:    wd,
@@ -188,6 +190,7 @@ func runServe(args []string) error {
 		return err
 	}
 	svc := core.New(v, tutor.New(cfg.AI))
+	svc.SetCourseDir(cfg.CourseDir)
 
 	fmt.Printf("Meari web UI on http://localhost%s  (vault: %s)\n", *addr, cfg.VaultDir)
 	if svc.Offline() {

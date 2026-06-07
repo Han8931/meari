@@ -26,6 +26,12 @@ one shared Go core, working on the same plain-markdown vault.
 - **AI lessons become notes, not chat scroll.** Ask to learn a topic and the tutor
   writes a focused lesson *into your vault*, linked to its prerequisites. Knowledge
   accumulates instead of evaporating.
+- **Notes become courses.** Open a note, type `:course`, answer two questions — an
+  agentic pipeline plans a curriculum *from what you wrote*, writes the missing
+  lessons, authors an exercise per topic, and **verifies every coding challenge by
+  actually running its tests** before you ever see it. `:revise` polishes a course
+  with your feedback. Then study it in the tutor: essays graded by AI, code checked
+  against hidden tests.
 - **Learning means recall, not re-reading.** Study any note actively: write an essay
   answer and get it graded, with quizzes and spaced-repetition flashcards on the
   roadmap. A built-in coding tutor (write code → hidden tests → feedback) covers the
@@ -58,10 +64,17 @@ model = "llama3.1"
 
 `meari check` verifies your AI setup end-to-end. Then, inside the vault:
 `:learn the french revolution` writes a lesson note; `:essay` quizzes you on the open
-note and `:grade` scores your answer.
+note and `:grade` scores your answer; **`:course` turns the open note into a full
+course** (`:tutor` → `:topic <name>` to take it). Courses are plain markdown in
+`meari-course/` next to the app — your notes vault stays untouched.
 
 ## Highlights
 
+- **Agentic course building** — `:course` interviews you in the chat pane
+  (difficulty, scope, title — or just say "defaults"), then plans, writes, critiques,
+  and verifies: code exercises run against the real executor and get repaired or
+  demoted before shipping; dead wikilinks are stripped; a completeness critic adds
+  what the outline missed. Courses are hand-editable markdown manifests.
 - **A real file tree** in the sidebar — fold/unfold directories, and manage files
   NERDTree-style: `Space` to mark, `m` then **a**dd / **m**ove / **d**elete.
 - **A modal Vim editor** with motions, counts, operators, visual mode, undo/redo, a
@@ -81,10 +94,12 @@ note and `:grade` scores your answer.
 
 - [x] Markdown vault with frontmatter + wikilinks (bring your own Obsidian vault)
 - [x] AI lessons as notes · essay study with grading · tutor chat
+- [x] **Agentic courses from your notes** — `:course` / `:revise`, executor-verified
+      exercises, runnable in the tutor
 - [x] Terminal + web front-ends over one headless core
 - [x] Built-in offline coding curricula (Go, Python) with hidden-test challenges
+- [ ] Quiz study kind and spaced-repetition flashcards (SM-2)
 - [ ] SQLite index: fast search, link graph, SRS store
-- [ ] Spaced-repetition flashcards (SM-2) and quizzes
 - [ ] Visual knowledge graph
 - [ ] Desktop app (the core + web UI in a native window)
 

@@ -297,6 +297,29 @@ func (t *Tutor) ChatStream(ctx context.Context, studyContext string, history []C
 	return t.chatStreamRaw(ctx, msgs, onDelta)
 }
 
+// StreamConversation streams a reply over history with system as THE system
+// prompt. Unlike ChatStream — which frames every exchange as tutor Q&A and
+// demotes extra instructions to context a small model may ignore — this lets
+// multi-step flows (the :course intake) own the conversation's framing.
+func (t *Tutor) StreamConversation(ctx context.Context, system string, history []ChatTurn, onDelta func(string)) (string, error) {
+	if t.offline {
+		s := "I'm offline right now (no AI provider configured)."
+		if onDelta != nil {
+			onDelta(s)
+		}
+		return s, nil
+	}
+	msgs := make([]chatMessage, 0, len(history)+1)
+	msgs = append(msgs, chatMessage{Role: "system", Content: system})
+	for _, h := range history {
+		msgs = append(msgs, chatMessage{Role: h.Role, Content: h.Content})
+	}
+	if onDelta == nil {
+		return t.chatRaw(ctx, msgs)
+	}
+	return t.chatStreamRaw(ctx, msgs, onDelta)
+}
+
 // chatStreamRaw posts a streaming chat-completions request (SSE) and feeds each
 // content delta to onDelta, returning the assembled reply.
 func (t *Tutor) chatStreamRaw(ctx context.Context, messages []chatMessage, onDelta func(string)) (string, error) {

@@ -70,6 +70,14 @@ type VaultModel struct {
 	streaming bool
 	streamCh  chan streamChunkMsg
 
+	// :course state. courseIntake routes chat input through the requirements
+	// interview (its own conversation in courseHist, seeded from courseSeed);
+	// courseCh streams generation progress lines while a course is built.
+	courseIntake bool
+	courseSeed   string
+	courseHist   []tutor.ChatTurn
+	courseCh     chan tea.Msg
+
 	// Essay study state. While studying, the editor holds the learner's answer
 	// (not the note), and autosave to the note is suspended.
 	studyMode   bool
@@ -91,6 +99,11 @@ type VaultModel struct {
 	// after "," in the editor's Normal mode (",n" folds the sidebar).
 	pendingWindow bool
 	pendingLeader bool
+
+	// Chat drag-scroll state: a left press on the chat anchors dragY; motion
+	// with the button held scrolls the transcript by the row delta.
+	dragChat bool
+	dragY    int
 
 	// editorBias shifts the editor/chat split (":wide" grows the editor,
 	// ":compact" grows the chat), sharing the classic TUI's step/clamp.
@@ -273,6 +286,23 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamChunkMsg:
 		return m.handleStreamChunk(msg)
 
+	case vCourseProgressMsg:
+		m.chat.append(roleSystem, "· "+msg.line)
+		return m, listenCourse(m.courseCh)
+
+	case vCourseDoneMsg:
+		m.pending--
+		m.courseCh = nil
+		if msg.err != nil {
+			m.chat.append(roleSystem, "⚠ course build failed: "+msg.err.Error())
+			return m, nil
+		}
+		m.chat.append(roleOK, "✓ course ready: "+msg.meta.Title+
+			"\n\nReview it in "+msg.meta.Path+" — then :tutor and :topic "+msg.meta.ID+" to study.")
+		m.flash("course created: " + msg.meta.ID)
+		// Refresh the tree and open the manifest for review.
+		return m, tea.Batch(vListCmd(m.svc), vOpenCmd(m.svc, msg.meta.Path))
+
 	case vEssayMsg:
 		m.pending--
 		pct := int(msg.res.Score*100 + 0.5)
@@ -451,6 +481,13 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editor = tm.(editor.Model)
 		return m, cmd
 	case paneChat:
+		// Esc abandons a running course intake (the interview, not a build).
+		if msg.Type == tea.KeyEsc && m.courseIntake && !m.streaming {
+			m.courseIntake = false
+			m.courseHist = nil
+			m.chat.append(roleSystem, "— course intake canceled —")
+			return m, nil
+		}
 		switch msg.String() {
 		// Copy the tutor's last reply: Alt+O (Linux) / Option+O (macOS, which
 		// arrives as "ø"/"Ø" unless the terminal sends Option as Meta).
@@ -464,7 +501,15 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.flash(pasteChat(&m.chat))
 			return m, nil
 		}
-		if msg.Type == tea.KeyEnter {
+		// The input's Vim Normal mode (Esc): ":" opens the command line right
+		// from the chat; Enter doesn't send while in it.
+		if m.chat.inNormal() && msg.String() == ":" {
+			m.cmdMode = true
+			m.cmdLine.SetValue("")
+			m.cmdHist.Open()
+			return m, m.cmdLine.Focus()
+		}
+		if msg.Type == tea.KeyEnter && !m.chat.inNormal() {
 			return m.submitChat()
 		}
 		var cmd tea.Cmd
@@ -523,9 +568,25 @@ func (m VaultModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Left click: focus the pane under the cursor.
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-		return m, m.setFocus(p)
+	// Left click: focus the pane under the cursor; on the chat it also anchors
+	// a drag, so pulling the mouse up/down scrolls the transcript. (For TEXT
+	// selection use the terminal's bypass: Option+drag on macOS, Shift+drag on
+	// Linux — mouse reporting is skipped entirely there.)
+	switch msg.Action {
+	case tea.MouseActionPress:
+		if msg.Button == tea.MouseButtonLeft {
+			m.dragChat = p == paneChat
+			m.dragY = msg.Y
+			return m, m.setFocus(p)
+		}
+	case tea.MouseActionMotion:
+		if m.dragChat && msg.Button == tea.MouseButtonLeft {
+			m.chat.scrollBy(m.dragY - msg.Y)
+			m.dragY = msg.Y
+			return m, nil
+		}
+	case tea.MouseActionRelease:
+		m.dragChat = false
 	}
 	return m, nil
 }
@@ -691,9 +752,9 @@ func (m VaultModel) confirmDelete(it sidebarItem) (tea.Model, tea.Cmd) {
 // vaultExCmds lists every command runEx accepts (aliases included), sorted,
 // for Tab completion in the command prompt.
 var vaultExCmds = []string{
-	"answer", "backlinks", "code", "compact", "copy", "done", "essay", "fold",
-	"gen", "grade", "learn", "lesson", "links", "new", "paste", "q", "quit",
-	"sidebar", "tutor", "wide", "yank",
+	"answer", "backlinks", "code", "compact", "copy", "course", "done", "essay",
+	"export", "fold", "gen", "grade", "learn", "lesson", "links", "new",
+	"paste", "q", "quit", "revise", "sidebar", "tutor", "wide", "yank",
 }
 
 // runEx dispatches a vault ex-command (without the leading colon).
@@ -730,6 +791,10 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.startEssay(args)
 	case "grade":
 		return m.gradeEssay()
+	case "course":
+		return m.cmdCourse(args)
+	case "revise":
+		return m.cmdRevise(args)
 	case "answer":
 		return m.revealAnswer()
 	case "copy", "yank":
@@ -738,6 +803,9 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 			what = fields[1]
 		}
 		m.flash(copyChat(&m.chat, what))
+		return m, nil
+	case "export":
+		m.flash(exportChat(&m.chat, m.cfg.ExportsDir, m.currentTitle))
 		return m, nil
 	case "paste":
 		m.flash(pasteChat(&m.chat))
@@ -930,7 +998,8 @@ func (m VaultModel) chatContext() string {
 }
 
 // submitChat sends the chat input to the tutor, streaming the reply into the
-// transcript, grounded in the open note / study state.
+// transcript. Normally it is grounded in the open note / study state; during
+// a :course intake it continues the requirements interview instead.
 func (m VaultModel) submitChat() (tea.Model, tea.Cmd) {
 	if m.streaming {
 		m.flash("the tutor is still replying — one question at a time")
@@ -941,23 +1010,45 @@ func (m VaultModel) submitChat() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.chat.append(roleUser, text)
-	m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "user", Content: text})
+	if m.courseIntake {
+		m.courseHist = append(m.courseHist, tutor.ChatTurn{Role: "user", Content: text})
+	} else {
+		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "user", Content: text})
+	}
+	return m.streamReply()
+}
+
+// streamReply starts streaming one tutor reply over the active conversation:
+// the requirements interview during a :course intake (its own system prompt,
+// via CourseIntakeStream), the note-grounded tutor chat otherwise.
+func (m VaultModel) streamReply() (tea.Model, tea.Cmd) {
 	m.pending++
 	m.loadKind = "tutor thinking"
 	m.streaming = true
 	m.chat.beginStream()
 
 	svc := m.svc
-	ctxText := m.chatContext()
-	hist := append([]tutor.ChatTurn(nil), m.chatHist...) // copy: the goroutine outlives this Update
-	ch, cmd := startChatStream(func(onDelta func(string)) (string, error) {
-		return svc.ChatStream(context.Background(), ctxText, hist, onDelta)
-	})
+	var ch chan streamChunkMsg
+	var cmd tea.Cmd
+	if m.courseIntake {
+		seed := m.courseSeed
+		hist := append([]tutor.ChatTurn(nil), m.courseHist...) // copy: the goroutine outlives this Update
+		ch, cmd = startChatStream(func(onDelta func(string)) (string, error) {
+			return svc.CourseIntakeStream(context.Background(), seed, hist, onDelta)
+		})
+	} else {
+		ctxText := m.chatContext()
+		hist := append([]tutor.ChatTurn(nil), m.chatHist...)
+		ch, cmd = startChatStream(func(onDelta func(string)) (string, error) {
+			return svc.ChatStream(context.Background(), ctxText, hist, onDelta)
+		})
+	}
 	m.streamCh = ch
 	return m, cmd
 }
 
-// handleStreamChunk advances a streaming tutor reply.
+// handleStreamChunk advances a streaming tutor reply. The end of an intake
+// reply is checked for the course_request JSON that starts the build.
 func (m VaultModel) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.pending--
@@ -968,11 +1059,114 @@ func (m VaultModel) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
 	if msg.done {
 		m.pending--
 		m.streaming = false
+		if m.courseIntake {
+			m.courseHist = append(m.courseHist, tutor.ChatTurn{Role: "assistant", Content: msg.full})
+			if req, ok := core.ParseCourseRequest(msg.full); ok {
+				m.courseIntake = false
+				req.NotePath = m.courseSeed
+				return m.startCourseGen(req)
+			}
+			return m, nil
+		}
 		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: msg.full})
 		return m, nil
 	}
 	m.chat.appendStream(msg.delta)
 	return m, listenStream(m.streamCh)
+}
+
+// --- :course — intake interview + agentic build ---
+
+// cmdCourse starts building a course from the open note: ":course" opens the
+// requirements interview in the chat pane; ":course defaults" (or running
+// offline) skips straight to the defaults — incremental, comprehensive, with
+// the linked notes included.
+func (m VaultModel) cmdCourse(args string) (tea.Model, tea.Cmd) {
+	if m.current == "" {
+		m.flash("open a note first — :course builds a course from it")
+		return m, nil
+	}
+	if m.courseCh != nil {
+		m.flash("a course is already being built")
+		return m, nil
+	}
+	if m.streaming {
+		m.flash("the tutor is still replying — try :course again in a moment")
+		return m, nil
+	}
+	m.courseSeed = m.current
+	if strings.EqualFold(strings.TrimSpace(args), "defaults") || m.svc.Offline() {
+		if m.svc.Offline() {
+			m.chat.append(roleSystem, "— offline: building the course with defaults —")
+		}
+		return m.startCourseGen(core.CourseRequest{NotePath: m.courseSeed, IncludeLinked: true})
+	}
+
+	m.courseIntake = true
+	m.courseHist = []tutor.ChatTurn{{Role: "user", Content: "I want to build a course from this note."}}
+	m.chat.append(roleSystem, "— course intake: answer in the chat, say \"defaults\" to skip, esc to cancel —")
+	tm, cmd := m.streamReply()
+	mm := tm.(VaultModel)
+	return mm, tea.Batch(mm.setFocus(paneChat), cmd)
+}
+
+// startCourseGen launches the agentic pipeline, pumping its progress lines
+// into the chat pane.
+func (m VaultModel) startCourseGen(req core.CourseRequest) (tea.Model, tea.Cmd) {
+	m.pending++
+	m.loadKind = "building course"
+	m.chat.append(roleSystem, "▶ building the course…")
+	ch := make(chan tea.Msg, 16)
+	m.courseCh = ch
+	svc := m.svc
+	go func() {
+		meta, err := svc.GenerateCourse(context.Background(), req, func(line string) {
+			ch <- vCourseProgressMsg{line: line}
+		})
+		ch <- vCourseDoneMsg{meta: meta, err: err}
+	}()
+	return m, listenCourse(ch)
+}
+
+// cmdRevise improves an existing course: ":revise" with a course note open
+// (its manifest or any lesson inside meari-course/<X>/), optionally followed
+// by free-form feedback, e.g. ":revise make module 2 harder, add more code".
+func (m VaultModel) cmdRevise(feedback string) (tea.Model, tea.Cmd) {
+	if m.courseCh != nil {
+		m.flash("a course is already being built")
+		return m, nil
+	}
+	key, ok := courseKeyOf(m.current)
+	if !ok {
+		m.flash("open a course first (its course.md, or any of its lessons) — then :revise")
+		return m, nil
+	}
+	m.pending++
+	m.loadKind = "revising course"
+	m.chat.append(roleSystem, "▶ revising the course…")
+	ch := make(chan tea.Msg, 16)
+	m.courseCh = ch
+	svc := m.svc
+	go func() {
+		meta, err := svc.ReviseCourse(context.Background(), key, strings.TrimSpace(feedback),
+			func(line string) { ch <- vCourseProgressMsg{line: line} })
+		ch <- vCourseDoneMsg{meta: meta, err: err}
+	}()
+	return m, listenCourse(ch)
+}
+
+// courseKeyOf maps a note path inside meari-course/<X>/ to that course's
+// manifest path.
+func courseKeyOf(notePath string) (string, bool) {
+	parts := strings.Split(notePath, "/")
+	if len(parts) < 3 || parts[0] != core.CourseDir {
+		return "", false
+	}
+	return parts[0] + "/" + parts[1] + "/course.md", true
+}
+
+func listenCourse(ch chan tea.Msg) tea.Cmd {
+	return func() tea.Msg { return <-ch }
 }
 
 func (m VaultModel) forwardToFocus(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1305,10 +1499,17 @@ type (
 	vRenamedMsg   struct{ oldPath, newPath string }
 	vMkdirMsg     struct{ path string }
 	vGeneratedMsg struct{ meta core.NoteMeta }
-	vSavedMsg     struct{ meta core.NoteMeta }
-	vEssayMsg     struct{ res core.EssayResult }
-	vAnswerMsg    struct{ text string }
-	vErrMsg       struct {
+
+	// :course build progress (one line per pipeline step) and completion.
+	vCourseProgressMsg struct{ line string }
+	vCourseDoneMsg     struct {
+		meta core.CourseMeta
+		err  error
+	}
+	vSavedMsg  struct{ meta core.NoteMeta }
+	vEssayMsg  struct{ res core.EssayResult }
+	vAnswerMsg struct{ text string }
+	vErrMsg    struct {
 		kind string
 		err  error
 	}
