@@ -128,6 +128,11 @@ func buildDeps(cfg config.Config, wd, cfgPath string) (tui.Deps, *core.Service, 
 	}
 	svc := core.New(v, tut)
 	svc.SetCourseDir(cfg.CourseDir) // courses live in the app dir, not the vault
+	// First run: materialize the built-in Go track as markdown courses, so
+	// every course is the same editable format. Never blocks startup.
+	if err := svc.SeedBuiltinCourses(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: could not seed built-in courses:", err)
+	}
 	deps := tui.Deps{
 		Tutor:      tut,
 		Store:      store,
@@ -191,6 +196,9 @@ func runServe(args []string) error {
 	}
 	svc := core.New(v, tutor.New(cfg.AI))
 	svc.SetCourseDir(cfg.CourseDir)
+	if err := svc.SeedBuiltinCourses(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: could not seed built-in courses:", err)
+	}
 
 	fmt.Printf("Meari web UI on http://localhost%s  (vault: %s)\n", *addr, cfg.VaultDir)
 	if svc.Offline() {

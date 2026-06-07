@@ -227,16 +227,33 @@ the tutor, exactly like their own courses.
 
 ## The coding tutor (`meari -tutor`)
 
-On a bare `meari` launch you're walked through a short **setup wizard** (`↑`/`↓` or
-`j`/`k` to move, `Enter` to choose, `Esc` to go back). It drops you into one of:
+A bare `meari` launch opens the **launch dashboard** — one full-screen course list
+with everything you can do (`↑`/`↓` or `j`/`k` to move, `Enter` to choose,
+`g`/`G` jump to top/bottom, `q` to quit):
 
-- **Curriculum mode** — a built-in, ordered, pre-authored learning path (no AI needed,
-  works offline), with progress saved so you can **Continue where you left off**. The
-  Go track, for example, goes deep — imperative basics & the type system → functions,
-  methods, closures, slices/maps → structs, JSON, interfaces, and pointers.
-- **Custom mode** — any topic you type; the AI generates the material for it.
+- **Continue** — your saved session, shown first so `Enter` alone resumes it.
+- **Courses** — every meari-course by name (`:course` creations, cloned/shared
+  ones, the seeded Go track), each row showing its difficulty and your
+  progress. Entering one starts it directly — a course carries its own level,
+  so there are no follow-up questions.
+- **A topic of my own** — type anything; the AI writes the lesson and challenge.
+- **Open the vault** — jump straight to the notes vault instead.
 
-The `-tutor` (`-t`) and `-topic` flags skip the wizard for returning users.
+**The seeded Go track.** On first launch Meari writes its built-in Go course —
+pre-authored and fully offline, going deep from imperative basics & the type
+system through closures, slices/maps, structs, JSON, interfaces, and pointers —
+into the courses directory **as ordinary markdown courses**, the same format
+`:course` produces: `meari-course/Go/Beginner/`, `Go/Intermediate/`, and
+`Go/Advanced/`. So they're editable, `:revise`-able, and `:publish`-able like
+any course you build; delete their folders and they stay gone.
+
+**Difficulty families.** That nested layout works for your own courses too: put
+levels of one course side by side (`meari-course/Rust/Beginner/course.md`,
+`meari-course/Rust/Advanced/course.md`) and set each manifest's `level:`, shown
+on the course's dashboard row. A manifest without an explicit `id:` gets one
+from its folder path (`rust-beginner`), so nested levels never collide.
+
+The `-tutor` (`-t`) and `-topic` flags skip the dashboard for returning users.
 
 **Global keys** (any pane):
 

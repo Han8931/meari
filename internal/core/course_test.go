@@ -1,6 +1,8 @@
 package core
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,6 +71,52 @@ func newCourseVault(t *testing.T) *Service {
 		t.Fatal(err)
 	}
 	return svc
+}
+
+// Difficulty variants of one course can nest under a shared directory; a
+// hand-authored manifest without an explicit id derives a unique one from its
+// full folder path, keeping the manifest's level for display.
+func TestNestedCourseLevels(t *testing.T) {
+	svc := newCourseVault(t)
+	courseDir := t.TempDir()
+	svc.SetCourseDir(courseDir)
+	if _, err := svc.SaveNote("Notes/Pointers.md", "# Pointers\n\nAddresses.\n"); err != nil {
+		t.Fatal(err)
+	}
+	// Hand-authored on disk, no explicit ids: the folder-path fallback applies.
+	write := func(rel, body string) {
+		t.Helper()
+		abs := filepath.Join(courseDir, rel)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("Rust/Beginner/course.md", "---\ntitle: Rust (Beginner)\n---\n## Basics\n- [[Pointers]]\n")
+	write("Rust/Advanced/course.md", "---\ntitle: Rust (Advanced)\nlevel: advanced\n---\n## Deep\n- [[Pointers]]\n")
+
+	metas, err := svc.ListCourses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]CourseMeta{}
+	for _, m := range metas {
+		byID[m.ID] = m
+	}
+	if _, ok := byID["rust-beginner"]; !ok {
+		t.Fatalf("nested id-less manifest should get id rust-beginner, got %+v", metas)
+	}
+	if _, ok := byID["rust-advanced"]; !ok {
+		t.Fatalf("nested id-less manifest should get id rust-advanced, got %+v", metas)
+	}
+	if _, err := svc.LoadCourse("rust-advanced"); err != nil {
+		t.Fatalf("LoadCourse(rust-advanced): %v", err)
+	}
+	if byID["rust-advanced"].Level != "advanced" {
+		t.Fatalf("nested manifest level lost: %+v", byID["rust-advanced"])
+	}
 }
 
 func TestListAndLoadCourse(t *testing.T) {

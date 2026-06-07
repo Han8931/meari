@@ -110,5 +110,4 @@ func contains(xs []string, want string) bool {
 	return false
 }
 
-func TestPythonCurriculumConsistency(t *testing.T) { auditCurriculum(t, "python") }
-func TestGoCurriculumConsistency(t *testing.T)     { auditCurriculum(t, "go") }
+func TestGoCurriculumConsistency(t *testing.T) { auditCurriculum(t, "go") }

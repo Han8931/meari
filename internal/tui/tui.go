@@ -59,16 +59,33 @@ const (
 	phaseReady              // the three panes
 )
 
-// setupStep is the current question in the startup wizard.
+// setupStep is the current screen of the startup flow.
 type setupStep int
 
 const (
-	stepResume   setupStep = iota // offer to continue a saved session (if any)
-	stepLanguage                  // pick a language
-	stepPath                      // full curriculum vs a specific topic
-	stepTopic                     // type the specific topic
-	stepLevel                     // beginner / intermediate / advanced
+	stepDashboard setupStep = iota // the launch dashboard: pick a course or destination
+	stepTopic                      // type the specific topic
+	stepLevel                      // beginner / intermediate / advanced
 )
+
+// dashKind says what selecting a launch-dashboard row does.
+type dashKind int
+
+const (
+	dashContinue dashKind = iota // resume the saved session
+	dashCourse                   // study a course (seeded or learner-built)
+	dashTopic                    // ask the AI for a custom topic
+	dashVault                    // switch to the notes vault
+)
+
+// dashEntry is one selectable row of the launch dashboard.
+type dashEntry struct {
+	kind    dashKind
+	id      string // the course id / language, for dashCourse and dashLang
+	section string // group header, drawn above the section's first entry
+	title   string
+	meta    string // dim right-aligned detail (level, progress, what happens)
+}
 
 // overlayKind selects which full-screen modal is active, if any.
 type overlayKind int
@@ -104,11 +121,13 @@ type Model struct {
 	chat       chatModel
 	topicInput textinput.Model
 
-	// Startup wizard state (phaseSetup).
+	// Startup flow state (phaseSetup).
 	setupStep    setupStep
 	setupCursor  int
 	setupHistory []setupStep // for Esc = back
-	lang         string      // chosen language ("python" | "go")
+	dash         []dashEntry // the launch dashboard's rows
+	dashCursor   int         // dashboard position, restored when Esc returns to it
+	lang         string      // the running course's id (curriculum.Lang)
 	level        string      // chosen experience level
 
 	topic      string
@@ -293,22 +312,90 @@ func newModel(d Deps) Model {
 		m.pending = 2
 		m.setFocus(paneEditor)
 	case d.Curriculum:
-		// Curriculum via flag: resume the saved session if any, else Python beginner.
-		lang, level, startID := "python", curriculum.Beginner, ""
+		// Curriculum via flag: resume the saved session if any, else the
+		// seeded Go beginner course.
+		key, level, startID := "go-beginner", curriculum.Beginner, ""
 		if last := d.Progress.Last; last != nil {
-			lang, level, startID = last.Lang, last.Level, last.TopicID
+			key, level, startID = last.Lang, last.Level, last.TopicID
 		}
-		m.loadCurriculum(lang, level, startID)
+		m.loadCurriculum(key, level, startID)
 		m.phase = phaseReady
 	default:
-		// Guided wizard. Start on the resume step only if there's a saved session.
-		if d.Progress.Last != nil {
-			m.setupStep = stepResume
-		} else {
-			m.setupStep = stepLanguage
-		}
+		// The launch dashboard: every way into the app on one screen.
+		m.setupStep = stepDashboard
+		m.dash = m.dashboardEntries()
 	}
 	return m
+}
+
+// dashboardEntries assembles the launch dashboard: the saved session, every
+// course (the seeded Go track and learner-built ones alike), and the two
+// destinations that aren't a course (a custom AI topic, the vault itself).
+func (m Model) dashboardEntries() []dashEntry {
+	var out []dashEntry
+	var metas []core.CourseMeta
+	if m.deps.Svc != nil {
+		metas, _ = m.deps.Svc.ListCourses()
+	}
+	if last := m.deps.Progress.Last; last != nil && m.resumable(last.Lang, metas) {
+		out = append(out, dashEntry{
+			kind:    dashContinue,
+			section: "Continue",
+			title:   last.Title,
+			meta:    "pick up where you left off",
+		})
+	}
+	for _, c := range metas {
+		level := c.Level
+		if level == "" {
+			level = curriculum.Beginner
+		}
+		meta := level
+		if done := m.courseTopicsDone(c.ID); done > 0 {
+			meta = level + " · " + itoa(done) + " done"
+		}
+		out = append(out, dashEntry{
+			kind:    dashCourse,
+			id:      c.ID,
+			section: "Courses",
+			title:   c.Title,
+			meta:    meta,
+		})
+	}
+	return append(out,
+		dashEntry{kind: dashTopic, section: "Or", title: "A topic of my own",
+			meta: "the AI writes a lesson + challenge"},
+		dashEntry{kind: dashVault, section: "Or", title: "Open the vault",
+			meta: "notes, lessons, build courses"},
+	)
+}
+
+// resumable reports whether the saved session's course still exists, so the
+// dashboard never leads with a dead Continue row (e.g. after a course was
+// deleted, or for sessions from removed built-ins). With no vault service the
+// check is skipped.
+func (m Model) resumable(key string, metas []core.CourseMeta) bool {
+	if m.deps.Svc == nil {
+		return true
+	}
+	for _, c := range metas {
+		if strings.EqualFold(c.ID, key) || strings.EqualFold(c.Title, key) {
+			return true
+		}
+	}
+	return false
+}
+
+// courseTopicsDone counts a course's completed topics from saved progress
+// (topic ids are "course-<id>-…"), without loading the course itself.
+func (m Model) courseTopicsDone(courseID string) int {
+	done := 0
+	for tid, status := range m.deps.Progress.Topics {
+		if status == "done" && strings.HasPrefix(tid, "course-"+courseID+"-") {
+			done++
+		}
+	}
+	return done
 }
 
 // seedOrder pre-populates the sidebar order from drafts and progress on disk so
@@ -794,7 +881,7 @@ func topicArgCandidates(svc *core.Service, input string) []string {
 		if !strings.HasPrefix(input, verb) {
 			continue
 		}
-		ids := append([]string{}, curriculum.Languages()...)
+		var ids []string
 		if svc != nil {
 			if metas, err := svc.ListCourses(); err == nil {
 				for _, c := range metas {
@@ -889,18 +976,9 @@ func (m Model) cmdTopic(args []string) (tea.Model, tea.Cmd) {
 	return m.switchCourse(strings.ToLower(strings.Join(args, " ")))
 }
 
-// switchCourse enters the curriculum for course at the learner's current level
-// (defaulting to beginner). Built-in languages are tried first, then the
-// vault's meari-courses (by id or title); unknown names list both.
+// switchCourse enters a course (by id or title; all courses — the seeded Go
+// track included — are markdown meari-courses); unknown names list what exists.
 func (m Model) switchCourse(course string) (tea.Model, tea.Cmd) {
-	if curriculum.HasCurriculum(course) {
-		level := m.level
-		if level == "" {
-			level = curriculum.Beginner
-		}
-		m.chat.append(roleSystem, "— now learning "+titleCase(course)+" ("+level+") —")
-		return m, m.loadCurriculum(course, level, "")
-	}
 	if vc, err := m.loadVaultCourse(course); err == nil {
 		m.chat.append(roleSystem, "— now studying "+vc.Lang+" ("+vc.Level+") —")
 		return m, m.installCurriculum(vc, "")
@@ -937,8 +1015,7 @@ func (m Model) switchCourse(course string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// courseNames lists everything :topic accepts: built-in languages plus the
-// vault's meari-courses.
+// courseNames lists everything :topic accepts: the vault's meari-courses.
 func (m Model) courseNames() []string {
 	ids, _ := m.pickerEntries()
 	return ids
@@ -1136,19 +1213,15 @@ func (m Model) overlayView() string {
 	return ""
 }
 
-// pickerEntries returns everything the course picker offers: the built-in
-// languages, then the vault's meari-courses. ids are what :topic accepts;
+// pickerEntries returns everything the course picker offers — the vault's
+// meari-courses (the seeded Go track included). ids are what :topic accepts;
 // labels are for display.
 func (m Model) pickerEntries() (ids, labels []string) {
-	for _, l := range curriculum.Languages() {
-		ids = append(ids, l)
-		labels = append(labels, titleCase(l))
-	}
 	if m.deps.Svc != nil {
 		if metas, err := m.deps.Svc.ListCourses(); err == nil {
 			for _, c := range metas {
 				ids = append(ids, c.ID)
-				labels = append(labels, c.Title+"  "+hintStyle.Render("(vault course)"))
+				labels = append(labels, c.Title)
 			}
 		}
 	}
@@ -1173,9 +1246,14 @@ func (m Model) pickerView() string {
 
 func (m Model) progressView() string {
 	var b strings.Builder
-	for _, course := range curriculum.Languages() {
-		done, total := m.courseCompletion(course)
-		b.WriteString(courseProgressLine(course, done, total))
+	ids, labels := m.pickerEntries()
+	if len(ids) == 0 {
+		b.WriteString(hintStyle.Render("no courses yet — :vault then :course builds one"))
+		b.WriteString("\n")
+	}
+	for i, id := range ids {
+		done, total := m.courseCompletion(id)
+		b.WriteString(courseProgressLine(labels[i], done, total))
 		b.WriteString("\n")
 	}
 	attempts, passes := 0, 0
@@ -1193,7 +1271,7 @@ func helpView() string {
 	cmds := strings.Join([]string{
 		bold("Commands"),
 		"  :help              this screen",
-		"  :topic <course>    switch course (python/go/physics)",
+		"  :topic <course>    switch course (any meari-course, by id or title)",
 		"  :subject <course>  alias for :topic",
 		"  :fold              fold/unfold the left tree pane",
 		"  :compact / :wide   shrink/grow the editor (frees chat space)",
@@ -1223,18 +1301,17 @@ func helpView() string {
 
 func bold(s string) string { return lipgloss.NewStyle().Bold(true).Render(s) }
 
-// courseCompletion counts done vs total topics across all levels of a course.
+// courseCompletion counts done vs total topics of one course (by id/title),
+// loading it through the same course loader the tutor runs it with.
 func (m Model) courseCompletion(course string) (done, total int) {
-	for _, level := range []string{curriculum.Beginner, curriculum.Intermediate, curriculum.Advanced} {
-		c, ok := curriculum.For(course, level)
-		if !ok {
-			continue
-		}
-		for _, t := range c.Topics() {
-			total++
-			if m.deps.Progress.TopicStatus(t.ID) == "done" {
-				done++
-			}
+	c, err := m.loadVaultCourse(course)
+	if err != nil {
+		return 0, 0
+	}
+	for _, t := range c.Topics() {
+		total++
+		if m.deps.Progress.TopicStatus(t.ID) == "done" {
+			done++
 		}
 	}
 	return done, total
@@ -1248,7 +1325,7 @@ func courseProgressLine(course string, done, total int) string {
 		filled = done * width / total
 	}
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
-	return fmt.Sprintf("%-9s %s  %d/%d", titleCase(course), bar, done, total)
+	return fmt.Sprintf("%-18s %s  %d/%d", truncate(course, 18), bar, done, total)
 }
 
 // modalCard wraps a title/body/hint in the same bordered card the setup wizard
@@ -1267,25 +1344,9 @@ func modalCard(title, body, hint string) string {
 }
 
 // setupOptions returns the selectable options for the current selection step
-// (empty for the free-text topic step).
+// (empty for the free-text topic step; the dashboard has its own entries).
 func (m Model) setupOptions() []string {
-	switch m.setupStep {
-	case stepResume:
-		cont := "Continue where you left off"
-		if last := m.deps.Progress.Last; last != nil {
-			cont = "Continue: " + titleCase(last.Lang) + " · " + last.Level + " — " + last.Title
-		}
-		return []string{cont, "Start something new"}
-	case stepLanguage:
-		langs := curriculum.Languages()
-		opts := make([]string, 0, len(langs))
-		for _, lang := range langs {
-			opts = append(opts, titleCase(lang))
-		}
-		return opts
-	case stepPath:
-		return []string{"Start from the beginning (full curriculum)", "Learn a specific topic (AI-generated)"}
-	case stepLevel:
+	if m.setupStep == stepLevel {
 		return []string{"Beginner", "Intermediate", "Advanced"}
 	}
 	return nil
@@ -1293,10 +1354,14 @@ func (m Model) setupOptions() []string {
 
 func (m *Model) gotoStep(s setupStep) {
 	m.setupStep = s
-	m.setupCursor = 0
+	if s == stepDashboard {
+		m.setupCursor = m.dashCursor // Esc-back lands on the row that was chosen
+	} else {
+		m.setupCursor = 0
+	}
 	if s == stepTopic {
 		m.topicInput.SetValue("")
-		m.topicInput.Placeholder = "e.g. list comprehensions"
+		m.topicInput.Placeholder = "e.g. spanish past tense · binary search"
 		m.topicInput.Focus()
 	}
 }
@@ -1340,14 +1405,22 @@ func (m Model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// Selection steps.
-	opts := m.setupOptions()
+	// Selection steps: the dashboard scrolls its own entries, the level step
+	// its option list.
+	n := len(m.setupOptions())
+	if m.setupStep == stepDashboard {
+		n = len(m.dash)
+	}
 	switch msg.String() {
 	case "q":
 		// "q" quits from any selection step (it's never typed here).
 		return m, tea.Quit
+	case "g":
+		m.setupCursor = 0
+	case "G":
+		m.setupCursor = n - 1
 	case "j", "down":
-		if m.setupCursor < len(opts)-1 {
+		if m.setupCursor < n-1 {
 			m.setupCursor++
 		}
 	case "k", "up":
@@ -1360,33 +1433,29 @@ func (m Model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// setupSelect advances the wizard after an option is chosen on a selection step.
+// setupSelect advances the startup flow after an option is chosen.
 func (m Model) setupSelect() (tea.Model, tea.Cmd) {
 	switch m.setupStep {
-	case stepResume:
-		if m.setupCursor == 0 { // continue the saved session
+	case stepDashboard:
+		if len(m.dash) == 0 {
+			return m, nil
+		}
+		m.dashCursor = m.setupCursor
+		e := m.dash[m.setupCursor]
+		switch e.kind {
+		case dashContinue:
 			return m.finishResume()
-		}
-		m.advance(stepLanguage)
-	case stepLanguage:
-		langs := curriculum.Languages()
-		if m.setupCursor < 0 || m.setupCursor >= len(langs) {
-			m.setupCursor = 0
-		}
-		m.lang = langs[m.setupCursor]
-		if m.lang == "python" {
-			m.advance(stepPath) // Python offers curriculum or a specific topic
-		} else {
-			m.curriculum = true // non-Python languages are curriculum-only
-			m.advance(stepLevel)
-		}
-	case stepPath:
-		if m.setupCursor == 0 {
-			m.curriculum = true
-			m.advance(stepLevel)
-		} else {
+		case dashCourse:
+			// Courses carry their own level; no further questions.
+			m.phase = phaseReady
+			m.topicInput.Blur()
+			return m.switchCourse(e.id)
+		case dashTopic:
 			m.curriculum = false
 			m.advance(stepTopic)
+		case dashVault:
+			m.exit = SwitchToVault
+			return m, tea.Quit // the shell loop opens the vault
 		}
 	case stepLevel:
 		m.level = []string{"beginner", "intermediate", "advanced"}[m.setupCursor]
@@ -1401,23 +1470,18 @@ func (m Model) setupSubmitInput() (tea.Model, tea.Cmd) {
 	if v == "" {
 		v = "basics"
 	}
-	m.topic = strings.TrimSpace(m.lang + " " + v)
+	m.topic = v
 	m.advance(stepLevel)
 	return m, nil
 }
 
-// finishSetup leaves the wizard and starts the session: a pre-authored
-// curriculum (no LLM) or an AI-generated custom topic.
+// finishSetup leaves the launch flow into an AI-generated custom topic (the
+// only dashboard path that still asks follow-up questions).
 func (m Model) finishSetup() (tea.Model, tea.Cmd) {
 	m.deps.Tutor.SetLevel(m.level)
 	m.phase = phaseReady
 	m.topicInput.Blur()
 
-	if m.curriculum {
-		return m, m.loadCurriculum(m.lang, m.level, "")
-	}
-
-	// Custom topic via the LLM.
 	m.pending += 2
 	m.loadKind = "loading lesson"
 	return m, tea.Batch(
@@ -1579,19 +1643,14 @@ func (m *Model) openSelected() tea.Cmd {
 	return nil
 }
 
-// loadCurriculum enters curriculum mode for (lang, level), indexes its topics,
-// and starts at startID (or the first unfinished topic when startID is empty).
-// lang may also name a vault-built course (its id/title), so a saved course
-// session resumes through the same path as the built-ins.
-func (m *Model) loadCurriculum(lang, level, startID string) tea.Cmd {
-	c, ok := curriculum.For(lang, level)
-	if !ok {
-		if vc, err := m.loadVaultCourse(lang); err == nil {
-			c, ok = vc, true
-		}
-	}
-	if !ok {
-		m.chat.append(roleSystem, "⚠ No curriculum for "+lang+" / "+level+".")
+// loadCurriculum enters curriculum mode for the course named by key (a
+// meari-course id or title — the seeded Go track included), indexes its
+// topics, and starts at startID (or the first unfinished topic when empty).
+// level rides along only for the warning when the course no longer exists.
+func (m *Model) loadCurriculum(key, level, startID string) tea.Cmd {
+	c, err := m.loadVaultCourse(key)
+	if err != nil {
+		m.chat.append(roleSystem, "⚠ No course "+key+" ("+level+") — :topic lists what exists.")
 		return nil
 	}
 	return m.installCurriculum(c, startID)
@@ -2231,6 +2290,9 @@ func (m Model) View() string {
 	}
 
 	if m.phase == phaseSetup {
+		if m.setupStep == stepDashboard {
+			return m.dashboardView()
+		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.setupView())
 	}
 
@@ -2271,22 +2333,14 @@ func (m Model) View() string {
 	return lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(frame)
 }
 
-// setupView renders the current wizard step as a centered card.
+// setupView renders the follow-up steps after a dashboard choice (the custom
+// topic input and the level question) as a centered card.
 func (m Model) setupView() string {
 	var title, body string
 
 	switch m.setupStep {
-	case stepResume:
-		title = "Welcome back!"
-		body = m.setupMenu()
-	case stepLanguage:
-		title = "Which language do you want to learn?"
-		body = m.setupMenu()
-	case stepPath:
-		title = "How would you like to learn " + titleCase(m.lang) + "?"
-		body = m.setupMenu()
 	case stepTopic:
-		title = "What topic do you want to learn?"
+		title = "What do you want to learn?"
 		body = m.topicInput.View()
 	case stepLevel:
 		title = "What's your experience level?"
@@ -2294,10 +2348,6 @@ func (m Model) setupView() string {
 	}
 
 	hint := "↑/↓ or j/k to move · enter to choose · esc to go back · q to quit"
-	if len(m.setupHistory) == 0 {
-		// First step: nothing to go back to, so esc / q both leave the app.
-		hint = "↑/↓ or j/k to move · enter to choose · q / esc to quit"
-	}
 	if m.setupStep == stepTopic {
 		hint = "type, then enter · esc to go back · ctrl+c to quit"
 	}
@@ -2313,6 +2363,66 @@ func (m Model) setupView() string {
 		Padding(1, 3).
 		Width(56).
 		Render(card)
+}
+
+// dashboardView renders the launch screen: a full-screen dashboard of every
+// way into the app — resume, your vault courses, the built-in tracks, a
+// custom topic, the vault — grouped into sections with the cursor row
+// highlighted, and scrolled to keep the cursor visible on short terminals.
+func (m Model) dashboardView() string {
+	colW := m.width - 8
+	if colW > 76 {
+		colW = 76
+	}
+
+	// Build display rows; the cursor's entry maps to one row.
+	var rows []string
+	cursorRow := 0
+	section := ""
+	for i, e := range m.dash {
+		if e.section != section {
+			section = e.section
+			if len(rows) > 0 {
+				rows = append(rows, "")
+			}
+			head := "── " + section + " "
+			rows = append(rows, hintStyle.Render(head+strings.Repeat("─", max(0, colW-lipgloss.Width(head)))))
+		}
+		meta := e.meta
+		title := truncate(e.title, max(8, colW-2-lipgloss.Width(meta)-2))
+		pad := max(2, colW-2-lipgloss.Width(title)-lipgloss.Width(meta))
+		if i == m.setupCursor {
+			cursorRow = len(rows)
+			rows = append(rows, selectedRow.Render("▸ "+title+strings.Repeat(" ", pad)+meta))
+		} else {
+			rows = append(rows, "  "+title+strings.Repeat(" ", pad)+hintStyle.Render(meta))
+		}
+	}
+
+	// Window the rows around the cursor when the terminal is short.
+	maxRows := m.height - 7 // title bar, greeting, paddings, status bar
+	if maxRows < 3 {
+		maxRows = 3
+	}
+	if len(rows) > maxRows {
+		start := cursorRow - maxRows/2
+		if start < 0 {
+			start = 0
+		}
+		if start > len(rows)-maxRows {
+			start = len(rows) - maxRows
+		}
+		rows = rows[start : start+maxRows]
+	}
+
+	greeting := lipgloss.NewStyle().Bold(true).Render("What will you learn today?")
+	body := greeting + "\n\n" + strings.Join(rows, "\n")
+
+	head := titleBar.Width(m.width).Render("Meari — 메아리")
+	hints := "↑/↓ or j/k move · enter choose · q / esc quit"
+	foot := statusBar.Width(m.width).Render(hintStyle.Render(hints))
+	mid := lipgloss.Place(m.width, m.height-2, lipgloss.Center, lipgloss.Center, body)
+	return head + "\n" + mid + "\n" + foot
 }
 
 // setupMenu renders the current selection step's options with the cursor row

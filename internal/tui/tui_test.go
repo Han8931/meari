@@ -8,14 +8,17 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"meari/internal/config"
+	"meari/internal/core"
 	"meari/internal/curriculum"
 	"meari/internal/drafts"
 	"meari/internal/editor"
 	"meari/internal/executor"
 	"meari/internal/progress"
 	"meari/internal/tutor"
+	"meari/internal/vault"
 )
 
 // testDeps builds an offline TUI over temp dirs so tests need no network/python.
@@ -48,22 +51,37 @@ func keyRunes(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
-func TestSetupWizardCustomTopicFlow(t *testing.T) {
+// dashboardSelect moves the dashboard cursor to the entry with the given kind
+// and presses enter.
+func dashboardSelect(t *testing.T, m Model, kind dashKind) Model {
+	t.Helper()
+	at := -1
+	for i, e := range m.dash {
+		if e.kind == kind {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		t.Fatalf("no dashboard entry of kind %v in %+v", kind, m.dash)
+	}
+	m = step(t, m, keyRunes("g")) // cursor to the top
+	for i := 0; i < at; i++ {
+		m = step(t, m, keyRunes("j"))
+	}
+	return step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+func TestSetupDashboardCustomTopicFlow(t *testing.T) {
 	m := newModel(testDeps(t))
-	if m.phase != phaseSetup || m.setupStep != stepLanguage {
-		t.Fatalf("expected setup wizard at language step, got phase=%v step=%v", m.phase, m.setupStep)
+	if m.phase != phaseSetup || m.setupStep != stepDashboard {
+		t.Fatalf("expected the launch dashboard, got phase=%v step=%v", m.phase, m.setupStep)
 	}
 
 	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	// Language: Python (enter on first option).
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.setupStep != stepPath {
-		t.Fatalf("after choosing Python, step = %v, want stepPath", m.setupStep)
-	}
-	// Path: move to "specific topic" and choose it.
-	m = step(t, m, keyRunes("j"))
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	// Pick "A topic of my own".
+	m = dashboardSelect(t, m, dashTopic)
 	if m.setupStep != stepTopic {
 		t.Fatalf("step = %v, want stepTopic", m.setupStep)
 	}
@@ -78,10 +96,10 @@ func TestSetupWizardCustomTopicFlow(t *testing.T) {
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 	if m.phase != phaseReady {
-		t.Fatalf("expected phaseReady after the wizard, got %v", m.phase)
+		t.Fatalf("expected phaseReady after the dashboard, got %v", m.phase)
 	}
-	if m.topic != "python loops" {
-		t.Fatalf("topic = %q, want \"python loops\"", m.topic)
+	if m.topic != "loops" {
+		t.Fatalf("topic = %q, want \"loops\"", m.topic)
 	}
 	if m.level != "intermediate" {
 		t.Fatalf("level = %q, want intermediate", m.level)
@@ -242,73 +260,183 @@ func TestCtrlWWindowChordSwitchesPanes(t *testing.T) {
 	}
 }
 
-func TestSetupWizardCurriculumPath(t *testing.T) {
-	m := newModel(testDeps(t))
+// testDepsSeeded is testDeps plus a vault service with the built-in Go track
+// seeded as markdown courses — what a real first launch produces.
+func testDepsSeeded(t *testing.T) Deps {
+	t.Helper()
+	d := testDeps(t)
+	v, err := vault.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Svc = core.New(v, d.Tutor)
+	d.Svc.SetCourseDir(t.TempDir())
+	if err := d.Svc.SeedBuiltinCourses(); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// Entering a seeded Go course from the dashboard starts it directly — courses
+// carry their own level, so no follow-up question.
+func TestSetupDashboardEntersSeededCourse(t *testing.T) {
+	m := newModel(testDepsSeeded(t))
 	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // Language: Python -> stepPath
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // Path: full curriculum -> stepLevel
-	if m.setupStep != stepLevel {
-		t.Fatalf("step = %v, want stepLevel", m.setupStep)
-	}
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // Level: Beginner -> ready
-
+	m = dashboardSelect(t, m, dashCourse)
 	if m.phase != phaseReady {
-		t.Fatalf("phase = %v, want phaseReady", m.phase)
+		t.Fatalf("phase = %v, want phaseReady (no level question for courses)", m.phase)
 	}
-	if !m.curriculum {
-		t.Fatal("choosing 'full curriculum' should enable curriculum mode")
+	if !m.curriculum || len(m.curr.Modules) == 0 {
+		t.Fatalf("seeded course should install a curriculum, got %+v", m.curr)
 	}
-	if m.level != "beginner" || m.topic == "" {
-		t.Fatalf("level=%q topic=%q after wizard", m.level, m.topic)
+	if m.current.Lang != "go" {
+		t.Fatalf("first challenge lang = %q, want go", m.current.Lang)
 	}
 }
 
-func TestSetupWizardBackWithEsc(t *testing.T) {
+func TestSetupDashboardBackWithEsc(t *testing.T) {
 	m := newModel(testDeps(t))
 	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // -> stepPath
-	m = step(t, m, tea.KeyMsg{Type: tea.KeyEsc})   // back -> stepLanguage
-	if m.setupStep != stepLanguage {
-		t.Fatalf("Esc should return to the language step, got %v", m.setupStep)
+	m = dashboardSelect(t, m, dashTopic)         // -> stepTopic
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEsc}) // back -> dashboard
+	if m.setupStep != stepDashboard {
+		t.Fatalf("Esc should return to the dashboard, got %v", m.setupStep)
+	}
+	// The cursor lands back on the row that was chosen, not the top.
+	if m.dash[m.setupCursor].kind != dashTopic {
+		t.Fatalf("cursor should restore to the chosen row, got %+v", m.dash[m.setupCursor])
 	}
 }
 
 func TestResumeOffersAndContinuesSavedSession(t *testing.T) {
-	d := testDeps(t)
-	// Simulate a prior session saved to disk.
-	d.Progress.SetLast("go", "beginner", "go-b-loops", "Loops")
+	d := testDepsSeeded(t)
+	// Simulate a prior session saved to disk: the 2nd topic of go-beginner.
+	course, err := d.Svc.LoadCourse("go-beginner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := course.Curriculum().Topics()[1]
+	d.Progress.SetLast("go-beginner", "beginner", second.ID, second.Title)
 
 	m := newModel(d)
-	if m.setupStep != stepResume {
-		t.Fatalf("with a saved session, wizard should start at stepResume, got %v", m.setupStep)
+	if m.setupStep != stepDashboard || len(m.dash) == 0 || m.dash[0].kind != dashContinue {
+		t.Fatalf("with a saved session, the dashboard should lead with Continue, got %+v", m.dash)
 	}
 	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	// Choose "Continue" (first option).
+	// Choose "Continue" (first row).
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.phase != phaseReady {
 		t.Fatalf("phase = %v, want phaseReady", m.phase)
 	}
-	if !m.curriculum || m.curr.Lang != "go" || m.curr.Level != "beginner" {
-		t.Fatalf("resumed into %s/%s, want go/beginner", m.curr.Lang, m.curr.Level)
+	if !m.curriculum || m.curr.Lang != "go-beginner" {
+		t.Fatalf("resumed into %q, want go-beginner", m.curr.Lang)
 	}
-	if m.currentTopicID != "go-b-loops" {
-		t.Fatalf("resumed topic = %q, want go-b-loops", m.currentTopicID)
+	if m.currentTopicID != second.ID {
+		t.Fatalf("resumed topic = %q, want %q", m.currentTopicID, second.ID)
+	}
+}
+
+// A saved session whose course no longer exists must not produce a dead
+// Continue row.
+func TestStaleSavedSessionHidesContinue(t *testing.T) {
+	d := testDepsSeeded(t)
+	d.Progress.SetLast("python", "beginner", "py-b-vars", "Variables")
+	m := newModel(d)
+	for _, e := range m.dash {
+		if e.kind == dashContinue {
+			t.Fatalf("stale session should hide Continue, got %+v", e)
+		}
+	}
+}
+
+// The dashboard lists vault-built courses and entering one starts it directly
+// (no level question — the course carries its own).
+func TestSetupDashboardListsVaultCourses(t *testing.T) {
+	d := testDeps(t)
+	v, err := vault.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Svc = core.New(v, d.Tutor)
+	if _, err := d.Svc.SaveNote("Algo/BST.md", "# BST\n\nOrdered keys.\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Svc.SaveNote(core.CourseDir+"/Trees/course.md", "## Basics\n- [[BST]]\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newModel(d)
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	found := false
+	for _, e := range m.dash {
+		if e.kind == dashCourse {
+			found = true
+			if e.title != "Trees" && e.id == "" {
+				t.Fatalf("course entry incomplete: %+v", e)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("dashboard should list the vault course, got %+v", m.dash)
+	}
+
+	m = dashboardSelect(t, m, dashCourse)
+	if m.phase != phaseReady {
+		t.Fatalf("phase = %v, want phaseReady after entering a vault course", m.phase)
+	}
+	if !m.curriculum || len(m.curr.Modules) == 0 {
+		t.Fatalf("vault course should install a curriculum, got %+v", m.curr)
+	}
+}
+
+func TestDashboardViewRenders(t *testing.T) {
+	d := testDepsSeeded(t)
+	d.Progress.SetLast("go-beginner", "beginner", "course-go-beginner-hello-go", "Hello, Go")
+	m := newModel(d)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	out := m.View()
+	for _, want := range []string{
+		"What will you learn today?",
+		"Continue", "Hello, Go",
+		"Courses", "Go (Beginner)", "Go (Advanced)",
+		"A topic of my own", "Open the vault",
+	} {
+		if !strings.Contains(ansi.Strip(out), want) {
+			t.Errorf("dashboard missing %q:\n%s", want, out)
+		}
+	}
+	// Full-screen: as tall as the terminal, not a small card.
+	if rows := strings.Count(out, "\n") + 1; rows < 24 {
+		t.Errorf("dashboard should fill the screen, got %d rows", rows)
+	}
+}
+
+// Choosing "Open the vault" leaves the tutor with the switch target set, so
+// the shell loop opens the vault TUI.
+func TestSetupDashboardOpensVault(t *testing.T) {
+	m := newModel(testDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = dashboardSelect(t, m, dashVault)
+	if m.exit != SwitchToVault {
+		t.Fatalf("exit = %v, want SwitchToVault", m.exit)
 	}
 }
 
 func TestStartingTopicPersistsResumePoint(t *testing.T) {
-	d := testDeps(t)
-	m := newModel(d)
-	m.loadCurriculum("python", "beginner", "py-b-loops")
-	if m.deps.Progress.Last == nil || m.deps.Progress.Last.TopicID != "py-b-loops" {
+	m := readyModel(t)
+	if m.currentTopicID == "" {
+		t.Fatal("setup: no current topic")
+	}
+	if m.deps.Progress.Last == nil || m.deps.Progress.Last.TopicID != m.currentTopicID {
 		t.Fatalf("starting a topic should save it as the resume point, got %+v", m.deps.Progress.Last)
 	}
 }
 
 func TestCurriculumModeStartsTracksAndSwitches(t *testing.T) {
-	d := testDeps(t)
+	d := testDepsSeeded(t)
 	d.Curriculum = true
 	m := newModel(d)
 	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -625,10 +753,10 @@ func TestWheelScrollsPaneUnderCursor(t *testing.T) {
 // curriculum, so command tests can act on a live session.
 func readyModel(t *testing.T) Model {
 	t.Helper()
-	m := newModel(testDeps(t))
+	m := newModel(testDepsSeeded(t))
 	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m.phase = phaseReady
-	m.loadCurriculum("python", curriculum.Beginner, "")
+	m.loadCurriculum("go-beginner", curriculum.Beginner, "")
 	return m
 }
 
@@ -640,21 +768,21 @@ func ex(t *testing.T, m Model, raw string) Model {
 
 func TestCommandSwitchesCourse(t *testing.T) {
 	m := readyModel(t)
-	if m.lang != "python" {
+	if m.lang != "go-beginner" {
 		t.Fatalf("setup: lang=%q", m.lang)
 	}
-	m = ex(t, m, "topic go")
-	if !m.curriculum || m.lang != "go" || m.current.Lang != "go" {
-		t.Fatalf("topic go did not switch course: curriculum=%v lang=%q chLang=%q", m.curriculum, m.lang, m.current.Lang)
+	m = ex(t, m, "topic go-intermediate")
+	if !m.curriculum || m.lang != "go-intermediate" || m.current.Lang != "go" {
+		t.Fatalf("topic go-intermediate did not switch course: curriculum=%v lang=%q chLang=%q", m.curriculum, m.lang, m.current.Lang)
 	}
 
 	// :subject is an alias; an unknown course is rejected without switching.
-	m = ex(t, m, "subject physics")
-	if m.lang != "physics" {
+	m = ex(t, m, "subject go-advanced")
+	if m.lang != "go-advanced" {
 		t.Fatalf("subject alias failed: %q", m.lang)
 	}
 	m = ex(t, m, "topic ruby")
-	if m.lang != "physics" {
+	if m.lang != "go-advanced" {
 		t.Fatalf("unknown course should not switch, lang=%q", m.lang)
 	}
 }
@@ -665,12 +793,13 @@ func TestBareTopicOpensPicker(t *testing.T) {
 	if m.overlay != overlayPicker {
 		t.Fatalf("bare :topic should open the picker, overlay=%d", m.overlay)
 	}
-	if curriculum.Languages()[m.pickerCursor] != "python" {
-		t.Fatal("picker cursor should start on the current course")
+	ids, _ := m.pickerEntries()
+	if ids[m.pickerCursor] != "go-beginner" {
+		t.Fatalf("picker cursor should start on the current course, got %q", ids[m.pickerCursor])
 	}
 	// Move down and choose: it should switch to that course and close the modal.
 	m = step(t, m, keyRunes("j"))
-	chosen := curriculum.Languages()[m.pickerCursor]
+	chosen := ids[m.pickerCursor]
 	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.overlay != overlayNone || m.lang != chosen {
 		t.Fatalf("picker enter should switch to %q and close, got lang=%q overlay=%d", chosen, m.lang, m.overlay)
@@ -691,8 +820,7 @@ func TestClearChatTranscript(t *testing.T) {
 
 func TestClearProgressRequiresConfirmation(t *testing.T) {
 	m := readyModel(t)
-	c, _ := curriculum.For("python", curriculum.Beginner)
-	id := c.Topics()[0].ID
+	id := m.curr.Topics()[0].ID
 	m.deps.Progress.MarkTopicDone(id)
 
 	m = ex(t, m, "clear progress")
@@ -742,7 +870,7 @@ func TestProgressSummaryListsCourses(t *testing.T) {
 		t.Fatalf("progress overlay not open, overlay=%d", m.overlay)
 	}
 	view := m.progressView()
-	for _, want := range []string{"Python", "Go", "Physics"} {
+	for _, want := range []string{"Go (Beginner)", "Go (Intermediate)", "Go (Advanced)"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("progress view missing %q:\n%s", want, view)
 		}
@@ -888,8 +1016,8 @@ func TestCompactAndWideResizeEditor(t *testing.T) {
 
 func TestEditorForwardsGlobalCommand(t *testing.T) {
 	m := readyModel(t)
-	m = step(t, m, editor.RunCommandMsg{Raw: "topic go"})
-	if m.lang != "go" {
+	m = step(t, m, editor.RunCommandMsg{Raw: "topic go-advanced"})
+	if m.lang != "go-advanced" {
 		t.Fatalf("editor-forwarded command did not switch course: %q", m.lang)
 	}
 }

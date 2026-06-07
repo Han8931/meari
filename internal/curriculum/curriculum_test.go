@@ -50,14 +50,3 @@ func TestTopicIDsUnique(t *testing.T) {
 	}
 }
 
-func TestPhysicsCurriculumCoverage(t *testing.T) {
-	for _, level := range []string{Beginner, Intermediate, Advanced} {
-		c, ok := For("physics", level)
-		if !ok {
-			t.Fatalf("missing physics/%s curriculum", level)
-		}
-		if got := len(c.Topics()); got < 4 {
-			t.Fatalf("physics/%s has %d topics, want at least 4", level, got)
-		}
-	}
-}

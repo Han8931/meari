@@ -91,25 +91,17 @@ func HasCurriculum(lang string) bool {
 	return ok
 }
 
-// registry maps language -> level -> module builder. Adding a language or level
-// is a matter of adding an entry here and a builder function.
+// registry maps language -> level -> module builder. The built-in Go track is
+// the SOURCE for the markdown course core.SeedBuiltinCourses materializes on
+// first run; at runtime every course — seeded or learner-built — is loaded
+// from markdown through the same vault course loader.
 var registry = map[string]map[string]func() []Module{
-	"python": {
-		Beginner:     pythonBeginner,
-		Intermediate: pythonIntermediate,
-		Advanced:     pythonAdvanced,
-	},
 	"go": {
 		Beginner:     goBeginner,
 		Intermediate: goIntermediate,
 		Advanced:     goAdvanced,
 	},
-	"physics": {
-		Beginner:     physicsBeginner,
-		Intermediate: physicsIntermediate,
-		Advanced:     physicsAdvanced,
-	},
 }
 
-// Languages returns the supported curriculum languages in display order.
-func Languages() []string { return []string{"python", "go", "physics"} }
+// Languages returns the built-in curriculum languages in display order.
+func Languages() []string { return []string{"go"} }

@@ -72,7 +72,7 @@ go build -o meari .
 
 ./meari -vault        # the vault, in your terminal
 ./meari serve         # the same vault, in your browser
-./meari               # the coding tutor (guided setup)
+./meari               # the tutor (launch dashboard: pick a course)
 ```
 
 Point it at notes you already have, and optionally wire up an AI:

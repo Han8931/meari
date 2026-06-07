@@ -219,14 +219,20 @@ func isCourseManifest(relPath string) bool {
 		strings.HasSuffix(strings.ToLower(relPath), "/course.md")
 }
 
-// courseID prefers the manifest's explicit id, falling back to its folder name.
+// courseID prefers the manifest's explicit id, falling back to a slug of the
+// manifest's folder path. The FULL path below meari-course/ is used — courses
+// may nest, e.g. Go/Beginner/ and Rust/Beginner/, and "beginner" alone would
+// collide.
 func courseID(n vault.Note) string {
 	if n.ID != "" {
 		return n.ID
 	}
 	parts := strings.Split(n.RelPath, "/")
-	if len(parts) >= 2 {
-		return vault.Slug(parts[len(parts)-2])
+	if len(parts) >= 3 { // meari-course / <folders…> / course.md
+		return vault.Slug(strings.Join(parts[1:len(parts)-1], " "))
+	}
+	if len(parts) == 2 {
+		return vault.Slug(parts[0])
 	}
 	return vault.Slug(n.Title)
 }
