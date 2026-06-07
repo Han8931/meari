@@ -93,4 +93,12 @@ func TestRunPhysicsReflection(t *testing.T) {
 	if res.Passed {
 		t.Fatal("empty physics response should not pass")
 	}
+
+	res, err = Run("quiz", "1A", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passed {
+		t.Fatalf("expected submitted quiz answer to pass, got %q", res.Output)
+	}
 }

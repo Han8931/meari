@@ -354,13 +354,14 @@ func TestCurriculumModeStartsTracksAndSwitches(t *testing.T) {
 	}
 	tm2, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m = tm2.(Model)
-	if m.currentTopicID != sel.id {
-		t.Fatalf("active topic = %q, want %q", m.currentTopicID, sel.id)
+	wantTopicID := topicIDFromSidebar(sel.id)
+	if m.currentTopicID != wantTopicID {
+		t.Fatalf("active topic = %q, want %q", m.currentTopicID, wantTopicID)
 	}
 	// Baked content loads synchronously: the editor should hold the new topic's
 	// starter code and the tutor should have its tests.
-	if m.current.ID != sel.id {
-		t.Fatalf("current challenge = %q, want %q", m.current.ID, sel.id)
+	if m.current.ID != wantTopicID {
+		t.Fatalf("current challenge = %q, want %q", m.current.ID, wantTopicID)
 	}
 	if len(m.current.Tests) == 0 {
 		t.Fatal("selected topic should have baked-in tests")
@@ -752,6 +753,9 @@ func TestHelpCommandOpensModal(t *testing.T) {
 
 func TestFoldHidesSidebarAndReclaimsWidth(t *testing.T) {
 	m := readyModel(t)
+	if tpc, ok := m.topicByID[m.currentTopicID]; ok {
+		_ = m.startTopicView(tpc, "quiz")
+	}
 	m.setFocus(paneSidebar)
 	wantTitle := firstLine(m.curr.Modules[0].Name)
 	if !strings.Contains(m.View(), wantTitle) {
@@ -800,6 +804,9 @@ func TestFoldHidesSidebarAndReclaimsWidth(t *testing.T) {
 
 func TestCompactAndWideResizeEditor(t *testing.T) {
 	m := readyModel(t)
+	if tpc, ok := m.topicByID[m.currentTopicID]; ok {
+		_ = m.startTopicView(tpc, "quiz")
+	}
 	baseEditor, baseChat := m.editorW, m.chatW
 
 	// :compact shrinks the editor and widens the chat (the whole point).

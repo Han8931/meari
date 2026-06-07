@@ -21,6 +21,7 @@ const (
 	roleLesson                 // the lesson text
 	roleUser                   // the learner's typed question
 	roleTutor                  // the AI's reply / feedback
+	roleQuiz                   // the current topic's quiz/task prompt
 	roleOK                     // test pass line
 	roleFail                   // test fail line
 )
@@ -224,6 +225,8 @@ func (c chatModel) renderBlock(blk chatBlock) string {
 		return chatTutorBadge.Render(" tutor ") + "\n" + c.renderRichBody(blk.text)
 	case roleLesson:
 		return chatLessonBadge.Render(" lesson ") + "\n" + c.renderRichBody(blk.text)
+	case roleQuiz:
+		return chatQuizBadge.Render(" quiz ") + "\n" + c.renderRichBody(blk.text)
 	case roleOK:
 		return chatOkStyle.Width(w).Render(blk.text)
 	case roleFail:
@@ -669,6 +672,8 @@ func (c chatModel) transcript() (string, bool) {
 			label = "tutor: "
 		case roleLesson:
 			label = "lesson: "
+		case roleQuiz:
+			label = "quiz: "
 		}
 		parts = append(parts, label+b.text)
 	}

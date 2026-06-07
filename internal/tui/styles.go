@@ -78,6 +78,7 @@ var (
 	chatUserBadge   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("81"))  // learner — cyan-blue
 	chatTutorBadge  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("79"))  // tutor — teal
 	chatLessonBadge = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("222")) // lesson — warm gold
+	chatQuizBadge   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("215")) // quiz — peach
 
 	// chatBusyStyle renders the in-pane "⠹ tutor thinking…" progress line.
 	chatBusyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("79")).Italic(true)
@@ -116,8 +117,8 @@ var (
 	promptHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
 	// backlinkHeaderStyle titles the "↩ Linked mentions" panel under the editor.
 	backlinkHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("79")).Bold(true)
-	chatOkStyle       = lipgloss.NewStyle().Foreground(doneColor).Bold(true)             // match the sidebar "done" green
-	chatFailStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("210")).Bold(true) // soft red, easier on the eyes than 203
+	chatOkStyle         = lipgloss.NewStyle().Foreground(doneColor).Bold(true)             // match the sidebar "done" green
+	chatFailStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("210")).Bold(true) // soft red, easier on the eyes than 203
 )
 
 // borderStyle returns the focused or blurred border depending on whether the

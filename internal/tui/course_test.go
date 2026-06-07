@@ -10,6 +10,7 @@ import (
 
 	"meari/internal/config"
 	"meari/internal/core"
+	"meari/internal/curriculum"
 	"meari/internal/tutor"
 	"meari/internal/vault"
 )
@@ -166,15 +167,20 @@ func TestVaultCourseRunsInTutor(t *testing.T) {
 	if !strings.Contains(m.current.Prompt, "insert") {
 		t.Fatalf("prompt = %q", m.current.Prompt)
 	}
-	// The lesson (the note body) lands in the chat transcript.
+	// The default course row opens the lesson only; the quiz/task prompt lives
+	// in its own child row.
+	blocks := m.chat.snapshot()
 	lesson := false
-	for _, b := range m.chat.snapshot() {
-		if strings.Contains(b.text, "keeps keys ordered") {
+	for _, b := range blocks {
+		if b.role == roleLesson && strings.Contains(b.text, "keeps keys ordered") {
 			lesson = true
+		}
+		if b.role == roleQuiz || strings.Contains(b.text, "Implement insert") {
+			t.Fatalf("lesson row should not include quiz prompt, got %+v", blocks)
 		}
 	}
 	if !lesson {
-		t.Fatalf("lesson not in chat transcript: %+v", m.chat.snapshot())
+		t.Fatalf("lesson row did not show lecture, got %+v", blocks)
 	}
 
 	// Advance to the essay topic (no study block on the AVL note): it takes
@@ -285,62 +291,145 @@ func TestChatCentricViewForEssayTopics(t *testing.T) {
 	tm, _ := m.runEx("topic balanced-trees")
 	m = tm.(Model)
 
-	// Topic 1 is code: three panes.
-	if m.chatCentric() || m.editorW == 0 {
-		t.Fatalf("code topic should keep the editor: centric=%v editorW=%d", m.chatCentric(), m.editorW)
+	// Topic 1 opens on its lecture row: lectures are chat-only.
+	if !m.chatCentric() || m.editorW != 0 {
+		t.Fatalf("lecture row should use chat view: centric=%v editorW=%d", m.chatCentric(), m.editorW)
 	}
 
-	// Move to the essay topic: the editor pane disappears, the chat widens,
-	// and the task statement is in the transcript.
-	_ = m.startTopic(m.curr.Topics()[1])
-	if !m.chatCentric() || m.editorW != 0 {
-		t.Fatalf("essay topic should be chat-centric: centric=%v editorW=%d", m.chatCentric(), m.editorW)
+	// Move to the essay topic's reflection row: it uses the editor/code view,
+	// while the transcript shows only the reflection prompt.
+	_ = m.startTopicView(m.curr.Topics()[1], "quiz")
+	if m.chatCentric() || m.editorW == 0 {
+		t.Fatalf("reflection row should use code view: centric=%v editorW=%d", m.chatCentric(), m.editorW)
 	}
-	if m.focus != paneChat {
-		t.Fatalf("focus should land on chat, got %v", m.focus)
+	if m.focus != paneEditor {
+		t.Fatalf("focus should land on editor, got %v", m.focus)
 	}
 	task := false
 	for _, b := range m.chat.snapshot() {
-		if strings.Contains(b.text, "Your task:") {
+		if strings.Contains(b.text, "A self-balancing BST") {
+			t.Fatalf("reflection row should not include the lesson: %+v", m.chat.snapshot())
+		}
+		if b.role == roleQuiz &&
+			strings.Contains(b.text, "Explain the key ideas") {
 			task = true
 		}
 	}
 	if !task {
 		t.Fatal("the prompt should be pinned into the transcript")
 	}
-	// The frame renders without an editor box and stays in bounds.
-	view := ansiRE.ReplaceAllString(m.View(), "")
-	if strings.Contains(view, "NORMAL") || strings.Contains(view, "INSERT") {
-		t.Fatalf("editor leaked into the chat-centric frame:\n%s", view)
-	}
 
-	// :submit with an empty input refuses; with text it grades it.
+	// :submit with the untouched starter refuses; edited text is graded from the editor.
 	if cmd := m.startRun(); cmd != nil {
-		t.Fatal("empty answer should not run")
+		t.Fatal("untouched reflection starter should not run")
 	}
-	m.chat.input.SetValue("A BST orders keys so lookup halves the space each step.")
+	m.editor.SetValue("A BST orders keys so lookup halves the space each step.")
 	cmd := m.startRun()
 	if cmd == nil {
-		t.Fatal("typed answer should run")
+		t.Fatal("edited answer should run")
 	}
 	res, ok := cmd().(runResultMsg)
 	if !ok || !res.res.Passed { // essay reflection: non-empty passes
 		t.Fatalf("essay submit result = %+v ok=%v", res, ok)
 	}
 	if res.code == "" || !strings.Contains(res.code, "BST orders keys") {
-		t.Fatalf("answer not taken from the chat input: %q", res.code)
+		t.Fatalf("answer not taken from the editor: %q", res.code)
 	}
 
-	// :view code forces the editor back; :view auto returns to chat for essays.
-	tm, _ = m.runEx("view code")
+	// :view chat forces the lecture-style chat view; :view auto returns quiz rows to code view.
+	tm, _ = m.runEx("view chat")
 	m = tm.(Model)
-	if m.chatCentric() || m.editorW == 0 {
-		t.Fatalf(":view code should restore the editor, editorW=%d", m.editorW)
+	if !m.chatCentric() || m.editorW != 0 {
+		t.Fatalf(":view chat should hide the editor, editorW=%d", m.editorW)
 	}
 	tm, _ = m.runEx("view auto")
 	m = tm.(Model)
-	if !m.chatCentric() {
-		t.Fatal(":view auto should follow the essay topic back to chat")
+	if m.chatCentric() || m.editorW == 0 {
+		t.Fatal(":view auto should follow the quiz row back to code")
+	}
+}
+
+func TestQuizTopicRendersBelowLecture(t *testing.T) {
+	m := newModel(courseDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.phase = phaseReady
+	m.curriculum = true
+	m.curr = curriculum.Curriculum{Lang: "quiz-course", Level: curriculum.Beginner}
+	m.topicByID = map[string]curriculum.Topic{}
+
+	topic := curriculum.Topic{
+		ID:     "quiz-one",
+		Title:  "Ordering",
+		Lesson: "Read this lecture note first.",
+		Lang:   "quiz",
+		Quiz: []curriculum.QuizQuestion{{
+			Q:       "What should come after the lecture?",
+			Choices: []string{"A quiz", "Another title"},
+			Answer:  0,
+		}},
+	}
+	_ = m.startTopicView(topic, "quiz")
+	if m.chatCentric() || m.editorW == 0 || m.focus != paneEditor {
+		t.Fatalf("quiz topic should use code view: centric=%v editorW=%d focus=%v", m.chatCentric(), m.editorW, m.focus)
+	}
+	blocks := m.chat.snapshot()
+	if len(blocks) != 1 || blocks[0].role != roleQuiz {
+		t.Fatalf("quiz row should show only quiz, got %+v", blocks)
+	}
+	if strings.Contains(blocks[0].text, "Read this lecture note first.") ||
+		!strings.Contains(blocks[0].text, "1. What should come after the lecture?") ||
+		!strings.Contains(blocks[0].text, "A. A quiz") ||
+		!strings.Contains(blocks[0].text, "B. Another title") {
+		t.Fatalf("quiz choices not formatted below lecture: %+v", blocks)
+	}
+	m.editor.SetValue("1A")
+	cmd := m.startRun()
+	if cmd == nil {
+		t.Fatal("typed quiz answer should run")
+	}
+	res, ok := cmd().(runResultMsg)
+	if !ok || !res.res.Passed {
+		t.Fatalf("quiz submit result = %+v ok=%v", res, ok)
+	}
+}
+
+func TestCourseSidebarShowsLessonAndQuizRows(t *testing.T) {
+	m := newModel(courseDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.phase = phaseReady
+	tm, _ := m.runEx("topic balanced-trees")
+	m = tm.(Model)
+
+	var lesson, quiz sidebarItem
+	for _, it := range m.sidebar.items {
+		switch it.id {
+		case topicLessonSidebarID(m.currentTopicID):
+			lesson = it
+		case topicQuizSidebarID(m.currentTopicID):
+			quiz = it
+		}
+	}
+	if lesson.id == "" || quiz.id == "" {
+		t.Fatalf("sidebar should include lesson and quiz rows, got %+v", m.sidebar.items)
+	}
+	if lesson.title != "BST" || lesson.depth != 0 {
+		t.Fatalf("lesson row wrong: %+v", lesson)
+	}
+	if quiz.title != "Challenge" || quiz.depth != 1 {
+		t.Fatalf("quiz row wrong: %+v", quiz)
+	}
+
+	m.sidebar.cursor = 0
+	for i, it := range m.sidebar.items {
+		if it.id == quiz.id {
+			m.sidebar.cursor = i
+			break
+		}
+	}
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m = tm.(Model)
+	if m.currentTopicID != topicIDFromSidebar(quiz.id) {
+		t.Fatalf("selecting quiz row should open its topic, got %q from %q", m.currentTopicID, quiz.id)
 	}
 }
 

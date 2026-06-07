@@ -131,10 +131,11 @@ type Model struct {
 
 	// Curriculum mode: the left pane is the guided learning path instead of the
 	// generated-challenge list. Lessons and challenges are pre-authored (no LLM).
-	curriculum     bool
-	curr           curriculum.Curriculum
-	topicByID      map[string]curriculum.Topic
-	currentTopicID string
+	curriculum       bool
+	curr             curriculum.Curriculum
+	topicByID        map[string]curriculum.Topic
+	currentTopicID   string
+	currentTopicView string // "lesson" or "quiz"; mirrors the selected course tree row
 
 	// horizontal selects the stacked layout (content on top, input on the
 	// bottom) instead of the side-by-side columns. Toggled live via :config.
@@ -1501,8 +1502,9 @@ func (m *Model) openSelected() tea.Cmd {
 		return nil
 	}
 	if m.curriculum {
-		if t, ok := m.topicByID[it.id]; ok {
-			return m.startTopic(t)
+		part := topicViewFromSidebar(it.id)
+		if t, ok := m.topicByID[topicIDFromSidebar(it.id)]; ok {
+			return m.startTopicView(t, part)
 		}
 		return nil
 	}
@@ -1563,7 +1565,7 @@ func (m *Model) installCurriculum(c curriculum.Curriculum, startID string) tea.C
 			start = t
 		}
 	}
-	return m.startTopic(start)
+	return m.startTopicView(start, "lesson")
 }
 
 // firstIncompleteTopic returns the first not-yet-done topic, or the first topic
@@ -1610,10 +1612,18 @@ func (m *Model) switchChatContext(key string) (fresh bool) {
 // startTopic switches the active curriculum topic, showing its pre-authored
 // lesson in chat and loading its challenge into the editor — no LLM call.
 func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
+	return m.startTopicView(t, "lesson")
+}
+
+func (m *Model) startTopicView(t curriculum.Topic, view string) tea.Cmd {
 	if m.current.ID != "" {
 		_ = m.deps.Store.Save(m.current.ID, m.editor.Value())
 	}
+	if view != "quiz" {
+		view = "lesson"
+	}
 	m.currentTopicID = t.ID
+	m.currentTopicView = view
 	m.topic = t.Title
 	m.deps.Progress.MarkTopicInProgress(t.ID)
 	m.deps.Progress.SetLast(m.curr.Lang, m.curr.Level, t.ID, t.Title)
@@ -1639,23 +1649,53 @@ func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
 	m.editor.SetValue(code)
 	m.layout() // the pinned prompt header's height depends on the new prompt
 	m.rebuildSidebar()
-	// Each topic keeps its own chat: show the lesson only on the first visit —
-	// revisits restore the prior transcript (which already contains it). The
-	// challenge statement is NOT echoed here: it lives at the top of the editor
-	// as a comment, where it stays visible regardless of chat length.
-	if m.switchChatContext("topic:" + t.ID) {
-		m.chat.append(roleLesson, t.Title+"\n\n"+t.Lesson)
-		// The chat-centric view has no editor to pin the prompt above, so the
-		// task statement joins the transcript right after the lesson.
-		if m.chatCentric() && strings.TrimSpace(ch.Prompt) != "" {
-			m.chat.append(roleSystem, "✎ Your task: "+ch.Prompt+
-				"\n\nType your answer below — enter chats, :submit grades it.")
+	// Each lesson/quiz row keeps its own chat context. The lesson row shows only
+	// lecture content; the quiz/reflection/challenge row shows only the prompt.
+	if m.switchChatContext("topic:" + t.ID + "#" + view) {
+		if view == "lesson" {
+			m.chat.append(roleLesson, t.Title+"\n\n"+t.Lesson)
+		} else if quiz := m.topicQuizText(t, ch); quiz != "" {
+			m.chat.append(roleQuiz, quiz)
 		}
 	}
 	if stale {
 		m.chat.append(roleSystem, staleDraftNotice)
 	}
+	if view == "lesson" {
+		return m.setFocus(paneChat)
+	}
 	return m.setFocus(paneEditor)
+}
+
+func (m Model) topicQuizText(t curriculum.Topic, ch tutor.Challenge) string {
+	if len(t.Quiz) > 0 {
+		var b strings.Builder
+		for i, q := range t.Quiz {
+			if i > 0 {
+				b.WriteString("\n\n")
+			}
+			fmt.Fprintf(&b, "%d. %s", i+1, strings.TrimSpace(q.Q))
+			for j, choice := range q.Choices {
+				if strings.TrimSpace(choice) == "" {
+					continue
+				}
+				fmt.Fprintf(&b, "\n   %s. %s", quizChoiceLabel(j), strings.TrimSpace(choice))
+			}
+		}
+		return b.String()
+	}
+	prompt := strings.TrimSpace(ch.Prompt)
+	if prompt == "" {
+		return ""
+	}
+	return prompt
+}
+
+func quizChoiceLabel(i int) string {
+	if i >= 0 && i < 26 {
+		return string(rune('A' + i))
+	}
+	return fmt.Sprint(i + 1)
 }
 
 // loadChallenge saves the current buffer, then loads ch (its saved draft or
@@ -1687,6 +1727,10 @@ func (m *Model) startRun() tea.Cmd {
 	if m.current.ID == "" {
 		return nil
 	}
+	if m.curriculum && m.currentTopicView != "quiz" {
+		m.flash("open the quiz row, then submit your answer")
+		return nil
+	}
 	code := m.editor.Value()
 	if m.chatCentric() {
 		// Chat-centric view: the answer is whatever sits in the chat input
@@ -1700,11 +1744,24 @@ func (m *Model) startRun() tea.Cmd {
 		m.chat.append(roleUser, text)
 		code = text
 	}
+	if isReflectionLang(m.current.Lang) && strings.TrimSpace(code) == strings.TrimSpace(m.current.StarterCode) {
+		m.flash("write your answer in the editor, then :submit")
+		return nil
+	}
 	_ = m.deps.Store.Save(m.current.ID, code)
 	m.chat.append(roleSystem, "▶ checking your answer…")
 	m.pending++
 	m.loadKind = "checking"
 	return runCmd(m.current.Lang, code, m.current)
+}
+
+func isReflectionLang(lang string) bool {
+	switch strings.ToLower(lang) {
+	case "physics", "essay", "quiz":
+		return true
+	default:
+		return false
+	}
 }
 
 // handleRunResult records progress, reports pass/fail, and chains tutor feedback.
@@ -1931,11 +1988,18 @@ func (m *Model) rebuildSidebar() {
 		for _, mod := range m.curr.Modules {
 			items = append(items, sidebarItem{title: mod.Name, header: true})
 			for _, t := range mod.Topics {
+				status := m.deps.Progress.TopicStatus(t.ID)
 				items = append(items, sidebarItem{
-					id:     t.ID,
+					id:     topicLessonSidebarID(t.ID),
 					title:  t.Title,
-					status: m.deps.Progress.TopicStatus(t.ID),
-					active: t.ID == m.currentTopicID,
+					active: t.ID == m.currentTopicID && m.currentTopicView == "lesson",
+				})
+				items = append(items, sidebarItem{
+					id:     topicQuizSidebarID(t.ID),
+					title:  topicQuizSidebarTitle(t),
+					status: status,
+					active: t.ID == m.currentTopicID && m.currentTopicView == "quiz",
+					depth:  1,
 				})
 			}
 		}
@@ -1959,11 +2023,42 @@ func (m *Model) rebuildSidebar() {
 	m.sidebar.setItems(items)
 }
 
+func topicLessonSidebarID(topicID string) string { return topicID + "#lesson" }
+func topicQuizSidebarID(topicID string) string   { return topicID + "#quiz" }
+
+func topicIDFromSidebar(id string) string {
+	if base, _, ok := strings.Cut(id, "#"); ok {
+		return base
+	}
+	return id
+}
+
+func topicViewFromSidebar(id string) string {
+	_, part, ok := strings.Cut(id, "#")
+	if ok && part == "quiz" {
+		return "quiz"
+	}
+	return "lesson"
+}
+
+func topicQuizSidebarTitle(t curriculum.Topic) string {
+	if len(t.Quiz) > 0 {
+		if len(t.Quiz) == 1 {
+			return "Quiz"
+		}
+		return fmt.Sprintf("Quiz (%d)", len(t.Quiz))
+	}
+	if t.Lang == "essay" {
+		return "Reflection"
+	}
+	return "Challenge"
+}
+
 // --- layout ---
 
 // chatCentric reports whether the screen should drop the editor: an explicit
-// :view override wins, otherwise essay topics read best as a conversation —
-// the answer is typed in the chat input and graded with :submit.
+// :view override wins, otherwise curriculum lesson rows read as chat-only
+// lectures and quiz/reflection/challenge rows use the editor/code view.
 func (m Model) chatCentric() bool {
 	switch m.view {
 	case "chat":
@@ -1971,7 +2066,7 @@ func (m Model) chatCentric() bool {
 	case "code":
 		return false
 	}
-	return m.current.Lang == "essay"
+	return m.curriculum && m.currentTopicView == "lesson"
 }
 
 func (m *Model) layout() {
@@ -2417,6 +2512,9 @@ const maxPromptHeaderLines = 6
 // as a pinned description block above the numbered editor buffer.
 func (m Model) promptHeaderLines(w int) []string {
 	if m.current.ID == "" || strings.TrimSpace(m.current.Prompt) == "" {
+		return nil
+	}
+	if m.curriculum && m.currentTopicView != "quiz" {
 		return nil
 	}
 	marker := "Challenge: "
