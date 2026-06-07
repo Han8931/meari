@@ -104,10 +104,13 @@ func TestHighlightMarkdown(t *testing.T) {
 
 func TestHighlightMarkdownEmphasisAndLists(t *testing.T) {
 	withANSI(t)
-	src := "some *italic* and **bold** and ***both*** text\n" +
+	src := "some *italic* and **bold** and ***both*** and ****strong**** text\n" +
 		"2 * 3 stays * plain\n" +
 		"- item one\n" +
-		"  * nested with **bold** inside\n"
+		"  * nested with **bold** inside\n" +
+		"1. first step\n" +
+		"12) twelfth step\n" +
+		"3.14 is pi, not a list\n"
 	out := highlightMarkdown(src, false, nil)
 	rows := strings.Split(out, "\n")
 
@@ -116,12 +119,15 @@ func TestHighlightMarkdownEmphasisAndLists(t *testing.T) {
 		want string
 		desc string
 	}{
-		{0, "\x1b[3m*italic*\x1b[0m", "italic span"},
-		{0, "\x1b[1m**bold**\x1b[0m", "bold span"},
-		{0, "\x1b[1;3m***both***\x1b[0m", "bold-italic span"},
+		{0, "\x1b[3;38;5;216m*italic*\x1b[0m", "italic span colored peach"},
+		{0, "\x1b[1;38;5;222m**bold**\x1b[0m", "bold span colored gold"},
+		{0, "\x1b[1;3;38;5;219m***both***\x1b[0m", "bold-italic span colored pink"},
+		{0, "\x1b[1;38;5;213m****strong****\x1b[0m", "four-star strong span colored magenta"},
 		{2, "\x1b[38;5;75m-\x1b[0m item one", "dash bullet tinted"},
 		{3, "\x1b[38;5;75m*\x1b[0m nested", "star bullet tinted"},
-		{3, "\x1b[1m**bold**\x1b[0m inside", "inline styling inside a list item"},
+		{3, "\x1b[1;38;5;222m**bold**\x1b[0m inside", "inline styling inside a list item"},
+		{4, "\x1b[38;5;75m1.\x1b[0m first step", "numbered marker tinted"},
+		{5, "\x1b[38;5;75m12)\x1b[0m twelfth step", "paren marker tinted"},
 	} {
 		if !strings.Contains(rows[c.row], c.want) {
 			t.Errorf("%s: row %d = %q", c.desc, c.row, rows[c.row])
@@ -130,6 +136,35 @@ func TestHighlightMarkdownEmphasisAndLists(t *testing.T) {
 	// Flanking rules: "2 * 3" has space-touching stars — no emphasis.
 	if rows[1] != "2 * 3 stays * plain" {
 		t.Errorf("loose stars styled: %q", rows[1])
+	}
+	// A number that isn't followed by "<digits>. " stays prose.
+	if rows[6] != "3.14 is pi, not a list" {
+		t.Errorf("decimal misread as list marker: %q", rows[6])
+	}
+	if got := stripANSI(out); got != src {
+		t.Errorf("visible text changed:\n got %q\nwant %q", got, src)
+	}
+}
+
+func TestHighlightMarkdownLinksAndRules(t *testing.T) {
+	withANSI(t)
+	src := "see [the docs](https://example.com) for more\n" +
+		"---\n" +
+		"checkbox [x] and lone [brackets] stay plain\n"
+	out := highlightMarkdown(src, false, nil)
+	rows := strings.Split(out, "\n")
+
+	if !strings.Contains(rows[0], "\x1b[38;5;79m[the docs]\x1b[0m") {
+		t.Errorf("link text not styled: %q", rows[0])
+	}
+	if !strings.Contains(rows[0], "\x1b[38;5;244m(https://example.com)\x1b[0m") {
+		t.Errorf("link url not dimmed: %q", rows[0])
+	}
+	if !strings.Contains(rows[1], "\x1b[38;5;240m---") {
+		t.Errorf("thematic break not styled: %q", rows[1])
+	}
+	if rows[2] != "checkbox [x] and lone [brackets] stay plain" {
+		t.Errorf("plain brackets styled: %q", rows[2])
 	}
 	if got := stripANSI(out); got != src {
 		t.Errorf("visible text changed:\n got %q\nwant %q", got, src)
@@ -145,7 +180,7 @@ func TestHighlightMarkdownCursorOnDelimiter(t *testing.T) {
 	// Cursor on the second star of "**bold**".
 	row := "x *" + cursor + "*\x1b[0m" + "bold** y"
 	out := mdInline(row)
-	if !strings.Contains(out, "\x1b[1m") {
+	if !strings.Contains(out, "\x1b[1;38;5;222m") {
 		t.Errorf("split ** delimiter lost bold styling: %q", out)
 	}
 	// Cursor on the second bracket of a wikilink.

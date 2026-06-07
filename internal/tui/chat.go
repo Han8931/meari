@@ -277,7 +277,7 @@ func (c chatModel) renderRichBody(text string) string {
 		var rows []string
 		for _, row := range strings.Split(hl, "\n") {
 			for _, wr := range strings.Split(ansi.Hardwrap(row, width, true), "\n") {
-				rows = append(rows, chatCodeGutter.Render("│ ")+wr)
+				rows = append(rows, chatCodeLine.Render(chatCodeGutter.Render("│ ")+wr))
 			}
 		}
 		out = append(out, strings.Join(rows, "\n"))

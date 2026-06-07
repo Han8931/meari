@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"os"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // noticeTTL is how long a status-bar notice stays visible.
@@ -103,8 +105,10 @@ var (
 	chatPromptNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
 
 	// chatCodeGutter is the "│ " bar marking syntax-highlighted code blocks in
-	// tutor/lesson messages.
-	chatCodeGutter = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	// transcript messages. The tinted gutter and dark wash make code read as a
+	// separate surface while the editor highlighter colors the tokens inside it.
+	chatCodeGutter = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
+	chatCodeLine   = lipgloss.NewStyle().Background(lipgloss.Color("236"))
 
 	chatSystemStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true)
 
@@ -128,4 +132,11 @@ func borderStyle(active bool) lipgloss.Style {
 		return focusedBorder
 	}
 	return blurredBorder
+}
+
+func enableTUIColor() {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("CLICOLOR") == "0" {
+		return
+	}
+	lipgloss.SetColorProfile(termenv.ANSI256)
 }

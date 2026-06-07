@@ -95,10 +95,10 @@ type streamChunkMsg struct {
 // each delta through the returned channel, then a final done/err message. The
 // returned cmd delivers the first message; the Update loop re-arms with
 // listenStream until done.
-func startChatStream(fn func(onDelta func(string)) (string, error)) (chan streamChunkMsg, tea.Cmd) {
+func startChatStream(ctx context.Context, fn func(context.Context, func(string)) (string, error)) (chan streamChunkMsg, tea.Cmd) {
 	ch := make(chan streamChunkMsg, 64)
 	go func() {
-		full, err := fn(func(d string) { ch <- streamChunkMsg{delta: d} })
+		full, err := fn(ctx, func(d string) { ch <- streamChunkMsg{delta: d} })
 		ch <- streamChunkMsg{done: true, full: full, err: err}
 	}()
 	return ch, listenStream(ch)

@@ -126,8 +126,10 @@ type Model struct {
 	histByKey map[string][]tutor.ChatTurn // saved tutor conversations
 
 	// Streaming chat reply state: one reply at a time.
-	streaming bool
-	streamCh  chan streamChunkMsg
+	streaming      bool
+	streamStopping bool
+	streamCancel   context.CancelFunc
+	streamCh       chan streamChunkMsg
 
 	// Curriculum mode: the left pane is the guided learning path instead of the
 	// generated-challenge list. Lessons and challenges are pre-authored (no LLM).
@@ -224,6 +226,7 @@ type Outcome struct {
 }
 
 func Run(d Deps) (Outcome, error) {
+	enableTUIColor()
 	m := newModel(d)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	final, err := p.Run()
@@ -442,6 +445,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.phase == phaseSetup {
 		return m.updateSetup(msg)
+	}
+	if msg.Type == tea.KeyEsc && m.streaming {
+		return m.stopStream()
 	}
 
 	// Modals and the command line capture all keys while they're open.
@@ -1469,25 +1475,54 @@ func (m Model) submitChat() (tea.Model, tea.Cmd) {
 	tut := m.deps.Tutor
 	ctxText := core.ClampContext(m.chatContext())
 	hist := core.TrimTurns(append([]tutor.ChatTurn(nil), m.chatHist...)) // copy: the goroutine outlives this Update
-	ch, cmd := startChatStream(func(onDelta func(string)) (string, error) {
-		return tut.ChatStream(context.Background(), ctxText, hist, onDelta)
+	ctx, cancel := context.WithCancel(context.Background())
+	m.streamCancel = cancel
+	m.streamStopping = false
+	ch, cmd := startChatStream(ctx, func(ctx context.Context, onDelta func(string)) (string, error) {
+		return tut.ChatStream(ctx, ctxText, hist, onDelta)
 	})
 	m.streamCh = ch
 	return m, cmd
 }
 
+func (m Model) stopStream() (tea.Model, tea.Cmd) {
+	if !m.streaming {
+		return m, nil
+	}
+	if m.streamCancel != nil {
+		m.streamCancel()
+	}
+	m.streamStopping = true
+	m.loadKind = "stopping tutor"
+	m.chat.append(roleSystem, "— stopping tutor reply —")
+	return m, nil
+}
+
 // handleStreamChunk advances a streaming tutor reply: grow the transcript on
 // each delta, finalize the conversation history when done.
 func (m Model) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
+	if m.streamStopping {
+		if msg.done || msg.err != nil {
+			m.pending--
+			m.streaming = false
+			m.streamStopping = false
+			m.streamCancel = nil
+			m.chat.append(roleSystem, "— tutor reply stopped —")
+			return m, nil
+		}
+		return m, listenStream(m.streamCh)
+	}
 	if msg.err != nil {
 		m.pending--
 		m.streaming = false
+		m.streamCancel = nil
 		m.chat.failStream("⚠ chat failed: " + msg.err.Error())
 		return m, nil
 	}
 	if msg.done {
 		m.pending--
 		m.streaming = false
+		m.streamCancel = nil
 		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: msg.full})
 		return m, nil
 	}
@@ -2048,10 +2083,7 @@ func topicQuizSidebarTitle(t curriculum.Topic) string {
 		}
 		return fmt.Sprintf("Quiz (%d)", len(t.Quiz))
 	}
-	if t.Lang == "essay" {
-		return "Reflection"
-	}
-	return "Challenge"
+	return "Quiz"
 }
 
 // --- layout ---

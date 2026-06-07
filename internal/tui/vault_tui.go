@@ -67,8 +67,10 @@ type VaultModel struct {
 	histByNote map[string][]tutor.ChatTurn
 
 	// Streaming chat reply state: one reply at a time.
-	streaming bool
-	streamCh  chan streamChunkMsg
+	streaming      bool
+	streamStopping bool
+	streamCancel   context.CancelFunc
+	streamCh       chan streamChunkMsg
 
 	// :course state. courseIntake routes chat input through the requirements
 	// interview (its own conversation in courseHist, seeded from courseSeed);
@@ -130,6 +132,7 @@ type VaultModel struct {
 // RunVault constructs and runs the vault terminal UI over svc. The Outcome tells
 // the shell loop (main.runShell) whether to quit or hand off to the coding TUI.
 func RunVault(svc *core.Service, cfg config.Config) (Outcome, error) {
+	enableTUIColor()
 	m := newVaultModel(svc, cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	final, err := p.Run()
@@ -351,6 +354,9 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyEsc && m.streaming {
+		return m.stopStream()
+	}
 	if m.cmdMode {
 		return m.updateCmdLine(msg)
 	}
@@ -1025,40 +1031,69 @@ func (m VaultModel) streamReply() (tea.Model, tea.Cmd) {
 	m.pending++
 	m.loadKind = "tutor thinking"
 	m.streaming = true
+	m.streamStopping = false
 	m.chat.beginStream()
 
 	svc := m.svc
 	var ch chan streamChunkMsg
 	var cmd tea.Cmd
+	ctx, cancel := context.WithCancel(context.Background())
+	m.streamCancel = cancel
 	if m.courseIntake {
 		seed := m.courseSeed
 		hist := append([]tutor.ChatTurn(nil), m.courseHist...) // copy: the goroutine outlives this Update
-		ch, cmd = startChatStream(func(onDelta func(string)) (string, error) {
-			return svc.CourseIntakeStream(context.Background(), seed, hist, onDelta)
+		ch, cmd = startChatStream(ctx, func(ctx context.Context, onDelta func(string)) (string, error) {
+			return svc.CourseIntakeStream(ctx, seed, hist, onDelta)
 		})
 	} else {
 		ctxText := m.chatContext()
 		hist := append([]tutor.ChatTurn(nil), m.chatHist...)
-		ch, cmd = startChatStream(func(onDelta func(string)) (string, error) {
-			return svc.ChatStream(context.Background(), ctxText, hist, onDelta)
+		ch, cmd = startChatStream(ctx, func(ctx context.Context, onDelta func(string)) (string, error) {
+			return svc.ChatStream(ctx, ctxText, hist, onDelta)
 		})
 	}
 	m.streamCh = ch
 	return m, cmd
 }
 
+func (m VaultModel) stopStream() (tea.Model, tea.Cmd) {
+	if !m.streaming {
+		return m, nil
+	}
+	if m.streamCancel != nil {
+		m.streamCancel()
+	}
+	m.streamStopping = true
+	m.loadKind = "stopping tutor"
+	m.chat.append(roleSystem, "— stopping tutor reply —")
+	return m, nil
+}
+
 // handleStreamChunk advances a streaming tutor reply. The end of an intake
 // reply is checked for the course_request JSON that starts the build.
 func (m VaultModel) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
+	if m.streamStopping {
+		if msg.done || msg.err != nil {
+			m.pending--
+			m.streaming = false
+			m.streamStopping = false
+			m.streamCancel = nil
+			m.chat.append(roleSystem, "— tutor reply stopped —")
+			return m, nil
+		}
+		return m, listenStream(m.streamCh)
+	}
 	if msg.err != nil {
 		m.pending--
 		m.streaming = false
+		m.streamCancel = nil
 		m.chat.failStream("⚠ chat failed: " + msg.err.Error())
 		return m, nil
 	}
 	if msg.done {
 		m.pending--
 		m.streaming = false
+		m.streamCancel = nil
 		if m.courseIntake {
 			m.courseHist = append(m.courseHist, tutor.ChatTurn{Role: "assistant", Content: msg.full})
 			if req, ok := core.ParseCourseRequest(msg.full); ok {

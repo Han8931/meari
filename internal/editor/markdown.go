@@ -8,9 +8,9 @@ package editor
 //
 // Styled structures: # headings, ```fenced code blocks``` (with full go/python
 // rules when the fence names the language), `inline code`, [[wikilinks]],
-// > blockquotes, -/*/+ list markers, and *italic*/**bold**/***both*** spans
-// (star-flanked only — _underscores_ are too common in technical notes to
-// color reliably).
+// [text](url) links, > blockquotes, -/*/+ and 1./1) list markers, --- rules,
+// and *italic*/**bold**/***both*** spans (star-flanked only — _underscores_
+// are too common in technical notes to color reliably).
 //
 // Block state (an open fence or quote) is computed from the FULL buffer
 // (mdScanBuffer) and re-synced to each rendered row via its line-number
@@ -28,10 +28,18 @@ var (
 	mdHeadingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
 	mdCodeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
 	mdLinkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("79"))
-	mdBulletStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
-	mdItalicStyle  = lipgloss.NewStyle().Italic(true)
-	mdBoldStyle    = lipgloss.NewStyle().Bold(true)
-	mdBoldItalic   = lipgloss.NewStyle().Bold(true).Italic(true)
+	// mdURLStyle dims the "(url)" target of a [text](url) link so the link text
+	// carries the color and the noisy URL recedes.
+	mdURLStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	mdBulletStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+	mdRuleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	mdItalicStyle = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("216"))
+	// Bold spans get a bright foreground on top of the attribute: many
+	// terminals render the bold attribute alone almost invisibly, and chat
+	// bodies sit on a dimmer neutral (252) that emphasis should pop out of.
+	mdBoldStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("222"))
+	mdBoldItalic  = lipgloss.NewStyle().Bold(true).Italic(true).Foreground(lipgloss.Color("219"))
+	mdStrongStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
 )
 
 // lineState is the block context at the START of a buffer line: whether it
@@ -79,8 +87,8 @@ func classify(content string, st *lineState) {
 		// fenced rows change nothing
 	case content == "":
 		st.inQuote = false // a blank line ends a blockquote
-	case isMDHeading(content), isMDBullet(content):
-		st.inQuote = false // headings and list items interrupt one
+	case isMDHeading(content), isMDBullet(content), mdNumberedLen(content) > 0, isMDRule(content):
+		st.inQuote = false // headings, list items, and rules interrupt one
 	case strings.HasPrefix(content, ">"):
 		st.inQuote = true
 	}
@@ -95,6 +103,42 @@ func isMDHeading(content string) bool {
 func isMDBullet(content string) bool {
 	return len(content) >= 2 &&
 		(content[0] == '-' || content[0] == '*' || content[0] == '+') && content[1] == ' '
+}
+
+// mdNumberedLen reports an ordered-list marker opening the line — "1. " or
+// "1) " — returning the marker's length ("12." → 3), or 0 when there is none.
+// Like isMDBullet, the space after the marker is required, so "3.14 is pi"
+// stays prose.
+func mdNumberedLen(content string) int {
+	j := 0
+	for j < len(content) && content[j] >= '0' && content[j] <= '9' {
+		j++
+	}
+	if j == 0 || j > 3 { // >999 is a paragraph that starts with a number, not a list
+		return 0
+	}
+	if j+1 < len(content) && (content[j] == '.' || content[j] == ')') && content[j+1] == ' ' {
+		return j + 1
+	}
+	return 0
+}
+
+// isMDRule matches a thematic break: a line of three or more of the same
+// rule character (---, ***, ___) and nothing else.
+func isMDRule(content string) bool {
+	if len(content) < 3 {
+		return false
+	}
+	c := content[0]
+	if c != '-' && c != '*' && c != '_' {
+		return false
+	}
+	for i := 1; i < len(content); i++ {
+		if content[i] != c {
+			return false
+		}
+	}
+	return true
 }
 
 // mdScanBuffer computes the block state at the start of every buffer line.
@@ -154,9 +198,13 @@ func highlightMarkdownRow(row string, st *mdState) string {
 		return row
 	case isMDHeading(content):
 		return styleRowText(row, mdHeadingStyle, st.gutter)
+	case isMDRule(content):
+		return styleRowText(row, mdRuleStyle, st.gutter)
 	case isMDBullet(content):
 		// Tint the marker, then give the item text the inline treatment.
-		return mdBulletRow(row, st.gutter)
+		return mdMarkerRow(row, st.gutter, 1)
+	case mdNumberedLen(content) > 0:
+		return mdMarkerRow(row, st.gutter, mdNumberedLen(content))
 	case strings.HasPrefix(content, ">") || before.inQuote:
 		// "> …" opens a quote; soft-wrapped rows of a long quoted line and
 		// lazy paragraph continuations stay quoted.
@@ -195,6 +243,17 @@ func mdInlineSeg(row string, ambient *string) string {
 				continue
 			}
 		}
+		// [text](url): the link text carries the color, the url is dimmed.
+		if row[i] == '[' {
+			if at, afterBracket, ok := textIndex(row, i+1, "]("); ok {
+				if _, afterURL, ok := textIndex(row, afterBracket, ")"); ok {
+					b.WriteString(renderToken(row[i:at+1], mdLinkStyle, ambient))
+					b.WriteString(renderToken(row[at+1:afterURL], mdURLStyle, ambient))
+					i = afterURL
+					continue
+				}
+			}
+		}
 		if row[i] == '*' {
 			if span, style, next := mdEmphasis(row, i); next > i {
 				b.WriteString(renderToken(span, style, ambient))
@@ -209,7 +268,7 @@ func mdInlineSeg(row string, ambient *string) string {
 }
 
 // mdEmphasis matches an emphasis span opening at text position i: *italic*,
-// **bold**, or ***both***. The opener must touch text (no space after it) and
+// **bold**, ***both***, or ****strong****. The opener must touch text (no space after it) and
 // the closer must touch text before it, CommonMark-flanking style, so a stray
 // "2 * 3" never styles half the line. All matching is escape-aware: the
 // cursor sitting on a delimiter splits it with SGR sequences, and the span
@@ -217,7 +276,7 @@ func mdInlineSeg(row string, ambient *string) string {
 // included), its style, and the offset just past it; next == i means no match.
 func mdEmphasis(row string, i int) (span string, style lipgloss.Style, next int) {
 	n, j := 0, i
-	for n < 3 {
+	for n < 4 {
 		after, ok := textMatch(row, j, "*")
 		if !ok {
 			break
@@ -241,6 +300,8 @@ func mdEmphasis(row string, i int) (span string, style lipgloss.Style, next int)
 	switch n {
 	case 3:
 		style = mdBoldItalic
+	case 4:
+		style = mdStrongStyle
 	case 2:
 		style = mdBoldStyle
 	default:
@@ -249,9 +310,11 @@ func mdEmphasis(row string, i int) (span string, style lipgloss.Style, next int)
 	return row[i:after], style, after
 }
 
-// mdBulletRow tints the list marker under any indentation, leaving the item
-// text to the inline pass.
-func mdBulletRow(row string, gutter bool) string {
+// mdMarkerRow tints a list marker of markerLen text bytes ("-" is 1, "12." is
+// 3) under any indentation, leaving the item text to the inline pass. The
+// marker scan is escape-aware: the cursor sitting on a marker digit splits it
+// with SGR sequences.
+func mdMarkerRow(row string, gutter bool, markerLen int) string {
 	i := gutterEnd(row, gutter)
 	for i < len(row) { // step over the item's indentation
 		if e := ansiEscapeEnd(row, i); e > i {
@@ -266,12 +329,21 @@ func mdBulletRow(row string, gutter bool) string {
 	if i >= len(row) {
 		return row
 	}
+	j, seen := i, 0
+	for j < len(row) && seen < markerLen { // span markerLen text bytes
+		if e := ansiEscapeEnd(row, j); e > j {
+			j = e
+			continue
+		}
+		j++
+		seen++
+	}
 	ambient := ""
 	updateAmbient(row[:i], &ambient)
 	var b strings.Builder
 	b.WriteString(row[:i])
-	b.WriteString(renderToken(row[i:i+1], mdBulletStyle, &ambient))
-	b.WriteString(mdInlineSeg(row[i+1:], &ambient))
+	b.WriteString(renderToken(row[i:j], mdBulletStyle, &ambient))
+	b.WriteString(mdInlineSeg(row[j:], &ambient))
 	return b.String()
 }
 

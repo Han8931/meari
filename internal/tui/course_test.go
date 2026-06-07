@@ -415,7 +415,7 @@ func TestCourseSidebarShowsLessonAndQuizRows(t *testing.T) {
 	if lesson.title != "BST" || lesson.depth != 0 {
 		t.Fatalf("lesson row wrong: %+v", lesson)
 	}
-	if quiz.title != "Challenge" || quiz.depth != 1 {
+	if quiz.title != "Quiz" || quiz.depth != 1 {
 		t.Fatalf("quiz row wrong: %+v", quiz)
 	}
 

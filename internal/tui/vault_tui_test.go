@@ -171,6 +171,35 @@ func TestVaultAnswerCommand(t *testing.T) {
 	}
 }
 
+func TestVaultEscStopsStreamingTutorReply(t *testing.T) {
+	m := newTestVaultModel(t)
+	m.setFocus(paneChat)
+	m.streaming = true
+	m.pending = 1
+	m.streamCh = make(chan streamChunkMsg, 1)
+	cancelled := false
+	m.streamCancel = func() { cancelled = true }
+	m.chat.beginStream()
+
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m = tm.(VaultModel)
+	if cmd != nil {
+		t.Fatal("esc while streaming should not quit or dispatch another command")
+	}
+	if !cancelled || !m.streamStopping || !m.streaming {
+		t.Fatalf("stream not marked stopping: cancelled=%v stopping=%v streaming=%v", cancelled, m.streamStopping, m.streaming)
+	}
+
+	tm, _ = m.Update(streamChunkMsg{done: true, full: "ignored"})
+	m = tm.(VaultModel)
+	if m.streaming || m.streamStopping || m.pending != 0 {
+		t.Fatalf("done after stop should clear stream state: streaming=%v stopping=%v pending=%d", m.streaming, m.streamStopping, m.pending)
+	}
+	if len(m.chatHist) != 0 {
+		t.Fatalf("stopped reply should not be recorded as assistant history: %+v", m.chatHist)
+	}
+}
+
 func TestVaultViewRenders(t *testing.T) {
 	m := newTestVaultModel(t)
 	out := m.View()

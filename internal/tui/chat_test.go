@@ -87,6 +87,25 @@ func TestChatHighlightsFencedCode(t *testing.T) {
 	if !strings.Contains(got, "Try it.") {
 		t.Fatalf("prose after the fence lost:\n%q", got)
 	}
+	if !strings.Contains(got, "\x1b[1;38;5;81m│ \x1b[0m") {
+		t.Fatalf("code gutter should be colored in chat:\n%q", got)
+	}
+	if !strings.Contains(got, "\x1b[48;5;236m") {
+		t.Fatalf("code rows should have a distinct background:\n%q", got)
+	}
+}
+
+func TestEnableTUIColorForcesANSIProfile(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CLICOLOR", "")
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.Ascii)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	enableTUIColor()
+	if got := chatTutorBadge.Render(" tutor "); !strings.Contains(got, "\x1b[") {
+		t.Fatalf("TUI color profile should emit ANSI, got %q", got)
+	}
 }
 
 func TestChatHighlightsUserFencedCode(t *testing.T) {
@@ -504,11 +523,12 @@ func TestChatRendersMarkdownProse(t *testing.T) {
 
 	c := newChat()
 	c.setSize(60, 20)
-	c.append(roleLesson, "# Heading\n\nuse **bold** and `code` with [[Link]]")
+	c.append(roleLesson, "# Heading\n\nuse **bold** and ****strong**** and `code` with [[Link]]")
 	content := c.renderBlock(c.blocks[0])
 	for what, want := range map[string]string{
 		"heading":  "\x1b[1;38;5;81m# Heading",
-		"bold":     "\x1b[1m**bold**",
+		"bold":     "\x1b[1;38;5;222m**bold**",
+		"strong":   "\x1b[1;38;5;213m****strong****",
 		"code":     "\x1b[38;5;222m`code`",
 		"wikilink": "\x1b[38;5;79m[[Link]]",
 	} {

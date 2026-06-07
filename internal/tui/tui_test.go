@@ -485,6 +485,46 @@ func TestChatQuestionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEscStopsStreamingTutorReply(t *testing.T) {
+	m := newModel(testDeps(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.phase = phaseReady
+	m.setFocus(paneChat)
+	m.streaming = true
+	m.pending = 1
+	m.streamCh = make(chan streamChunkMsg, 1)
+	cancelled := false
+	m.streamCancel = func() { cancelled = true }
+	m.chat.beginStream()
+
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m = tm.(Model)
+	if cmd != nil {
+		t.Fatal("esc while streaming should not quit or dispatch another command")
+	}
+	if !cancelled || !m.streamStopping || !m.streaming {
+		t.Fatalf("stream not marked stopping: cancelled=%v stopping=%v streaming=%v", cancelled, m.streamStopping, m.streaming)
+	}
+
+	tm, cmd = m.Update(streamChunkMsg{delta: "late text"})
+	m = tm.(Model)
+	if !m.streamStopping || !m.streaming || cmd == nil {
+		t.Fatalf("late delta should be ignored while listener stays armed: stopping=%v streaming=%v cmd=%v", m.streamStopping, m.streaming, cmd)
+	}
+	if strings.Contains(m.chat.view(), "late text") {
+		t.Fatalf("late delta should not appear after stop:\n%s", m.chat.view())
+	}
+
+	tm, _ = m.Update(streamChunkMsg{done: true, full: "ignored"})
+	m = tm.(Model)
+	if m.streaming || m.streamStopping || m.pending != 0 {
+		t.Fatalf("done after stop should clear stream state: streaming=%v stopping=%v pending=%d", m.streaming, m.streamStopping, m.pending)
+	}
+	if len(m.chatHist) != 0 {
+		t.Fatalf("stopped reply should not be recorded as assistant history: %+v", m.chatHist)
+	}
+}
+
 // fillChat appends enough blocks that the transcript overflows its viewport, so
 // scrolling has somewhere to go.
 func fillChat(m *Model) {
