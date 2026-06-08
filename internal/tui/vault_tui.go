@@ -1592,7 +1592,7 @@ func (m *VaultModel) rebuildSidebar() {
 	rootOpen := m.expanded[vaultRootID]
 	items = append(items, sidebarItem{
 		id:       vaultRootID,
-		title:    m.vaultRootName(),
+		title:    vaultRootLabel,
 		dir:      true,
 		root:     true,
 		expanded: rootOpen,
@@ -1607,15 +1607,10 @@ func (m *VaultModel) rebuildSidebar() {
 // root row. The empty path is the vault root and can never name a real entry.
 const vaultRootID = ""
 
-// vaultRootName is the label of the vault-root sidebar row: the configured
-// vault directory's base name, or "vault" when it has none.
-func (m VaultModel) vaultRootName() string {
-	name := filepath.Base(m.cfg.VaultDir)
-	if name == "" || name == "." || name == "/" {
-		return "vault"
-	}
-	return name
-}
+// vaultRootLabel is the display name of the vault-root sidebar row. It is a
+// fixed generic label on purpose — NOT the configured directory's base name —
+// so the learner's real (possibly personal) vault path never shows on screen.
+const vaultRootLabel = "vault"
 
 // expandTo unfolds every ancestor directory of relPath so its row is visible
 // after the next sidebar rebuild.

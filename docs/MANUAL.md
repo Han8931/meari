@@ -141,9 +141,10 @@ structure) │ **editor** (center) │ **chat / study** (right).
 
 The tree shows your vault as it is on disk, NERDTree/Obsidian-style — directories
 first (`▸` folded / `▾` unfolded), files indented beneath them, the open note in bold.
-The **vault root** is the bold row at the top (named after your vault directory):
-everything nests under it, and it's always present — even on a fresh, course-only
-vault — so there's always somewhere to create your first note.
+The **vault root** is the bold `vault` row at the top: everything nests under it, and
+it's always present — even on a fresh, course-only vault — so there's always somewhere
+to create your first note. (The row shows a fixed `vault` label, never your real
+directory path, so nothing personal leaks on screen.)
 
 - `j`/`k` move · `Enter` opens a note / folds-unfolds a directory (including the root)
 - `Space` marks files/folders (amber) for a batch operation
