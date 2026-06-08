@@ -491,6 +491,11 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cmdLine.SetValue("")
 			m.cmdHist.Open()
 			return m, m.cmdLine.Focus()
+		case "r":
+			// Reload the tree from disk (NERDTree-style refresh), for files
+			// changed by another app, git, or :publish.
+			m.flash("tree refreshed")
+			return m, vListCmd(m.svc)
 		case " ":
 			// Space-mark the row (NERDTree-style multi-select), then step down
 			// so a run of files can be marked in one sweep. The vault root is
@@ -1857,7 +1862,7 @@ func (m VaultModel) statusView() string {
 	case m.studyMode:
 		hints = ":grade check answer · :answer see a model answer · :done finish"
 	case m.focus == paneSidebar:
-		hints = "j/k move · enter open · ,ff find · space mark · m node ops · : cmds"
+		hints = "j/k move · enter open · ,ff find · space mark · m node ops · r refresh · : cmds"
 	case m.focus == paneEditor:
 		hints = ",ff files · ,fg contents · ,n fold notes · ⌃s save"
 	case m.focus == paneChat:

@@ -147,6 +147,7 @@ to create your first note. (The row shows a fixed `vault` label, never your real
 directory path, so nothing personal leaks on screen.)
 
 - `j`/`k` move · `Enter` opens a note / folds-unfolds a directory (including the root)
+- `r` reloads the tree from disk (pick up files changed by another app, git, or `:publish`)
 - `Space` marks files/folders (amber) for a batch operation
 - `m` opens the node menu: **(a)dd** — type a path, end with `/` for a folder;
   **(m)ove/rename** — edit the prefilled path; **(d)elete** — the marked rows (or the

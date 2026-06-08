@@ -582,6 +582,47 @@ func TestVaultRootAddCreatesAtRoot(t *testing.T) {
 	}
 }
 
+// "r" in the sidebar reloads the tree from disk, picking up files created by
+// another app (or git, or :publish) since the pane was last built.
+func TestVaultSidebarRefreshKey(t *testing.T) {
+	m := newTestVaultModel(t)
+	tm, _ := m.Update(vListCmd(m.svc)()) // initial (empty) tree
+	m = tm.(VaultModel)
+	m.setFocus(paneSidebar)
+	before := len(m.sidebar.items)
+
+	// A note appears on disk outside the running model.
+	if _, err := m.svc.SaveNote("Outside.md", "# Outside\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	// "r" issues the reload; applying its message rebuilds the tree.
+	tm, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = tm.(VaultModel)
+	if cmd == nil {
+		t.Fatal("r should issue a tree-reload command")
+	}
+	msg, ok := cmd().(vNotesMsg)
+	if !ok {
+		t.Fatalf("expected vNotesMsg from refresh, got %T", cmd())
+	}
+	tm, _ = m.Update(msg)
+	m = tm.(VaultModel)
+
+	if len(m.sidebar.items) <= before {
+		t.Fatalf("refresh should pick up the new note: %d -> %d rows", before, len(m.sidebar.items))
+	}
+	found := false
+	for _, it := range m.sidebar.items {
+		if it.id == "Outside.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("refreshed tree should include the new note")
+	}
+}
+
 // The vault root is structural — it can't be moved, deleted, or marked.
 func TestVaultRootIsProtected(t *testing.T) {
 	m := newTestVaultModel(t)
