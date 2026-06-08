@@ -18,11 +18,14 @@ type sidebarItem struct {
 
 	// Tree fields (vault TUI). depth indents the row; dir marks a directory
 	// node (▸ collapsed / ▾ expanded); marked is the space-bar selection used
-	// by the NERDTree-style batch operations.
+	// by the NERDTree-style batch operations. root marks the synthetic vault-
+	// root row at the top of the tree: a directory you can add into but never
+	// move, delete, or mark.
 	depth    int
 	dir      bool
 	expanded bool
 	marked   bool
+	root     bool
 }
 
 // sidebarModel is the left pane: a hand-rolled cursor list. Hand-rolled rather
@@ -195,6 +198,8 @@ func (s sidebarModel) renderRow(it sidebarItem, selected bool) string {
 		}
 		t := title
 		switch {
+		case it.root:
+			t = activeItem.Render(title) // the vault root reads as the container
 		case it.marked:
 			t = markedItem.Render(title) // space-marked for a batch op
 		case it.active:
@@ -223,6 +228,8 @@ func (s sidebarModel) renderRow(it sidebarItem, selected bool) string {
 	}
 	t := base.Render(" " + title)
 	switch {
+	case it.root:
+		t = base.Bold(true).Render(" " + title)
 	case it.marked:
 		t = base.Foreground(wipColor).Render(" " + title)
 	case it.active:

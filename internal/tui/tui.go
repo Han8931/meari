@@ -704,10 +704,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Left click: focus the pane under the cursor; on the chat it also anchors
-	// a text SELECTION, so dragging sweeps out transcript text to copy with
-	// Alt-C (scrolling stays on the wheel and Ctrl-F/B). The terminal's native
-	// bypass still works too: Option+drag on macOS, Shift+drag on Linux —
-	// mouse reporting is skipped entirely there.
+	// a text SELECTION, so dragging sweeps out transcript text. RELEASING the
+	// drag copies the selection to the clipboard automatically (Alt-C also
+	// copies, but many Linux terminals eat Alt-<key> as a menu mnemonic, so
+	// release-to-copy is the reliable path). Scrolling stays on the wheel and
+	// Ctrl-F/B; the terminal's native bypass still works too — Option+drag on
+	// macOS, Shift+drag on Linux skip mouse reporting entirely.
 	switch msg.Action {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
@@ -727,6 +729,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case tea.MouseActionRelease:
+		if m.dragChat && m.chat.sel.active { // a real drag, not a bare click
+			m.flash(copySelection(&m.chat))
+		}
 		m.dragChat = false
 	}
 	return m, nil
@@ -2595,7 +2600,7 @@ func (m Model) statusView() string {
 	case m.focus == paneChat && m.chatCentric():
 		hints = "enter chat · :submit grade your answer · ⌥o/:copy copy · ⌃f/⌃b page · :view code"
 	case m.focus == paneChat:
-		hints = "enter send · drag+⌥c copy selection · ⌥o/:copy copy reply · ⌃f/⌃b page"
+		hints = "enter send · drag to copy · ⌥o/:copy copy reply · ⌃f/⌃b page"
 	case m.focus == paneSidebar:
 		hints = "j/k move · enter open · : cmds (:help) · ⌃r run · ⌃c quit"
 	}

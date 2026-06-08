@@ -171,7 +171,7 @@ func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
 		chat:             newChat(),
 		chatByNote:       map[string][]chatBlock{},
 		histByNote:       map[string][]tutor.ChatTurn{},
-		expanded:         map[string]bool{},
+		expanded:         map[string]bool{vaultRootID: true}, // vault root starts open
 		marked:           map[string]bool{},
 		spin:             spinner.New(spinner.WithSpinner(spinner.Dot)),
 	}
@@ -471,8 +471,16 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case "a":
 				return m.openNodePrompt("add", it)
 			case "m":
+				if it.root {
+					m.flash("the vault root can't be moved")
+					return m, nil
+				}
 				return m.openNodePrompt("move", it)
 			case "d":
+				if it.root {
+					m.flash("the vault root can't be deleted")
+					return m, nil
+				}
 				return m.confirmDelete(it)
 			}
 			return m, nil
@@ -485,14 +493,17 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.cmdLine.Focus()
 		case " ":
 			// Space-mark the row (NERDTree-style multi-select), then step down
-			// so a run of files can be marked in one sweep.
+			// so a run of files can be marked in one sweep. The vault root is
+			// never markable — just step past it.
 			if it, ok := m.sidebar.selected(); ok {
-				if m.marked[it.id] {
-					delete(m.marked, it.id)
-				} else {
-					m.marked[it.id] = true
+				if !it.root {
+					if m.marked[it.id] {
+						delete(m.marked, it.id)
+					} else {
+						m.marked[it.id] = true
+					}
+					m.rebuildSidebar()
 				}
-				m.rebuildSidebar()
 				m.sidebar.move(1)
 			}
 			return m, nil
@@ -657,10 +668,12 @@ func (m VaultModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Left click: focus the pane under the cursor; on the chat it also anchors
-	// a text SELECTION, so dragging sweeps out transcript text to copy with
-	// Alt-C (scrolling stays on the wheel and Ctrl-F/B). The terminal's native
-	// bypass still works too: Option+drag on macOS, Shift+drag on Linux —
-	// mouse reporting is skipped entirely there.
+	// a text SELECTION, so dragging sweeps out transcript text. RELEASING the
+	// drag copies the selection automatically (Alt-C also copies, but many
+	// Linux terminals eat Alt-<key> as a menu mnemonic, so release-to-copy is
+	// the reliable path). Scrolling stays on the wheel and Ctrl-F/B; the
+	// terminal's native bypass still works too — Option+drag on macOS,
+	// Shift+drag on Linux skip mouse reporting entirely.
 	switch msg.Action {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
@@ -680,6 +693,9 @@ func (m VaultModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case tea.MouseActionRelease:
+		if m.dragChat && m.chat.sel.active { // a real drag, not a bare click
+			m.flash(copySelection(&m.chat))
+		}
 		m.dragChat = false
 	}
 	return m, nil
@@ -1569,8 +1585,36 @@ func (m *VaultModel) rebuildSidebar() {
 			}
 		}
 	}
-	walk("", 0)
+	// The vault root is always shown first (NERDTree-style): a directory you
+	// can add notes into — the default home for new notes — but never move,
+	// delete, or mark. Its real entries nest one level under it. Fold state
+	// lives under the "" key in m.expanded (seeded open in newVaultModel).
+	rootOpen := m.expanded[vaultRootID]
+	items = append(items, sidebarItem{
+		id:       vaultRootID,
+		title:    m.vaultRootName(),
+		dir:      true,
+		root:     true,
+		expanded: rootOpen,
+	})
+	if rootOpen {
+		walk("", 1)
+	}
 	m.sidebar.setItems(items)
+}
+
+// vaultRootID is the synthetic sidebar id (and m.expanded key) of the vault-
+// root row. The empty path is the vault root and can never name a real entry.
+const vaultRootID = ""
+
+// vaultRootName is the label of the vault-root sidebar row: the configured
+// vault directory's base name, or "vault" when it has none.
+func (m VaultModel) vaultRootName() string {
+	name := filepath.Base(m.cfg.VaultDir)
+	if name == "" || name == "." || name == "/" {
+		return "vault"
+	}
+	return name
 }
 
 // expandTo unfolds every ancestor directory of relPath so its row is visible
@@ -1822,7 +1866,7 @@ func (m VaultModel) statusView() string {
 	case m.focus == paneEditor:
 		hints = ",ff files · ,fg contents · ,n fold notes · ⌃s save"
 	case m.focus == paneChat:
-		hints = "enter send · drag+⌥c copy selection · ⌥o/:copy copy reply · ⌃f/⌃b scroll"
+		hints = "enter send · drag to copy · ⌥o/:copy copy reply · ⌃f/⌃b scroll"
 	}
 	return statusBar.Width(m.width).Render(left + "   " + hintStyle.Render(hints))
 }

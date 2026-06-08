@@ -410,35 +410,46 @@ func TestVaultSidebarTree(t *testing.T) {
 		{Path: "root.md", Name: "root"},
 	}
 
-	// Collapsed by default: only the top level is visible, directories first.
+	// The vault root is row 0 (a directory); top-level entries nest under it at
+	// depth 1, directories first.
 	m.rebuildSidebar()
 	got := make([]string, 0, len(m.sidebar.items))
 	for _, it := range m.sidebar.items {
 		got = append(got, it.id)
 	}
-	want := []string{"bio", "math", "root.md"}
+	want := []string{vaultRootID, "bio", "math", "root.md"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("collapsed tree = %v, want %v", got, want)
 	}
+	if it := m.sidebar.items[0]; !it.root || !it.dir || !it.expanded || it.depth != 0 {
+		t.Fatalf("row 0 should be the open vault root: %+v", it)
+	}
 
-	// Expanding math reveals its children (subdirectory before file), at depth 1.
+	// Expanding math reveals its children (subdirectory before file), at depth 2.
 	m.expanded["math"] = true
 	m.rebuildSidebar()
 	got = got[:0]
 	for _, it := range m.sidebar.items {
 		got = append(got, it.id)
 	}
-	want = []string{"bio", "math", "math/calc", "math/A.md", "root.md"}
+	want = []string{vaultRootID, "bio", "math", "math/calc", "math/A.md", "root.md"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("expanded tree = %v, want %v", got, want)
 	}
 	for _, it := range m.sidebar.items {
-		if it.id == "math/A.md" && it.depth != 1 {
-			t.Fatalf("math/A.md depth = %d, want 1", it.depth)
+		if it.id == "math/A.md" && it.depth != 2 {
+			t.Fatalf("math/A.md depth = %d, want 2", it.depth)
 		}
-		if it.id == "math" && (!it.dir || !it.expanded) {
-			t.Fatalf("math should render as an expanded dir: %+v", it)
+		if it.id == "math" && (!it.dir || !it.expanded || it.depth != 1) {
+			t.Fatalf("math should render as an expanded dir at depth 1: %+v", it)
 		}
+	}
+
+	// Folding the vault root hides everything beneath it.
+	delete(m.expanded, vaultRootID)
+	m.rebuildSidebar()
+	if len(m.sidebar.items) != 1 || !m.sidebar.items[0].root {
+		t.Fatalf("a folded root should leave only the root row, got %d rows", len(m.sidebar.items))
 	}
 }
 
@@ -451,17 +462,23 @@ func TestVaultSidebarMarkAndDirToggle(t *testing.T) {
 	m = tm.(VaultModel)
 	m.setFocus(paneSidebar)
 
-	// Enter on the collapsed "math" dir unfolds it.
-	if it, _ := m.sidebar.selected(); it.id != "math" {
-		t.Fatalf("cursor should start on the math dir, got %q", it.id)
+	// The cursor starts on the vault root; step down to the "math" dir.
+	if it, _ := m.sidebar.selected(); !it.root {
+		t.Fatalf("cursor should start on the vault root, got %q", it.id)
 	}
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m = tm.(VaultModel)
+	if it, _ := m.sidebar.selected(); it.id != "math" {
+		t.Fatalf("j should land on the math dir, got %q", it.id)
+	}
+	// Enter on the collapsed "math" dir unfolds it.
 	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m = tm.(VaultModel)
 	if !m.expanded["math"] {
 		t.Fatal("enter should unfold the directory")
 	}
-	if len(m.sidebar.items) != 3 {
-		t.Fatalf("after unfold the tree should show 3 rows, got %d", len(m.sidebar.items))
+	if len(m.sidebar.items) != 4 { // root, math, math/A.md, root.md
+		t.Fatalf("after unfold the tree should show 4 rows, got %d", len(m.sidebar.items))
 	}
 
 	// Space marks the row under the cursor and steps down.
@@ -510,5 +527,92 @@ func TestVaultSidebarMarkAndDirToggle(t *testing.T) {
 		if it.id == "math" || it.id == "math/A.md" {
 			t.Fatalf("deleted %q still in the tree", it.id)
 		}
+	}
+}
+
+// On a course-only vault (the common fresh-install case), the vault root is
+// still shown so a new note can be created there — "m a" on the root opens an
+// add prompt rooted at the vault, not inside meari-course/.
+func TestVaultRootAddCreatesAtRoot(t *testing.T) {
+	m := newTestVaultModel(t)
+	m.svc.SetCourseDir(t.TempDir())
+	if _, err := m.svc.SaveNote("math/A.md", "# A\n"); err != nil { // seed a course
+		t.Fatal(err)
+	}
+	if _, err := m.svc.SaveNote(core.CourseDir+"/Trees/course.md", "## Basics\n- [[A]]\n"); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a vault whose only user content is the course mount.
+	m.tree = []core.TreeEntry{
+		{Path: core.CourseDir, Name: core.CourseDir, Dir: true},
+		{Path: core.CourseDir + "/Trees", Name: "Trees", Dir: true},
+	}
+	m.rebuildSidebar()
+	m.setFocus(paneSidebar)
+
+	// Row 0 is the vault root and the cursor sits on it.
+	if it, ok := m.sidebar.selected(); !ok || !it.root {
+		t.Fatalf("cursor should start on the vault root, got %+v", it)
+	}
+
+	// "m" then "a" opens the add prompt with an empty (root-level) prefill.
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m = tm.(VaultModel)
+	if !m.cmdMode || m.promptMode != "add" {
+		t.Fatalf("m a should open the add prompt, cmdMode=%v mode=%q", m.cmdMode, m.promptMode)
+	}
+	if v := m.cmdLine.Value(); v != "" {
+		t.Fatalf("add prompt on the root should prefill empty (root-level), got %q", v)
+	}
+
+	// Submitting a bare name creates the note at the vault root.
+	tm, cmd := m.runNodePrompt("add", "", "Ideas")
+	m = tm.(VaultModel)
+	if cmd == nil {
+		t.Fatal("add should issue a save+open command")
+	}
+	opened, ok := cmd().(vOpenedMsg)
+	if !ok {
+		t.Fatalf("expected vOpenedMsg, got %T", cmd())
+	}
+	if opened.note.Path != "Ideas.md" {
+		t.Fatalf("new note path = %q, want Ideas.md (vault root)", opened.note.Path)
+	}
+}
+
+// The vault root is structural — it can't be moved, deleted, or marked.
+func TestVaultRootIsProtected(t *testing.T) {
+	m := newTestVaultModel(t)
+	m.rebuildSidebar()
+	m.setFocus(paneSidebar)
+	if it, ok := m.sidebar.selected(); !ok || !it.root {
+		t.Fatalf("cursor should start on the vault root, got %+v", it)
+	}
+
+	// m d on the root refuses with a flash, arms no deletion.
+	tm, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = tm.(VaultModel)
+	if len(m.confirmDel) != 0 {
+		t.Fatalf("deleting the vault root should be refused, confirmDel=%v", m.confirmDel)
+	}
+
+	// m m on the root refuses too (no move prompt).
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = tm.(VaultModel)
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	m = tm.(VaultModel)
+	if m.cmdMode || m.promptMode == "move" {
+		t.Fatal("moving the vault root should be refused")
+	}
+
+	// Space doesn't mark the root.
+	tm, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = tm.(VaultModel)
+	if m.marked[vaultRootID] {
+		t.Fatal("the vault root must not be markable")
 	}
 }

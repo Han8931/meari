@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	runewidth "github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 
 	"meari/internal/editor"
@@ -18,6 +19,24 @@ func forceColorTUI(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+}
+
+// The app must pin ambiguous-width characters to one cell so every pane (chat
+// viewport via uniseg, editor soft-wrap via go-runewidth) measures the arrows,
+// ≤/≥, · and ² that fill lessons the same way. Under a CJK locale go-runewidth
+// would otherwise call them 2 cells and the layout would drift.
+func TestNormalizeRuneWidthNarrowsAmbiguous(t *testing.T) {
+	prev := runewidth.DefaultCondition.EastAsianWidth
+	runewidth.DefaultCondition.EastAsianWidth = true // simulate a CJK locale
+	t.Cleanup(func() { runewidth.DefaultCondition.EastAsianWidth = prev })
+
+	normalizeRuneWidth()
+
+	for _, r := range []rune{'→', '≤', '≥', '·', '×', '²', '—'} {
+		if w := runewidth.RuneWidth(r); w != 1 {
+			t.Errorf("RuneWidth(%q) = %d after normalizeRuneWidth, want 1", r, w)
+		}
+	}
 }
 
 func TestChatBusyLineShowsProgress(t *testing.T) {
@@ -223,6 +242,43 @@ func TestChatSelectionSingleLineAndClamp(t *testing.T) {
 	c.dragSelect(999, 999)
 	if _, ok := c.selectionText(); !ok {
 		t.Fatal("clamped select-all should still produce text")
+	}
+}
+
+// Releasing a drag selection copies it to the clipboard with no key press —
+// the reliable path on Linux terminals that swallow Alt-C as a menu mnemonic.
+func TestChatDragReleaseCopies(t *testing.T) {
+	got := stubClipboard(t)
+	m := newTestVaultModel(t) // sized 100x40, chat laid out
+	m.chat.append(roleTutor, "copy this whole line please")
+
+	// Simulate a drag in progress over the body line (line 0 is the badge).
+	m.chat.startSelect(0, 1)
+	m.chat.dragSelect(20, 1)
+	m.dragChat = true
+
+	// Release on a valid (non-title/status) cell finishes the drag.
+	tm, _ := m.handleMouse(tea.MouseMsg{Action: tea.MouseActionRelease, X: 90, Y: 10})
+	m = tm.(VaultModel)
+
+	if *got == "" {
+		t.Fatal("releasing a drag selection should copy to the clipboard")
+	}
+	if !strings.Contains(*got, "copy this whole line") {
+		t.Fatalf("copied text = %q, want the selected line", *got)
+	}
+	if m.dragChat {
+		t.Fatal("release should end the drag")
+	}
+
+	// A bare click (press then release, no motion) must NOT copy.
+	*got = ""
+	m.chat.clearSelect()
+	m.dragChat = true
+	tm, _ = m.handleMouse(tea.MouseMsg{Action: tea.MouseActionRelease, X: 90, Y: 10})
+	m = tm.(VaultModel)
+	if *got != "" {
+		t.Fatalf("a bare click should not copy, got %q", *got)
 	}
 }
 

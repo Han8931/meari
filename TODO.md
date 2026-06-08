@@ -12,6 +12,9 @@ this file tracks concrete, actionable items. Check things off as they land.
 - [ ] `meari check` — suggest the exact fix when key/model/base-url is wrong
 - [ ] URL go
 - [ ] Mouse visual block
+- [ ] copy dragged contents issue
+- [ ] NerdTree in the vault mode, show parents directory. 
+
 
 ## Study & learning
 

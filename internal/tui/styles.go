@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	runewidth "github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 )
 
@@ -140,8 +141,23 @@ func borderStyle(active bool) lipgloss.Style {
 }
 
 func enableTUIColor() {
+	normalizeRuneWidth()
 	if os.Getenv("NO_COLOR") != "" || os.Getenv("CLICOLOR") == "0" {
 		return
 	}
 	lipgloss.SetColorProfile(termenv.ANSI256)
+}
+
+// normalizeRuneWidth pins go-runewidth to NARROW ambiguous-width characters,
+// so the whole app measures glyph widths the one way the rest of the render
+// stack already does. Under a CJK locale (LANG=ko_KR/ja_JP/zh_*) go-runewidth
+// auto-enables East Asian Width, counting ambiguous characters — the arrows,
+// ≤ ≥ · × ² and dashes that fill lessons and AI replies — as 2 cells. But the
+// chat viewport, the textarea, and charm's x/ansi all measure them as 1 (via
+// uniseg), as do modern terminals by default. That split is what corrupted the
+// layout (misaligned borders, " ????" cell garbage) once scrolled into
+// symbol-dense content. Forcing width 1 everywhere — lipgloss's word-wrap and
+// the editor's soft-wrap both read this condition — keeps every pane in sync.
+func normalizeRuneWidth() {
+	runewidth.DefaultCondition.EastAsianWidth = false
 }

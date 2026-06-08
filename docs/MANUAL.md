@@ -140,14 +140,21 @@ structure) │ **editor** (center) │ **chat / study** (right).
 ### The notes tree
 
 The tree shows your vault as it is on disk, NERDTree/Obsidian-style — directories
-first (`▸` folded / `▾` unfolded), files indented beneath them, the open note in bold:
+first (`▸` folded / `▾` unfolded), files indented beneath them, the open note in bold.
+The **vault root** is the bold row at the top (named after your vault directory):
+everything nests under it, and it's always present — even on a fresh, course-only
+vault — so there's always somewhere to create your first note.
 
-- `j`/`k` move · `Enter` opens a note / folds-unfolds a directory
+- `j`/`k` move · `Enter` opens a note / folds-unfolds a directory (including the root)
 - `Space` marks files/folders (amber) for a batch operation
 - `m` opens the node menu: **(a)dd** — type a path, end with `/` for a folder;
   **(m)ove/rename** — edit the prefilled path; **(d)elete** — the marked rows (or the
   cursor row) after a `y/n` confirm. Deletes clear the editor if the open note went
   with them; renames follow the open note.
+- **New notes default to the vault root.** Run `m` → `a` on the **vault root row** (or
+  on any root-level note) and the add prompt starts empty, so the note lands at the top
+  of your vault instead of inside a subfolder. Selecting a directory first prefills its
+  path. (The root itself can't be moved, deleted, or marked — it's the container.)
 
 ### Commands & study
 
@@ -303,6 +310,12 @@ type a question and press `Enter` to ask the tutor.
   draft) — so answers relate to what's on screen. Long conversations send only the most
   recent turns to the model.
 - **↑/↓ recall your previous questions** (when the input is empty), readline-style.
+- **Drag to copy:** click and drag across the transcript to select text; **releasing the
+  drag copies the selection** to the clipboard automatically (no key needed). `Alt-C` /
+  `Option-C` also copies the current selection — but some Linux terminals intercept
+  `Alt-<key>`, which is why release-to-copy is the reliable path. (For your terminal's own
+  selection instead, hold `Shift` on Linux / `Option` on macOS while dragging to bypass the
+  app's mouse capture.)
 - **Copy a reply:** with the chat focused, `Option-O` (macOS) / `Alt-O` (Linux) copies the
   tutor's last reply to the clipboard; `:copy code` grabs just its last code block and
   `:copy all` the whole transcript. Copying uses the native clipboard *and* OSC 52, so it
