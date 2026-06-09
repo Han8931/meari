@@ -163,11 +163,27 @@ directory path, so nothing personal leaks on screen.)
 - `Ctrl-W` cycle focus · `Ctrl-S` save · `Ctrl-C` quit
 - `:learn <topic>` — generate an AI lesson note (e.g. `:learn the french revolution`)
 - `:new <title>` — create a blank note
+- `:polish` / `:edit <instruction>` — AI-edit the open note. `:polish` does a light
+  copy-edit (grammar, clarity, flow; meaning and structure kept); `:edit make this more
+  concise` takes any instruction. The proposed rewrite **streams into the chat for you to
+  read** — nothing changes yet — then **`:apply`** swaps it into the editor (press `u` to
+  undo) or **`:discard`** drops it. Opening another note or going offline cancels a
+  pending proposal.
+  - **Edit just a selection:** in the editor, select text in Visual mode (`v`/`V`), then
+    type `:polish` or `:edit <instruction>` — the command acts on the selection and
+    `:apply` rewrites only that span (it's left untouched if the surrounding text changed
+    in the meantime). With no selection, the whole note is edited.
+- `:ask` / `:discuss [question]` — **talk with the tutor about a selection.** Select text
+  in the editor (Visual mode) and type `:ask` to make that excerpt the subject of the
+  chat — it stays the topic across follow-up questions until you open another note. Add a
+  question (`:ask is this rigorous?`) to send it right away, or omit it to jump to the
+  chat and type. (To rewrite the selection instead of discussing it, use `:polish` /
+  `:edit` on it.)
 - `:essay` — study the open note: write an answer in the editor, then `:grade` to check
   it; `:answer` reveals a model answer; `:done` ends the study
 - `:backlinks` — toggle the "↩ Linked mentions" panel under the editor, listing the
   notes whose `[[wikilinks]]` point at the open note (Obsidian-style backlinks)
-- `:course` / `:revise` / `:publish` — build, polish, or share a course from the
+- `:course` / `:revise` / `:publish` — build, refine, or share a course from the
   open note (see [Courses](#courses-course--revise))
 - `:export` — write the current chat transcript to `exports/chat-<note>-<time>.md`
   in the app directory (works in the tutor too)

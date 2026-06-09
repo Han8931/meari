@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
@@ -694,6 +695,15 @@ func (m Model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
+	case ":":
+		// Open the command line on the selection, Vim's ":'<,'>" — capture the
+		// span so a forwarded command (e.g. ":edit …") can act on it.
+		m.captureSelection()
+		m.mode = modeCommand
+		m.cmd.SetValue("")
+		m.cmd.Focus()
+		m.exHist.Open()
+		return m, textinput.Blink
 	case "v":
 		if m.visualLine {
 			m.visualLine = false // switch V -> v, keeping the selection
@@ -778,6 +788,43 @@ func (m *Model) visualSpan() (runes []rune, start, cut int) {
 		start-- // last line: take the preceding newline instead
 	}
 	return runes, start, cut
+}
+
+// captureSelection stashes the current Visual selection — its exact text and
+// flat-rune range, with any bounding newlines (from a linewise V selection)
+// trimmed off both — for a command launched with ":" from Visual mode. An
+// empty selection captures nothing.
+func (m *Model) captureSelection() {
+	runes, start, cut := m.visualSpan()
+	for start < cut && runes[start] == '\n' {
+		start++
+	}
+	for cut > start && runes[cut-1] == '\n' {
+		cut--
+	}
+	if start >= cut {
+		m.selCapture = nil
+		return
+	}
+	m.selCapture = &selSpan{text: string(runes[start:cut]), start: start, cut: cut}
+}
+
+// ReplaceRange swaps the half-open flat-rune span [start, cut) for repl as one
+// undoable edit — but ONLY if that span still holds want, so an edit proposed
+// against an earlier buffer can't clobber text that changed underneath it. It
+// reports whether the replacement happened; on a mismatch the buffer is left
+// untouched. The cursor lands at the end of the inserted text.
+func (m *Model) ReplaceRange(start, cut int, repl, want string) bool {
+	runes := []rune(m.ta.Value())
+	if start < 0 || start > cut || cut > len(runes) || string(runes[start:cut]) != want {
+		return false
+	}
+	m.pushUndo()
+	out := append(append(append([]rune{}, runes[:start]...), []rune(repl)...), runes[cut:]...)
+	m.ta.SetValue(string(out))
+	r, c := rowColOf(out, start+len([]rune(repl)))
+	m.moveTo(r, c)
+	return true
 }
 
 // visualDelete removes the selection into the register and leaves the cursor at

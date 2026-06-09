@@ -8,6 +8,22 @@ import (
 
 func ctrlR() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyCtrlR} }
 
+// ReplaceAll swaps the whole buffer as one undoable edit (used to apply an AI
+// rewrite): u restores the previous text, unlike SetValue which clears history.
+func TestReplaceAllIsUndoable(t *testing.T) {
+	m := New("# notes\n\nrough draft", true, nil)
+	m.SetSize(40, 10)
+
+	m.ReplaceAll("# Notes\n\nPolished draft.")
+	if got := m.Value(); got != "# Notes\n\nPolished draft." {
+		t.Fatalf("ReplaceAll: %q", got)
+	}
+	m = apply(m, key("u"))
+	if got := m.Value(); got != "# notes\n\nrough draft" {
+		t.Fatalf("u should restore the pre-replace note: %q", got)
+	}
+}
+
 func TestUndoRedoDeleteLine(t *testing.T) {
 	m := New("one\ntwo\nthree", true, nil)
 	m.SetSize(40, 10)

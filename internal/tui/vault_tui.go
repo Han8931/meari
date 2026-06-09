@@ -87,6 +87,27 @@ type VaultModel struct {
 	studyMode   bool
 	studyPrompt string
 
+	// AI note-polish state. :polish/:edit stream a proposed rewrite into the
+	// chat (polishing == true for that stream); the result is held in
+	// pendingEdit until :apply writes it back to the note (or :discard drops
+	// it). pendingEditPath records which note the proposal is for, so :apply
+	// is a no-op if the learner switched notes meanwhile. When the edit was
+	// scoped to a Visual selection, pendingSel holds that span so :apply
+	// replaces just it (verifying the span is unchanged); nil = whole note.
+	polishing       bool
+	pendingEdit     string
+	pendingEditPath string
+	pendingSel      *editor.Selection
+
+	// cmdSel carries the selection from a ":"-in-Visual command into runEx for
+	// the duration of one dispatch; nil outside that window.
+	cmdSel *editor.Selection
+
+	// focusExcerpt is a selected passage the learner is discussing with the
+	// tutor (:ask): while set, chatContext grounds replies on it. It persists
+	// across follow-up questions and clears when another note is opened.
+	focusExcerpt string
+
 	// Backlinks ("notes that link here") for the open note, shown as a footer
 	// under the editor (Obsidian-style). showBacklinks toggles the panel.
 	backlinks     []core.NoteMeta
@@ -236,6 +257,12 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case vOpenedMsg:
 		m.studyMode = false
+		if msg.note.Path != m.pendingEditPath {
+			m.pendingEdit, m.pendingSel = "", nil // a proposal doesn't carry to a different note
+		}
+		if msg.note.Path != m.current {
+			m.focusExcerpt = "" // a new note ends the discussion of the old one's excerpt
+		}
 		m.switchNoteChat(msg.note)
 		m.current = msg.note.Path
 		m.currentTitle = msg.note.Title
@@ -369,7 +396,13 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case editor.RunCommandMsg:
-		return m.runEx(msg.Raw)
+		// A command launched with ":" from the editor's Visual mode carries the
+		// selected span; stash it so :polish/:edit can scope to it, then clear.
+		m.cmdSel = msg.Sel
+		tm, cmd := m.runEx(msg.Raw)
+		mm := tm.(VaultModel)
+		mm.cmdSel = nil
+		return mm, cmd
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -1043,9 +1076,10 @@ func (m VaultModel) confirmDelete(it sidebarItem) (tea.Model, tea.Cmd) {
 // vaultExCmds lists every command runEx accepts (aliases included), sorted,
 // for Tab completion in the command prompt.
 var vaultExCmds = []string{
-	"answer", "backlinks", "code", "compact", "copy", "course", "done", "essay",
-	"export", "fold", "gen", "grade", "learn", "lesson", "links", "new",
-	"paste", "publish", "q", "quit", "revise", "sidebar", "tutor", "wide", "yank",
+	"answer", "apply", "ask", "backlinks", "code", "compact", "copy", "course",
+	"discard", "discuss", "done", "edit", "essay", "export", "fold", "gen", "grade",
+	"learn", "lesson", "links", "new", "paste", "polish", "publish", "q", "quit",
+	"revise", "sidebar", "tutor", "wide", "yank",
 }
 
 // runEx dispatches a vault ex-command (without the leading colon).
@@ -1088,6 +1122,20 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdRevise(args)
 	case "publish":
 		return m.cmdPublish(args)
+	case "polish":
+		return m.cmdPolish(args) // args optional: a one-off instruction, else the default
+	case "edit":
+		if args == "" {
+			m.flash("usage: :edit <what to change> (e.g. :edit make this more concise)")
+			return m, nil
+		}
+		return m.cmdPolish(args)
+	case "apply":
+		return m.cmdApplyEdit()
+	case "discard":
+		return m.cmdDiscardEdit()
+	case "ask", "discuss":
+		return m.cmdAsk(args)
 	case "answer":
 		return m.revealAnswer()
 	case "copy", "yank":
@@ -1273,10 +1321,17 @@ func (m *VaultModel) switchNoteChat(n core.Note) {
 // during essay study, the prompt plus their draft answer) — so chat replies
 // stay grounded in the current material.
 func (m VaultModel) chatContext() string {
-	if m.current == "" {
-		return ""
-	}
 	var b strings.Builder
+	// Lead with the focused excerpt (the subject of a :ask/:discuss thread) so
+	// it ALWAYS survives context clamping — the note body that follows may be
+	// trimmed, but the excerpt the learner is asking about must not be.
+	if m.focusExcerpt != "" {
+		b.WriteString("The learner has SELECTED this excerpt and wants the whole conversation " +
+			"focused on it. Keep grounding every reply in it:\n```\n" + m.focusExcerpt + "\n```\n\n")
+	}
+	if m.current == "" {
+		return strings.TrimSpace(b.String())
+	}
 	b.WriteString("Current note — " + m.currentTitle + "\n")
 	if m.studyMode {
 		b.WriteString("\nEssay prompt: " + m.studyPrompt + "\n")
@@ -1311,6 +1366,56 @@ func (m VaultModel) submitChat() (tea.Model, tea.Cmd) {
 	return m.streamReply()
 }
 
+// cmdAsk routes a selected passage into the chat to discuss it with the tutor.
+// From the editor's Visual mode, ":ask" (or ":discuss") grounds the
+// conversation on the selection — it stays the topic across follow-ups until
+// another note is opened. With a trailing question (":ask why is this vague?")
+// the question is sent right away; without one, focus moves to the chat input
+// so the learner can type. Polishing it instead is just :polish/:edit on the
+// same selection.
+func (m VaultModel) cmdAsk(question string) (tea.Model, tea.Cmd) {
+	if m.streaming {
+		m.flash("the tutor is still replying — try again in a moment")
+		return m, nil
+	}
+	question = strings.TrimSpace(question)
+	if m.cmdSel != nil && strings.TrimSpace(m.cmdSel.Text) != "" {
+		m.focusExcerpt = m.cmdSel.Text
+		preview := firstLine(m.focusExcerpt)
+		if len(preview) > 50 {
+			preview = preview[:50] + "…"
+		}
+		m.chat.append(roleSystem, "— discussing this excerpt: \""+preview+"\" — ask away (it stays the topic until you open another note) —")
+	} else if question == "" && m.focusExcerpt == "" {
+		m.flash("select text in the editor first, or :ask <your question>")
+		return m, nil
+	}
+	if question == "" {
+		return m, m.setFocus(paneChat) // let the learner type their question
+	}
+	m.chat.append(roleUser, question)
+	m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "user", Content: question})
+	tm, cmd := m.streamReply()
+	mm := tm.(VaultModel)
+	return mm, tea.Batch(mm.setFocus(paneChat), cmd)
+}
+
+// groundHistory returns a copy of the chat history with a :ask/:discuss
+// excerpt pinned to the LATEST user turn. The selection rides in the system
+// context too, but small models drift away from far-off system text after a
+// few turns; keeping it adjacent to the current question is what holds the
+// discussion on the selected passage. The input slice and m.chatHist are left
+// unchanged (the transcript stays clean).
+func groundHistory(hist []tutor.ChatTurn, excerpt string) []tutor.ChatTurn {
+	out := append([]tutor.ChatTurn(nil), hist...)
+	if excerpt == "" || len(out) == 0 || out[len(out)-1].Role != "user" {
+		return out
+	}
+	out[len(out)-1].Content = "About the excerpt I selected:\n```\n" +
+		excerpt + "\n```\n\n" + out[len(out)-1].Content
+	return out
+}
+
 // streamReply starts streaming one tutor reply over the active conversation:
 // the requirements interview during a :course intake (its own system prompt,
 // via CourseIntakeStream), the note-grounded tutor chat otherwise.
@@ -1334,7 +1439,7 @@ func (m VaultModel) streamReply() (tea.Model, tea.Cmd) {
 		})
 	} else {
 		ctxText := m.chatContext()
-		hist := append([]tutor.ChatTurn(nil), m.chatHist...)
+		hist := groundHistory(m.chatHist, m.focusExcerpt)
 		ch, cmd = startChatStream(ctx, func(ctx context.Context, onDelta func(string)) (string, error) {
 			return svc.ChatStream(ctx, ctxText, hist, onDelta)
 		})
@@ -1364,6 +1469,7 @@ func (m VaultModel) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
 			m.pending--
 			m.streaming = false
 			m.streamStopping = false
+			m.polishing = false
 			m.streamCancel = nil
 			m.chat.append(roleSystem, "— tutor reply stopped —")
 			return m, nil
@@ -1373,6 +1479,7 @@ func (m VaultModel) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.pending--
 		m.streaming = false
+		m.polishing = false
 		m.streamCancel = nil
 		m.chat.failStream("⚠ chat failed: " + msg.err.Error())
 		return m, nil
@@ -1381,6 +1488,13 @@ func (m VaultModel) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
 		m.pending--
 		m.streaming = false
 		m.streamCancel = nil
+		if m.polishing {
+			m.polishing = false
+			m.pendingEdit = msg.full
+			m.chat.append(roleSystem, "— proposed edit ready · :apply to replace the note · :discard to drop —")
+			m.flash("proposed edit ready — :apply or :discard")
+			return m, nil
+		}
 		if m.courseIntake {
 			m.courseHist = append(m.courseHist, tutor.ChatTurn{Role: "assistant", Content: msg.full})
 			if req, ok := core.ParseCourseRequest(msg.full); ok {
@@ -1499,6 +1613,106 @@ func (m VaultModel) cmdPublish(args string) (tea.Model, tea.Cmd) {
 	m.pending++
 	m.loadKind = "publishing course"
 	return m, vPublishCmd(m.svc, key, dest)
+}
+
+// --- :polish / :edit — AI note editing ---
+
+// cmdPolish streams an AI rewrite of the open note into the chat for review.
+// instruction is free-form (":edit make this concise") or empty (":polish",
+// which uses core.DefaultPolishInstruction). The result waits in pendingEdit
+// until :apply writes it back, so nothing is changed until the learner agrees.
+func (m VaultModel) cmdPolish(instruction string) (tea.Model, tea.Cmd) {
+	switch {
+	case m.current == "":
+		m.flash("open a note first — :polish edits the open note")
+		return m, nil
+	case m.studyMode:
+		m.flash("not while studying — :done first, then :polish")
+		return m, nil
+	case m.svc.Offline():
+		m.flash("polishing needs an AI provider — set one up, then :polish")
+		return m, nil
+	case m.streaming || m.courseCh != nil:
+		m.flash("busy — try :polish again in a moment")
+		return m, nil
+	case m.pendingEdit != "":
+		m.flash("you already have a proposed edit — :apply or :discard it first")
+		return m, nil
+	}
+	m.pending++
+	m.loadKind = "polishing"
+	m.streaming = true
+	m.streamStopping = false
+	m.polishing = true
+	m.pendingEditPath = m.current
+
+	// Scope to the Visual selection when the command came from one; otherwise
+	// the whole note.
+	body := m.editor.Value()
+	target := "note"
+	m.pendingSel = nil
+	if m.cmdSel != nil && strings.TrimSpace(m.cmdSel.Text) != "" {
+		body = m.cmdSel.Text
+		sel := *m.cmdSel
+		m.pendingSel = &sel
+		target = "selection"
+	}
+	verb := "polishing"
+	if strings.TrimSpace(instruction) != "" {
+		verb = "editing"
+	}
+	m.chat.append(roleSystem, "▶ "+verb+" the "+target+" — :apply to use the result · :discard to drop it")
+	m.chat.beginStream()
+
+	svc, instr := m.svc, instruction
+	ctx, cancel := context.WithCancel(context.Background())
+	m.streamCancel = cancel
+	ch, cmd := startChatStream(ctx, func(ctx context.Context, onDelta func(string)) (string, error) {
+		return svc.PolishNote(ctx, body, instr, onDelta)
+	})
+	m.streamCh = ch
+	return m, tea.Batch(m.setFocus(paneChat), cmd)
+}
+
+// cmdApplyEdit writes the pending AI rewrite back into the editor as one
+// undoable change (u reverts it) and saves the note.
+func (m VaultModel) cmdApplyEdit() (tea.Model, tea.Cmd) {
+	if m.pendingEdit == "" {
+		m.flash("nothing to apply — :polish or :edit first")
+		return m, nil
+	}
+	if m.current != m.pendingEditPath {
+		m.pendingEdit, m.pendingSel = "", nil
+		m.flash("the proposed edit was for another note — discarded")
+		return m, nil
+	}
+	if m.pendingSel != nil {
+		// Selection edit: replace just that span, and only if it's unchanged.
+		if !m.editor.ReplaceRange(m.pendingSel.Start, m.pendingSel.Cut, m.pendingEdit, m.pendingSel.Text) {
+			m.pendingEdit, m.pendingSel = "", nil
+			m.flash("the note changed under the selection — edit discarded")
+			return m, nil
+		}
+	} else {
+		m.editor.ReplaceAll(m.pendingEdit)
+	}
+	body := m.editor.Value()
+	m.pendingEdit, m.pendingSel = "", nil
+	m.chat.append(roleSystem, "— edit applied · press u in the editor to undo —")
+	m.flash("note updated — u to undo")
+	return m, tea.Batch(m.setFocus(paneEditor), vSaveCmd(m.svc, m.current, body))
+}
+
+// cmdDiscardEdit drops a pending AI rewrite without touching the note.
+func (m VaultModel) cmdDiscardEdit() (tea.Model, tea.Cmd) {
+	if m.pendingEdit == "" {
+		m.flash("no proposed edit to discard")
+		return m, nil
+	}
+	m.pendingEdit, m.pendingSel = "", nil
+	m.chat.append(roleSystem, "— proposed edit discarded —")
+	m.flash("edit discarded")
+	return m, nil
 }
 
 // courseKeyOf maps a note path inside meari-course/<X>/ to that course's
@@ -1857,6 +2071,8 @@ func (m VaultModel) statusView() string {
 	}
 	hints := "⌃w h·l focus · : cmds · :learn <topic> · enter open · ⌃s save · ⌃c quit"
 	switch {
+	case m.pendingEdit != "":
+		hints = noticeStyle.Render("proposed edit") + " · :apply to use it · :discard to drop it"
 	case m.pendingWindow:
 		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
 	case m.studyMode:
@@ -1864,7 +2080,7 @@ func (m VaultModel) statusView() string {
 	case m.focus == paneSidebar:
 		hints = "j/k move · enter open · ,ff find · space mark · m node ops · r refresh · : cmds"
 	case m.focus == paneEditor:
-		hints = ",ff files · ,fg contents · ,n fold notes · ⌃s save"
+		hints = ",ff find · :polish/:edit AI edit · select+:ask discuss · ,n fold · ⌃s save"
 	case m.focus == paneChat:
 		hints = "enter send · drag to copy · ⌥o/:copy copy reply · ⌃f/⌃b scroll"
 	}

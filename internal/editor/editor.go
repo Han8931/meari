@@ -67,7 +67,27 @@ type OpenConfigMsg struct{}
 // ":progress", ":clear") up to the embedding parent, which dispatches it. Raw is
 // the command without the leading colon. This lets the editor's command line
 // double as the app's global command line instead of having two of them.
-type RunCommandMsg struct{ Raw string }
+type RunCommandMsg struct {
+	Raw string
+	// Sel is the editor selection captured when the command was launched with
+	// ":" from Visual mode (nil otherwise), so a parent command can scope
+	// itself to the selected span and write a result back to it.
+	Sel *Selection
+}
+
+// Selection is a captured Visual-mode span: its text plus the half-open
+// [Start, Cut) flat-rune range it occupied. The range lets a parent apply an
+// edit back to exactly that span later (ReplaceRange verifies it first).
+type Selection struct {
+	Text       string
+	Start, Cut int
+}
+
+// selSpan is the editor-internal form of a captured selection.
+type selSpan struct {
+	text       string
+	start, cut int
+}
 
 // SaveFunc persists an in-progress draft. Called on ":w" while editing.
 type SaveFunc func(code string) error
@@ -108,6 +128,12 @@ type Model struct {
 	anchorRow, anchorCol int
 	visualLine           bool
 	visualTop            int
+
+	// selCapture holds the selection captured when ":" is pressed in Visual
+	// mode, carried into the next RunCommandMsg so a parent command (e.g.
+	// ":edit make this concise") can act on the selected span. Consumed and
+	// cleared when the command line runs or is cancelled.
+	selCapture *selSpan
 
 	// undo/redo snapshots ('u' and Ctrl-R in Normal mode). One snapshot is
 	// taken before each mutating command, and once on Insert entry so a whole
@@ -235,6 +261,24 @@ func (m *Model) SetValue(s string) {
 
 // Value returns the current buffer contents.
 func (m Model) Value() string { return m.ta.Value() }
+
+// ReplaceAll swaps the whole buffer for s as a SINGLE undoable edit: it
+// snapshots the current text first, so `u` restores it. Unlike SetValue (which
+// clears history for a freshly loaded note), this keeps the undo stack — used
+// to apply an AI rewrite the learner can revert. The cursor returns to the top.
+func (m *Model) ReplaceAll(s string) {
+	if m.ta.Value() == s {
+		return
+	}
+	m.pushUndo()
+	m.ta.SetValue(s)
+	wasFocused := m.ta.Focused()
+	m.ta.Focus()
+	m.send(tea.KeyCtrlHome)
+	if !wasFocused {
+		m.ta.Blur()
+	}
+}
 
 // NormalMode reports whether the editor is in Vim Normal mode with no operator
 // or count pending — a safe point for a parent to intercept a leader key (e.g.
@@ -609,6 +653,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cmd.SetValue("")
 		m.cmd.Focus()
 		m.exHist.Open()
+		m.selCapture = nil // a ":" from Normal mode has no selection
 		return m, textinput.Blink
 	}
 	return m, nil
@@ -760,6 +805,7 @@ func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cmd.Blur()
 		m.cmd.Prompt = ":"
 		m.searchMode = false
+		m.selCapture = nil // dropping the command line drops the captured selection
 		return m, nil
 	case tea.KeyEnter:
 		m.cmdHist().Record(m.cmd.Value())
@@ -810,6 +856,8 @@ func (m Model) exCmdNames() []string {
 func (m Model) runCommand(raw string) (tea.Model, tea.Cmd) {
 	m.mode = modeNormal
 	m.cmd.Blur()
+	sel := m.selCapture // captured by ":" from Visual mode; consumed here
+	m.selCapture = nil
 
 	switch raw {
 	case "submit":
@@ -835,9 +883,17 @@ func (m Model) runCommand(raw string) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return OpenConfigMsg{} }
 	default:
 		// Not an editor command — forward it to the parent's global dispatcher
-		// (e.g. ":topic go", ":progress", ":clear drafts").
+		// (e.g. ":topic go", ":progress", ":clear drafts"), carrying any Visual
+		// selection captured when ":" opened so commands like ":edit" can scope
+		// to it.
 		cmd := raw
-		return m, func() tea.Msg { return RunCommandMsg{Raw: cmd} }
+		return m, func() tea.Msg {
+			msg := RunCommandMsg{Raw: cmd}
+			if sel != nil {
+				msg.Sel = &Selection{Text: sel.text, Start: sel.start, Cut: sel.cut}
+			}
+			return msg
+		}
 	}
 }
 

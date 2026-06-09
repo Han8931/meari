@@ -279,6 +279,51 @@ func (s *Service) ModelAnswer(ctx context.Context, prompt string) (string, error
 	return s.tutor.ModelAnswer(ctx, prompt)
 }
 
+// DefaultPolishInstruction is what :polish uses when given no instruction of
+// its own: a light copy-edit that leaves meaning and structure alone.
+const DefaultPolishInstruction = "Improve grammar, clarity, and flow. Keep the meaning, structure, and formatting intact."
+
+const polishSystemPrompt = `You are a meticulous copy-editor for a personal Markdown note.
+Apply the user's instruction to the note and return ONLY the revised note as Markdown.
+Rules:
+- Output the note text and nothing else: no preamble, no explanation, no "Here is…", and no code fence wrapping the whole note.
+- Preserve the note's meaning unless the instruction says otherwise.
+- Keep YAML frontmatter (--- … ---), fenced code blocks (verbatim), [[wikilinks]], and the heading structure intact unless the instruction asks to change them.
+- Stay in Markdown.`
+
+// PolishNote asks the model to revise markdown per instruction, streaming the
+// rewrite through onDelta and returning the full revised text. It is
+// selection-agnostic — body may be a whole note or any excerpt — so the same
+// call backs both whole-note polishing and (later) editing a visual selection.
+// An empty instruction falls back to DefaultPolishInstruction. The result is
+// stripped of any code fence the model wraps the whole output in.
+func (s *Service) PolishNote(ctx context.Context, body, instruction string, onDelta func(string)) (string, error) {
+	if strings.TrimSpace(instruction) == "" {
+		instruction = DefaultPolishInstruction
+	}
+	hist := []tutor.ChatTurn{{Role: "user", Content: "Instruction: " + instruction + "\n\nNote:\n" + body}}
+	full, err := s.tutor.StreamConversation(ctx, polishSystemPrompt, hist, onDelta)
+	if err != nil {
+		return "", err
+	}
+	return stripNoteFence(full), nil
+}
+
+// stripNoteFence unwraps a whole-output ```…``` fence, which models sometimes
+// add around a markdown document despite being told not to. A note that merely
+// contains fenced code (fences in the middle) is left untouched.
+func stripNoteFence(s string) string {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "```") {
+		return s
+	}
+	lines := strings.Split(t, "\n")
+	if len(lines) < 2 || strings.TrimSpace(lines[len(lines)-1]) != "```" {
+		return s
+	}
+	return strings.Join(lines[1:len(lines)-1], "\n")
+}
+
 // --- helpers ---
 
 func metaOf(n vault.Note) NoteMeta {

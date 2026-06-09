@@ -30,6 +30,76 @@ func TestVisualCharwiseDeleteAndPaste(t *testing.T) {
 	}
 }
 
+// ":" from Visual mode opens the command line and captures the selection, so a
+// forwarded (parent) command carries the selected span.
+func TestVisualColonForwardsSelection(t *testing.T) {
+	m := New("alpha beta gamma", true, nil)
+	m.SetSize(40, 10)
+	m = apply(m, key("v"), key("e"), key(":")) // select "alpha", open ":"
+	if m.mode != modeCommand {
+		t.Fatalf("’:’ in Visual should open the command line, mode=%v", m.mode)
+	}
+	m = apply(m, key("edit make it formal")) // type into the command line
+
+	tm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = tm.(Model)
+	if cmd == nil {
+		t.Fatal("Enter should forward the unknown command")
+	}
+	msg, ok := cmd().(RunCommandMsg)
+	if !ok {
+		t.Fatalf("expected RunCommandMsg, got %T", cmd())
+	}
+	if msg.Raw != "edit make it formal" {
+		t.Fatalf("Raw = %q", msg.Raw)
+	}
+	if msg.Sel == nil || msg.Sel.Text != "alpha" {
+		t.Fatalf("selection not carried: %+v", msg.Sel)
+	}
+}
+
+// Esc out of a Visual ":" drops the captured selection; a later Normal-mode ":"
+// command carries none.
+func TestVisualColonEscDropsSelection(t *testing.T) {
+	m := New("alpha beta", true, nil)
+	m.SetSize(40, 10)
+	m = apply(m, key("v"), key("e"), key(":"), esc())
+	if m.selCapture != nil {
+		t.Fatal("Esc should drop the captured selection")
+	}
+	m = apply(m, key(":"))
+	m = apply(m, key("progress"))
+	tm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_ = tm
+	if msg, ok := cmd().(RunCommandMsg); !ok || msg.Sel != nil {
+		t.Fatalf("a Normal-mode command must carry no selection: %+v", msg)
+	}
+}
+
+func TestReplaceRangeVerifiesAndUndoes(t *testing.T) {
+	m := New("alpha beta gamma", true, nil)
+	m.SetSize(40, 10)
+
+	if !(&m).ReplaceRange(6, 10, "BRAVO", "beta") { // "beta" -> "BRAVO"
+		t.Fatal("ReplaceRange should succeed when the span matches")
+	}
+	if got := m.Value(); got != "alpha BRAVO gamma" {
+		t.Fatalf("after ReplaceRange: %q", got)
+	}
+	// A stale span (want no longer matches) is refused without changing text.
+	if (&m).ReplaceRange(0, 5, "X", "WRONG") {
+		t.Fatal("ReplaceRange should refuse a mismatched span")
+	}
+	if got := m.Value(); got != "alpha BRAVO gamma" {
+		t.Fatalf("refused replace must not change the buffer: %q", got)
+	}
+	// The successful replace is one undoable edit.
+	m = apply(m, key("u"))
+	if got := m.Value(); got != "alpha beta gamma" {
+		t.Fatalf("u should restore the pre-replace text: %q", got)
+	}
+}
+
 func TestVisualReverseSelection(t *testing.T) {
 	m := New("abcd", true, nil)
 	m.SetSize(40, 10)
