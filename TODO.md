@@ -5,15 +5,13 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## Quick wins
 
-- [ ] Fuzzy note finder — `Ctrl-P` / `:find` palette that jumps to a note by title
 - [ ] `:rename <title>` and `:delete` note commands (vault lifecycle, next to `:new`/`:learn`)
 - [ ] Word/line count + reading time in the editor status bar
-- [x] Answer check button — clickable "▸ Check answer" in the coding TUI title bar
 - [ ] `meari check` — suggest the exact fix when key/model/base-url is wrong
 - [ ] URL go
 - [ ] Mouse visual block
-- [ ] copy dragged contents issue
-- [ ] NerdTree in the vault mode, show parents directory. 
+- [ ] Global install: root `workspace`/`data`/`exports` at a fixed app-home (e.g. `~/.meari`)
+      instead of the cwd, so `meari` behaves the same from any directory
 
 
 ## Study & learning
@@ -26,13 +24,11 @@ this file tracks concrete, actionable items. Check things off as they land.
 ## Vault & knowledge graph
 
 - [ ] `[[wikilink]]` autocomplete in the editor
-- [x] Backlinks panel (vault `:backlinks` — "↩ Linked mentions" under the editor)
 - [ ] Tag support (`#tag` / frontmatter tags) + tag browser in the left pane
 - [ ] Link graph view (start with an ASCII/adjacency summary)
 
 ## AI tutor
 
-- [ ] Visual mode AI in the vault mode: "Explain this selection" — explain/expand selected editor text inline
 - [ ] Lesson regeneration — "go deeper" / "simplify" the current lesson note
 - [ ] Citations / source mode — store references in lesson frontmatter
 
@@ -44,6 +40,18 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## Recently done
 
+- [x] AI note editing — `:polish`/`:edit` (whole note or Visual selection) → review in chat
+      → `:apply`/`:discard`; `:ask`/`:discuss` a selection with the tutor (excerpt pinned to
+      every turn so follow-ups stay grounded)
+- [x] Vault sidebar root — a fixed `vault` row anchors the tree (no real path shown);
+      new notes default to it; `r` reloads the tree from disk
+- [x] Chat drag-to-copy — drag the transcript and release to copy (Alt-C too); works on Linux
+- [x] Launch dashboard — one full-screen course list (continue / your courses / topic / vault)
+      replacing the step-by-step wizard
+- [x] Markdown-only courses — the built-in Go track is seeded as ordinary `:course`-format
+      markdown; `:publish` shares a course as a self-contained folder for git
+- [x] CJK-locale layout fix — pin ambiguous-width glyphs to one cell so the TUI doesn't
+      misalign / show `????` under `LANG=*.UTF-8` CJK locales
 - [x] `:vault` / `:tutor` — hop between the coding TUI and the notes vault in one
       process (no relaunch); vault gains an Obsidian-style backlinks panel (`:backlinks`)
 - [x] Go curriculum: added Constants & iota, Recursion, Generics, Sorting, Panic &

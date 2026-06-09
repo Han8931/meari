@@ -5,3 +5,6 @@
 /vault/
 /meari-course/
 /exports/
+
+# Personal config stays local; the repo ships config.example.toml as the template.
+/config.toml

@@ -49,6 +49,10 @@ one shared Go core, working on the same plain-markdown vault.
 - ✍️ **AI lessons become notes, not chat scroll.** Ask to learn a topic and the tutor
   writes a focused lesson *into your vault*, linked to its prerequisites. Knowledge
   accumulates instead of evaporating.
+- 🪄 **Edit notes with AI, on your terms.** `:polish` / `:edit` rewrite the open note —
+  or just a passage you select in Visual mode; the proposal **streams into the chat to
+  review first**, then `:apply` (undoable) or `:discard`. `:ask` talks with the tutor
+  about a selection without leaving the note.
 - 🎓 **Notes become courses.** Open a note, type `:course`, answer two questions — an
   agentic pipeline plans a curriculum *from what you wrote*, writes the missing
   lessons, authors an exercise per topic, and **verifies every coding challenge by
@@ -75,7 +79,13 @@ go build -o meari .
 ./meari               # the tutor (launch dashboard: pick a course)
 ```
 
-Point it at notes you already have, and optionally wire up an AI:
+Point it at notes you already have, and optionally wire up an AI. Copy the
+documented template and edit what you need (everything is optional — Meari runs
+with no config at all):
+
+```bash
+cp config.example.toml config.toml
+```
 
 ```toml
 # config.toml
@@ -92,6 +102,8 @@ model = "llama3.1"
 | You type | Meari echoes back |
 |---|---|
 | `:learn the french revolution` | 📝 a lesson note, written into your vault |
+| `:polish` · `:edit make this tighter` | 🪄 an AI rewrite of the note (or selection), to review then `:apply` |
+| `:ask is this rigorous?` | 💬 a chat about the text you selected, grounded in it |
 | `:essay` → `:grade` | 🧠 an essay prompt on the open note, then a scored critique |
 | `:course` | 🎓 a full course built from the open note (`:tutor` → `:topic` to take it) |
 | `:revise make it harder` | 🔧 the same course, rebuilt around your feedback |
@@ -111,7 +123,12 @@ stays untouched.
   topic note, so it's self-contained) into a publish directory meant to be a git
   repo. Recipients drop the folder into their `meari-course/` and study it like
   their own.
-- 🌲 **A real file tree** in the sidebar — fold/unfold directories, and manage files
+- 🪄 **AI note editing** — `:polish` / `:edit <instruction>` rewrite the open note or a
+  Visual selection; the proposal streams into the chat to read, then `:apply` (one `u`
+  undoes it) or `:discard`. `:ask` / `:discuss` make a selected passage the subject of a
+  tutor conversation that stays grounded on it across follow-ups.
+- 🌲 **A real file tree** in the sidebar — a fixed `vault` root anchors it, new notes
+  default there, `r` reloads from disk; fold/unfold directories and manage files
   NERDTree-style: `Space` to mark, `m` then **a**dd / **m**ove / **d**elete.
 - ⌨️ **A modal Vim editor** with motions, counts, operators, visual mode, undo/redo, a
   jumplist (`Ctrl-O`/`Ctrl-I`), and markdown syntax highlighting — fenced code blocks
