@@ -97,6 +97,7 @@ const (
 	overlayConfirm              // destructive-action confirmation (":clear progress|drafts")
 	overlayHelp                 // command & key reference (":help")
 	overlayComplete             // course-completion celebration (any key dismisses)
+	overlayAchievements         // the completion ledger / trophy room (":achievements")
 )
 
 // completionInfo is the data shown on the course-completion card and recorded
@@ -370,6 +371,13 @@ func (m Model) dashboardEntries() []dashEntry {
 		meta := level
 		if done := m.courseTopicsDone(c.ID); done > 0 {
 			meta = level + " · " + itoa(done) + " done"
+		}
+		// A finished course wears a medal and its completion date.
+		if comp, ok := m.deps.Progress.CompletionOf(c.ID); ok {
+			meta = "🏅 completed " + comp.Date
+			if comp.Flawless {
+				meta += " ⭐"
+			}
 		}
 		out = append(out, dashEntry{
 			kind:    dashCourse,
@@ -876,9 +884,9 @@ func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // tutorExCmds lists every command runEx accepts (aliases included), sorted,
 // for Tab completion in the command prompt.
 var tutorExCmds = []string{
-	"answer", "clear", "compact", "config", "copy", "course", "export", "fold",
-	"help", "notes", "paste", "progress", "q", "quit", "run", "sidebar",
-	"subject", "submit", "topic", "vault", "view", "wide", "yank",
+	"achievements", "answer", "clear", "compact", "config", "copy", "course",
+	"export", "fold", "help", "notes", "paste", "progress", "q", "quit", "run",
+	"sidebar", "subject", "submit", "topic", "trophies", "vault", "view", "wide", "yank",
 }
 
 // exCandidates returns the command line's Tab-completion candidates: command
@@ -961,6 +969,9 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, m.setFocus(paneChat) // land where the pasted text is
 	case "progress":
 		m.overlay = overlayProgress
+		return m, nil
+	case "achievements", "trophies":
+		m.overlay = overlayAchievements
 		return m, nil
 	case "help":
 		m.overlay = overlayHelp
@@ -1203,7 +1214,7 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.overlay = overlayNone
 			return m.switchCourse(ids[m.pickerCursor])
 		}
-	case overlayProgress, overlayHelp:
+	case overlayProgress, overlayHelp, overlayAchievements:
 		switch msg.String() {
 		case "esc", "q", "enter":
 			m.overlay = overlayNone
@@ -1235,8 +1246,61 @@ func (m Model) overlayView() string {
 		return helpView()
 	case overlayComplete:
 		return m.completeView()
+	case overlayAchievements:
+		return m.achievementsView()
 	}
 	return ""
+}
+
+// levelMedal flavors a course's difficulty with a medal.
+func levelMedal(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "advanced":
+		return "🥇"
+	case "intermediate":
+		return "🥈"
+	case "beginner", "":
+		return "🥉"
+	default:
+		return "🎖️"
+	}
+}
+
+// achievementsView renders the completion ledger: every finished course with
+// its date and medal, plus lifetime totals.
+func (m Model) achievementsView() string {
+	comps := m.deps.Progress.CompletedCourses()
+	if len(comps) == 0 {
+		return modalCard("🏆  Achievements",
+			hintStyle.Render("No courses completed yet.\nFinish one to earn your first certificate."),
+			"esc / q to close")
+	}
+	var b strings.Builder
+	topics, flawless := 0, 0
+	for _, c := range comps {
+		topics += c.Topics
+		star := " "
+		if c.Flawless {
+			star = chatOkStyle.Render("⭐")
+			flawless++
+		}
+		title := truncate(c.Title, 22)
+		fmt.Fprintf(&b, "%s %s  %-22s  %d/%d %s\n",
+			levelMedal(c.Level), c.Date, title, c.FirstTry, c.Topics, star)
+	}
+	summary := fmt.Sprintf("%d course%s · %d topics", len(comps), plural(len(comps)), topics)
+	if flawless > 0 {
+		summary += fmt.Sprintf(" · %d flawless", flawless)
+	}
+	b.WriteString("\n" + hintStyle.Render(summary))
+	return modalCard("🏆  Achievements", b.String(), "esc / q to close")
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // completeView renders the course-completion celebration card.
@@ -1332,6 +1396,7 @@ func helpView() string {
 		"  :answer            reveal a model solution for the open challenge",
 		"  :vault             switch to the notes vault (Obsidian-style)",
 		"  :progress          progress summary",
+		"  :achievements      completed courses + lifetime stats",
 		"  :copy [code|all]   copy the tutor's last reply / its code / everything",
 		"  :paste             paste the clipboard into the chat input",
 		"  :clear             clear the chat transcript",
@@ -2019,6 +2084,7 @@ func (m *Model) celebrateCompletion() {
 		attempts: attempts,
 		flawless: topics > 0 && firstTry == topics,
 	}
+	date := time.Now().Format("2006-01-02")
 	if m.deps.Svc != nil {
 		if metas, err := m.deps.Svc.ListCourses(); err == nil {
 			for _, c := range metas {
@@ -2029,16 +2095,24 @@ func (m *Model) celebrateCompletion() {
 			}
 		}
 		cert := core.Certificate{
-			CourseTitle: info.title, Level: info.level, Date: time.Now().Format("2006-01-02"),
+			CourseTitle: info.title, Level: info.level, Date: date,
 			Topics: topics, FirstTry: firstTry, Attempts: attempts, Flawless: info.flawless,
 		}
 		if meta, err := m.deps.Svc.IssueCertificate(m.curr.Lang, cert); err == nil {
 			info.certPath = meta.Path
 		}
 	}
+	// Record the finish in the durable ledger (behind :achievements and the
+	// dashboard medals). The first completion date is preserved by the store.
+	m.deps.Progress.RecordCompletion(progress.Completion{
+		CourseID: m.curr.Lang, Title: info.title, Level: info.level, Date: date,
+		Topics: topics, FirstTry: firstTry, Attempts: attempts, Flawless: info.flawless,
+	})
+	_ = m.deps.Progress.Save()
+
 	m.completion = info
 	m.overlay = overlayComplete
-	m.chat.append(roleOK, "🏆 Course complete — "+info.title+"!")
+	m.chat.append(roleOK, "🏆 Course complete — "+info.title+"!  (see :achievements)")
 }
 
 func failureSummary(res executor.Result) string {
@@ -2119,11 +2193,22 @@ func (m *Model) nextChallenge() tea.Cmd {
 }
 
 func (m *Model) quit() tea.Cmd {
+	m.cancelBackground()
 	if m.current.ID != "" {
 		_ = m.deps.Store.Save(m.current.ID, m.editor.Value())
 	}
 	_ = m.deps.Progress.Save()
 	return tea.Quit
+}
+
+// cancelBackground stops any in-flight worker goroutine (a streaming tutor
+// reply) so it doesn't outlive the TUI — important because the shell loop runs
+// the next mode in the SAME process, so an uncancelled goroutine would leak.
+func (m *Model) cancelBackground() {
+	if m.streamCancel != nil {
+		m.streamCancel()
+		m.streamCancel = nil
+	}
 }
 
 // configReloadMsg is delivered after the external config editor exits.

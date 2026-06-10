@@ -250,7 +250,10 @@ off" work exactly like the built-in curricula.
 **Finishing a course** pops a celebration card with your stats (topics, first-try
 solves, a ⭐ for a flawless run) and writes a **certificate** into the course folder —
 `meari-course/<Course>/certificate.md`, an ordinary note you can keep, commit, or
-`:publish`. The reward is a file you own, not a popup that vanishes.
+`:publish`. The reward is a file you own, not a popup that vanishes. Every finish is
+also logged: **`:achievements`** (alias `:trophies`) opens your trophy room — completed
+courses with dates, medals by level, ⭐ for flawless runs, and lifetime totals — and the
+launch dashboard marks finished courses with a 🏅 and their completion date.
 
 Re-running `:course` on the same note with the **same title** rebuilds the course in
 place (progress kept); a **different title** creates a separate course alongside it.

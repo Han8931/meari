@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"meari/internal/curriculum"
@@ -92,5 +93,26 @@ func TestCourseCompletionWritesCertificate(t *testing.T) {
 	}
 	if m.completion.title != "Go (Beginner)" {
 		t.Fatalf("completion title = %q, want the course title", m.completion.title)
+	}
+
+	// The finish is recorded in the durable ledger…
+	comp, ok := m.deps.Progress.CompletionOf("go-beginner")
+	if !ok || comp.Title != "Go (Beginner)" || comp.Topics != len(topics) {
+		t.Fatalf("completion not recorded: %+v ok=%v", comp, ok)
+	}
+	// …shown on :achievements…
+	tm, _ := m.runEx("achievements")
+	m = tm.(Model)
+	if m.overlay != overlayAchievements {
+		t.Fatal(":achievements should open the trophy room")
+	}
+	if view := m.achievementsView(); !strings.Contains(view, "Go (Beginner)") {
+		t.Fatalf("achievements view missing the completed course:\n%s", view)
+	}
+	// …and as a medal on the launch dashboard.
+	for _, e := range m.dashboardEntries() {
+		if e.id == "go-beginner" && !strings.Contains(e.meta, "🏅") {
+			t.Fatalf("dashboard entry for a completed course should show a medal: %q", e.meta)
+		}
 	}
 }

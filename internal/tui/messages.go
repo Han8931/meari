@@ -98,8 +98,21 @@ type streamChunkMsg struct {
 func startChatStream(ctx context.Context, fn func(context.Context, func(string)) (string, error)) (chan streamChunkMsg, tea.Cmd) {
 	ch := make(chan streamChunkMsg, 64)
 	go func() {
-		full, err := fn(ctx, func(d string) { ch <- streamChunkMsg{delta: d} })
-		ch <- streamChunkMsg{done: true, full: full, err: err}
+		// Every send races ctx.Done so the goroutine can never wedge on a full
+		// channel after the reader (the Update loop) goes away — e.g. when the
+		// learner switches modes (:vault/:tutor) or quits mid-stream. Without
+		// this, a cancelled stream whose buffer filled would leak the goroutine
+		// (and its open HTTP request) for the rest of the process.
+		full, err := fn(ctx, func(d string) {
+			select {
+			case ch <- streamChunkMsg{delta: d}:
+			case <-ctx.Done():
+			}
+		})
+		select {
+		case ch <- streamChunkMsg{done: true, full: full, err: err}:
+		case <-ctx.Done():
+		}
 	}()
 	return ch, listenStream(ch)
 }

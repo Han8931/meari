@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // State is the on-disk record. Challenges is keyed by challenge ID; Topics is
@@ -14,8 +15,23 @@ type State struct {
 	Challenges map[string]*Entry `json:"challenges"`
 	Topics     map[string]string `json:"topics"` // topicID -> "in_progress" | "done"
 	Last       *Session          `json:"last,omitempty"`
+	// Completions is the course-completion ledger, keyed by course id — the
+	// durable record behind the celebration card and the :achievements screen.
+	Completions map[string]Completion `json:"completions,omitempty"`
 
 	path string
+}
+
+// Completion records one finished course (every topic done).
+type Completion struct {
+	CourseID string `json:"course_id"`
+	Title    string `json:"title"`
+	Level    string `json:"level"`
+	Date     string `json:"date"` // ISO date of the FIRST completion
+	Topics   int    `json:"topics"`
+	FirstTry int    `json:"first_try"` // topics solved on the first attempt
+	Attempts int    `json:"attempts"`  // total attempts across the course
+	Flawless bool   `json:"flawless"`  // every topic solved first try
 }
 
 // Session records where the learner last was, so they can resume on relaunch.
@@ -39,7 +55,7 @@ func Load(dataDir string) (*State, error) {
 		return nil, err
 	}
 	p := filepath.Join(dataDir, "progress.json")
-	s := &State{Challenges: map[string]*Entry{}, Topics: map[string]string{}, path: p}
+	s := &State{Challenges: map[string]*Entry{}, Topics: map[string]string{}, Completions: map[string]Completion{}, path: p}
 
 	b, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
@@ -57,8 +73,44 @@ func Load(dataDir string) (*State, error) {
 	if s.Topics == nil {
 		s.Topics = map[string]string{}
 	}
+	if s.Completions == nil {
+		s.Completions = map[string]Completion{}
+	}
 	s.path = p
 	return s, nil
+}
+
+// RecordCompletion logs (or refreshes) a finished course. The FIRST completion
+// date is preserved across re-completions, but the stats are updated.
+func (s *State) RecordCompletion(c Completion) {
+	if s.Completions == nil {
+		s.Completions = map[string]Completion{}
+	}
+	if prev, ok := s.Completions[c.CourseID]; ok && prev.Date != "" {
+		c.Date = prev.Date
+	}
+	s.Completions[c.CourseID] = c
+}
+
+// CompletionOf returns the recorded completion for a course, if any.
+func (s *State) CompletionOf(courseID string) (Completion, bool) {
+	c, ok := s.Completions[courseID]
+	return c, ok
+}
+
+// CompletedCourses returns the completion ledger, newest first (then by title).
+func (s *State) CompletedCourses() []Completion {
+	out := make([]Completion, 0, len(s.Completions))
+	for _, c := range s.Completions {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Date != out[j].Date {
+			return out[i].Date > out[j].Date
+		}
+		return out[i].Title < out[j].Title
+	})
+	return out
 }
 
 // TopicStatus returns "done", "in_progress", or "" for a curriculum topic.

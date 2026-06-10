@@ -76,11 +76,14 @@ type VaultModel struct {
 
 	// :course state. courseIntake routes chat input through the requirements
 	// interview (its own conversation in courseHist, seeded from courseSeed);
-	// courseCh streams generation progress lines while a course is built.
+	// courseCh streams generation progress lines while a course is built;
+	// courseCancel stops the (possibly long, LLM-heavy) build if the learner
+	// leaves before it finishes.
 	courseIntake bool
 	courseSeed   string
 	courseHist   []tutor.ChatTurn
 	courseCh     chan tea.Msg
+	courseCancel context.CancelFunc
 
 	// Essay study state. While studying, the editor holds the learner's answer
 	// (not the note), and autosave to the note is suspended.
@@ -350,6 +353,7 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case vCourseDoneMsg:
 		m.pending--
 		m.courseCh = nil
+		m.courseCancel = nil
 		if msg.err != nil {
 			m.chat.append(roleSystem, "⚠ course build failed: "+msg.err.Error())
 			return m, nil
@@ -391,7 +395,7 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case editor.ActionSubmit:
 			return m.submitEditor()
 		case editor.ActionQuit:
-			return m, tea.Quit
+			return m, m.quit()
 		}
 		return m, nil
 
@@ -439,7 +443,7 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		return m, m.quit()
 	case "ctrl+w":
 		// Focus moves via the Vim window chord (Ctrl-W then h/l); bare Tab is left
 		// for the panes (e.g. indenting in the editor).
@@ -806,7 +810,7 @@ func (m VaultModel) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyCtrlC:
-		return m, tea.Quit
+		return m, m.quit()
 	case tea.KeyEnter:
 		raw := strings.TrimSpace(m.cmdLine.Value())
 		mode, old := m.promptMode, m.promptOld
@@ -1167,9 +1171,9 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "tutor", "code":
 		m.exit = SwitchToTutor
-		return m, tea.Quit // the shell loop opens the coding TUI
+		return m, m.quit() // the shell loop opens the coding TUI
 	case "q", "quit":
-		return m, tea.Quit
+		return m, m.quit()
 	default:
 		m.flash("unknown command: :" + raw +
 			"  (try :learn · :new · :essay · :grade · :answer · :done · :backlinks · :tutor · :fold · :compact · :wide · :q)")
@@ -1461,6 +1465,26 @@ func (m VaultModel) stopStream() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// quit cancels any in-flight worker (a streaming reply or a course build) so it
+// can't outlive this TUI — the shell loop runs the next mode in the SAME
+// process, so an uncancelled goroutine would leak — then ends the program.
+func (m *VaultModel) quit() tea.Cmd {
+	m.cancelBackground()
+	return tea.Quit
+}
+
+// cancelBackground stops the chat/polish stream and any course build in flight.
+func (m *VaultModel) cancelBackground() {
+	if m.streamCancel != nil {
+		m.streamCancel()
+		m.streamCancel = nil
+	}
+	if m.courseCancel != nil {
+		m.courseCancel()
+		m.courseCancel = nil
+	}
+}
+
 // handleStreamChunk advances a streaming tutor reply. The end of an intake
 // reply is checked for the course_request JSON that starts the build.
 func (m VaultModel) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
@@ -1554,12 +1578,20 @@ func (m VaultModel) startCourseGen(req core.CourseRequest) (tea.Model, tea.Cmd) 
 	m.chat.append(roleSystem, "▶ building the course…")
 	ch := make(chan tea.Msg, 16)
 	m.courseCh = ch
+	ctx, cancel := context.WithCancel(context.Background())
+	m.courseCancel = cancel
 	svc := m.svc
 	go func() {
-		meta, err := svc.GenerateCourse(context.Background(), req, func(line string) {
-			ch <- vCourseProgressMsg{line: line}
+		meta, err := svc.GenerateCourse(ctx, req, func(line string) {
+			select {
+			case ch <- vCourseProgressMsg{line: line}:
+			case <-ctx.Done():
+			}
 		})
-		ch <- vCourseDoneMsg{meta: meta, err: err}
+		select {
+		case ch <- vCourseDoneMsg{meta: meta, err: err}:
+		case <-ctx.Done():
+		}
 	}()
 	return m, listenCourse(ch)
 }
@@ -1582,11 +1614,21 @@ func (m VaultModel) cmdRevise(feedback string) (tea.Model, tea.Cmd) {
 	m.chat.append(roleSystem, "▶ revising the course…")
 	ch := make(chan tea.Msg, 16)
 	m.courseCh = ch
+	ctx, cancel := context.WithCancel(context.Background())
+	m.courseCancel = cancel
 	svc := m.svc
 	go func() {
-		meta, err := svc.ReviseCourse(context.Background(), key, strings.TrimSpace(feedback),
-			func(line string) { ch <- vCourseProgressMsg{line: line} })
-		ch <- vCourseDoneMsg{meta: meta, err: err}
+		meta, err := svc.ReviseCourse(ctx, key, strings.TrimSpace(feedback),
+			func(line string) {
+				select {
+				case ch <- vCourseProgressMsg{line: line}:
+				case <-ctx.Done():
+				}
+			})
+		select {
+		case ch <- vCourseDoneMsg{meta: meta, err: err}:
+		case <-ctx.Done():
+		}
 	}()
 	return m, listenCourse(ch)
 }
