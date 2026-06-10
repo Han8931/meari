@@ -10,8 +10,9 @@ this file tracks concrete, actionable items. Check things off as they land.
 - [ ] `meari check` — suggest the exact fix when key/model/base-url is wrong
 - [ ] URL go
 - [ ] Mouse visual block
-- [ ] Global install: root `workspace`/`data`/`exports` at a fixed app-home (e.g. `~/.meari`)
-      instead of the cwd, so `meari` behaves the same from any directory
+- [x] Global install — config + progress + drafts live in `~/.config/meari` (honors
+      `$XDG_CONFIG_HOME`; a checkout with a `config.toml`/`vault/` stays local; `MEARI_HOME`
+      overrides), so `meari` behaves the same from any directory
 
 
 ## Study & learning

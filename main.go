@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -52,19 +53,75 @@ func run() error {
 	return runTUI()
 }
 
-// loadConfig loads config rooted at the working directory.
-func loadConfig(cfgPath string) (config.Config, string, error) {
-	wd, err := os.Getwd()
+// loadConfig loads config rooted at the app home (see appBaseDir), so an
+// installed `meari` keeps one config, progress, and drafts no matter where it
+// is launched from. An empty cfgPath defaults to <home>/config.toml; an
+// explicit -config path is honored as given.
+func loadConfig(cfgPath string) (cfg config.Config, base, resolvedCfg string, err error) {
+	base, err = appBaseDir()
 	if err != nil {
-		return config.Config{}, "", err
+		return config.Config{}, "", "", err
 	}
-	cfg, err := config.Load(cfgPath, wd)
-	return cfg, wd, err
+	if strings.TrimSpace(cfgPath) == "" {
+		cfgPath = filepath.Join(base, "config.toml")
+	}
+	cfg, err = config.Load(cfgPath, base)
+	return cfg, base, cfgPath, err
 }
+
+// appBaseDir picks the directory that roots all per-user state — config.toml,
+// data/ (progress), workspace/ (drafts), exports/, and generated courses — so
+// it never depends on the current working directory. Order:
+//
+//  1. $MEARI_HOME, if set (an explicit override; "~/" expands).
+//  2. The current directory IF it already looks like a meari home/checkout —
+//     a config.toml or a vault/ is present — so running from the repo or a
+//     portable folder keeps everything local (the historical behavior).
+//  3. $XDG_CONFIG_HOME/meari (default ~/.config/meari) — the global default,
+//     created on first run, where most apps keep their config.
+func appBaseDir() (string, error) {
+	if h := strings.TrimSpace(os.Getenv("MEARI_HOME")); h != "" {
+		return expandTilde(h)
+	}
+	if wd, err := os.Getwd(); err == nil {
+		if isFile(filepath.Join(wd, "config.toml")) || isDir(filepath.Join(wd, "vault")) {
+			return wd, nil
+		}
+	}
+	cfgRoot := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
+	if !filepath.IsAbs(cfgRoot) { // unset, or a relative value the XDG spec says to ignore
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		cfgRoot = filepath.Join(home, ".config")
+	}
+	base := filepath.Join(cfgRoot, "meari")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", err
+	}
+	return base, nil
+}
+
+// expandTilde resolves a leading "~/" to the home directory and makes the path
+// absolute.
+func expandTilde(p string) (string, error) {
+	if strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		p = filepath.Join(home, p[2:])
+	}
+	return filepath.Abs(p)
+}
+
+func isFile(p string) bool { fi, err := os.Stat(p); return err == nil && !fi.IsDir() }
+func isDir(p string) bool  { fi, err := os.Stat(p); return err == nil && fi.IsDir() }
 
 func runTUI() error {
 	var (
-		cfgPath   = flag.String("config", "config.toml", "path to config file")
+		cfgPath   = flag.String("config", "", "config file path (default: <app home>/config.toml)")
 		topicFlag = flag.String("topic", "", "topic to learn (skips the startup prompt)")
 		vimFlag   = flag.Bool("vim", false, "force Vim keybindings in the editor")
 		defFlag   = flag.Bool("default", false, "force default (non-Vim) keybindings")
@@ -81,7 +138,7 @@ func runTUI() error {
 		return fmt.Errorf("unknown argument %q (subcommands: serve, check; -vault/-tutor pick the TUI mode)", flag.Arg(0))
 	}
 
-	cfg, wd, err := loadConfig(*cfgPath)
+	cfg, base, resolvedCfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}
@@ -93,7 +150,7 @@ func runTUI() error {
 		cfg.Editor.Keybindings = "default"
 	}
 
-	deps, svc, err := buildDeps(cfg, wd, *cfgPath)
+	deps, svc, err := buildDeps(cfg, base, resolvedCfg)
 	if err != nil {
 		return err
 	}
@@ -181,11 +238,11 @@ func runShell(start tui.SwitchTarget, deps tui.Deps, svc *core.Service, cfg conf
 // runServe starts the local web UI over the same vault and tutor as the TUI.
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	cfgPath := fs.String("config", "config.toml", "path to config file")
+	cfgPath := fs.String("config", "", "config file path (default: <app home>/config.toml)")
 	addr := fs.String("addr", ":8765", "address to listen on")
 	_ = fs.Parse(args)
 
-	cfg, _, err := loadConfig(*cfgPath)
+	cfg, _, _, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}
@@ -211,10 +268,10 @@ func runServe(args []string) error {
 // configured model exists upstream, and a real round-trip request.
 func runCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
-	cfgPath := fs.String("config", "config.toml", "path to config file")
+	cfgPath := fs.String("config", "", "config file path (default: <app home>/config.toml)")
 	_ = fs.Parse(args)
 
-	cfg, _, err := loadConfig(*cfgPath)
+	cfg, _, _, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}

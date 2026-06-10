@@ -45,9 +45,20 @@ All configuration lives in `config.toml` next to meari (or `-config <path>`). Th
 `:config` command opens it in your `$EDITOR` from inside the app; on save, the layout
 re-applies live.
 
+### Where Meari keeps things (the app home)
+
+Config, progress, drafts, exports, and generated courses live under one **app home**,
+so a globally installed `meari` behaves the same from any directory. The home is, in
+order: `$MEARI_HOME` if set; else the current directory when it already looks like a
+Meari home/checkout (a `config.toml` or `vault/` is present — keeps a repo/portable
+setup local); else **`~/.config/meari`** (honoring `$XDG_CONFIG_HOME`, created on first
+run). The config file defaults to `<home>/config.toml`; `meari -config <path>` overrides
+just the file. This is why a `git pull` never disturbs your progress — it lives outside
+the repo.
+
 ### Vault location
 
-By default the vault lives in `./vault` next to meari. Point it anywhere — e.g. an
+By default the vault lives in `vault/` under the app home. Point it anywhere — e.g. an
 existing Obsidian vault (notes with hand-written or unparseable frontmatter still
 load; the header just stays in the body):
 
@@ -235,6 +246,11 @@ under the built-ins, and `:topic <name>` accepts the id, the title, any unique
 substring (`:topic nosql`), with Tab completing the argument. Code topics run the
 executor; essay topics are graded as prose; progress and "continue where you left
 off" work exactly like the built-in curricula.
+
+**Finishing a course** pops a celebration card with your stats (topics, first-try
+solves, a ⭐ for a flawless run) and writes a **certificate** into the course folder —
+`meari-course/<Course>/certificate.md`, an ordinary note you can keep, commit, or
+`:publish`. The reward is a file you own, not a popup that vanishes.
 
 Re-running `:course` on the same note with the **same title** rebuilds the course in
 place (progress kept); a **different title** creates a separate course alongside it.

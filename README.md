@@ -79,12 +79,15 @@ go build -o meari .
 ./meari               # the tutor (launch dashboard: pick a course)
 ```
 
-Point it at notes you already have, and optionally wire up an AI. Copy the
-documented template and edit what you need (everything is optional — Meari runs
-with no config at all):
+Install it globally with `go install .` (then `meari` runs from anywhere; it
+keeps config + progress under `~/.config/meari`, so your data is the same in
+every directory). Point it at notes you already have, and optionally wire up an
+AI by copying the documented template — everything is optional, Meari runs with
+no config at all:
 
 ```bash
-cp config.example.toml config.toml
+mkdir -p ~/.config/meari && cp config.example.toml ~/.config/meari/config.toml
+# …or, from a checkout, keep it local:  cp config.example.toml config.toml
 ```
 
 ```toml

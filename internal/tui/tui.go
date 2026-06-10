@@ -96,7 +96,20 @@ const (
 	overlayProgress             // progress summary (":progress")
 	overlayConfirm              // destructive-action confirmation (":clear progress|drafts")
 	overlayHelp                 // command & key reference (":help")
+	overlayComplete             // course-completion celebration (any key dismisses)
 )
+
+// completionInfo is the data shown on the course-completion card and recorded
+// in the certificate note.
+type completionInfo struct {
+	title    string
+	level    string
+	topics   int
+	firstTry int
+	attempts int
+	flawless bool
+	certPath string // "" when no certificate was written (e.g. no vault service)
+}
 
 // confirmKind is the action a confirmation modal will run if accepted.
 type confirmKind int
@@ -157,6 +170,10 @@ type Model struct {
 	topicByID        map[string]curriculum.Topic
 	currentTopicID   string
 	currentTopicView string // "lesson" or "quiz"; mirrors the selected course tree row
+
+	// completion holds the stats shown on the course-completion card (set when
+	// the last topic of the running course is finished).
+	completion completionInfo
 
 	// horizontal selects the stacked layout (content on top, input on the
 	// bottom) instead of the side-by-side columns. Toggled live via :config.
@@ -1191,6 +1208,8 @@ func (m Model) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc", "q", "enter":
 			m.overlay = overlayNone
 		}
+	case overlayComplete:
+		m.overlay = overlayNone // any key dismisses the celebration
 	case overlayConfirm:
 		switch msg.String() {
 		case "y", "Y":
@@ -1214,8 +1233,38 @@ func (m Model) overlayView() string {
 		return modalCard("Are you sure?", errStyle.Render("This cannot be undone.")+"\n\n"+m.confirmPrompt, "y to confirm · n / esc to cancel")
 	case overlayHelp:
 		return helpView()
+	case overlayComplete:
+		return m.completeView()
 	}
 	return ""
+}
+
+// completeView renders the course-completion celebration card.
+func (m Model) completeView() string {
+	c := m.completion
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("222")).Render(c.title))
+	if c.level != "" {
+		b.WriteString("  " + hintStyle.Render("("+c.level+")"))
+	}
+	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "Topics finished    %d\n", c.topics)
+	if c.topics > 0 {
+		fmt.Fprintf(&b, "First-try solves   %d / %d\n", c.firstTry, c.topics)
+	}
+	if c.attempts > 0 {
+		fmt.Fprintf(&b, "Total attempts     %d\n", c.attempts)
+	}
+	if c.flawless {
+		b.WriteString("\n" + chatOkStyle.Render("⭐ Flawless — every topic on the first try!") + "\n")
+	}
+	b.WriteString("\n" + hintStyle.Italic(true).Render("메아리 — the echo returns."))
+
+	hint := "any key to continue"
+	if c.certPath != "" {
+		hint = "🎓 certificate saved → " + c.certPath + "   ·   any key to continue"
+	}
+	return modalCard("🏆  Course complete!", b.String(), hint)
 }
 
 // pickerEntries returns everything the course picker offers — the vault's
@@ -1892,12 +1941,17 @@ func isReflectionLang(lang string) bool {
 
 // handleRunResult records progress, reports pass/fail, and chains tutor feedback.
 func (m *Model) handleRunResult(msg runResultMsg) tea.Cmd {
+	justCompleted := false
 	if msg.res.Passed {
 		m.chat.append(roleOK, "✓ All tests passed!")
 		_ = m.deps.Store.Clear(msg.ch.ID)
 		if m.curriculum && m.currentTopicID != "" {
+			wasComplete := m.courseComplete()
 			m.deps.Progress.MarkTopicDone(m.currentTopicID)
-			m.chat.append(roleSystem, "🎓 Topic complete! Press Ctrl-N for the next topic, or pick any topic on the left.")
+			justCompleted = !wasComplete && m.courseComplete()
+			if !justCompleted {
+				m.chat.append(roleSystem, "🎓 Topic complete! Press Ctrl-N for the next topic, or pick any topic on the left.")
+			}
 		}
 	} else {
 		m.chat.append(roleFail, "✗ Tests failed")
@@ -1908,9 +1962,83 @@ func (m *Model) handleRunResult(msg runResultMsg) tea.Cmd {
 	_ = m.deps.Progress.Save()
 	m.rebuildSidebar()
 
+	// Finishing the LAST topic earns the course-completion card + certificate.
+	// Run it after RecordAttempt so the stats include this final attempt.
+	if justCompleted {
+		m.celebrateCompletion()
+	}
+
 	m.pending++
 	m.loadKind = "tutor feedback"
 	return feedbackCmd(m.deps.Tutor, msg.ch, msg.code, msg.res.Output, msg.res.Passed)
+}
+
+// courseComplete reports whether every topic of the running course is done.
+func (m Model) courseComplete() bool {
+	if !m.curriculum {
+		return false
+	}
+	topics := m.curr.Topics()
+	if len(topics) == 0 {
+		return false
+	}
+	for _, t := range topics {
+		if m.deps.Progress.TopicStatus(t.ID) != "done" {
+			return false
+		}
+	}
+	return true
+}
+
+// courseStats tallies the running course's topic count, first-try solves, and
+// total attempts from saved progress (challenge ids equal topic ids).
+func (m Model) courseStats() (topics, firstTry, attempts int) {
+	for _, t := range m.curr.Topics() {
+		topics++
+		// Challenges is keyed by topic id and holds *Entry — nil until the topic
+		// has been attempted (e.g. a topic marked done without a code run).
+		if e := m.deps.Progress.Challenges[t.ID]; e != nil {
+			attempts += e.Attempts
+			if e.Attempts == 1 && e.Passes >= 1 {
+				firstTry++
+			}
+		}
+	}
+	return topics, firstTry, attempts
+}
+
+// celebrateCompletion records the completion stats, writes a certificate note
+// into the course folder, and raises the celebration overlay.
+func (m *Model) celebrateCompletion() {
+	topics, firstTry, attempts := m.courseStats()
+	info := completionInfo{
+		title:    titleCase(m.curr.Lang),
+		level:    m.curr.Level,
+		topics:   topics,
+		firstTry: firstTry,
+		attempts: attempts,
+		flawless: topics > 0 && firstTry == topics,
+	}
+	if m.deps.Svc != nil {
+		if metas, err := m.deps.Svc.ListCourses(); err == nil {
+			for _, c := range metas {
+				if strings.EqualFold(c.ID, m.curr.Lang) {
+					info.title = c.Title
+					break
+				}
+			}
+		}
+		cert := core.Certificate{
+			CourseTitle: info.title, Level: info.level, Date: time.Now().Format("2006-01-02"),
+			Topics: topics, FirstTry: firstTry, Attempts: attempts, Flawless: info.flawless,
+		}
+		if meta, err := m.deps.Svc.IssueCertificate(m.curr.Lang, cert); err == nil {
+			info.certPath = meta.Path
+		}
+	}
+	m.completion = info
+	m.overlay = overlayComplete
+	m.chat.append(roleOK, "🏆 Course complete — "+info.title+"!")
 }
 
 func failureSummary(res executor.Result) string {

@@ -1,13 +1,18 @@
 # Meari — example configuration.
 #
-# Copy this to "config.toml" and edit what you need:
-#
-#     cp config.example.toml config.toml
+# Where this lives:
+#   - Globally installed (`go install .`): Meari keeps config + progress under
+#     ~/.config/meari (honoring $XDG_CONFIG_HOME), so copy this there:
+#         mkdir -p ~/.config/meari && cp config.example.toml ~/.config/meari/config.toml
+#   - From a checkout / portable folder (a config.toml or vault/ is present):
+#     everything stays local — copy it here:   cp config.example.toml config.toml
+#   - Override the home anytime with the MEARI_HOME environment variable, or the
+#     config file alone with `meari -config /path/to/config.toml`.
 #
 # Every field is OPTIONAL — Meari runs with sensible defaults and no config
 # file at all. The values shown here ARE the defaults unless noted; uncomment
 # and change only what you want to override. Relative paths are rooted at the
-# Meari directory; "~/" expands to your home directory.
+# app home; "~/" expands to your home directory.
 
 [ai]
 # provider: "openai" | "ollama" | "compatible"
