@@ -103,15 +103,12 @@ func appBaseDir() (string, error) {
 	return base, nil
 }
 
-// expandTilde resolves a leading "~/" to the home directory and makes the path
-// absolute.
+// expandTilde resolves a leading "~"/"~/" (via config.ExpandHome, so "~" means
+// the same here as in vault paths) and makes the result absolute.
 func expandTilde(p string) (string, error) {
-	if strings.HasPrefix(p, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		p = filepath.Join(home, p[2:])
+	p, err := config.ExpandHome(p)
+	if err != nil {
+		return "", err
 	}
 	return filepath.Abs(p)
 }

@@ -78,11 +78,16 @@ func TestAppBaseDirXDGConfigHome(t *testing.T) {
 
 func TestExpandTilde(t *testing.T) {
 	home, _ := os.UserHomeDir()
-	got, err := expandTilde("~/notes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(home, "notes"); got != want {
-		t.Fatalf("expandTilde(~/notes) = %q, want %q", got, want)
+	for in, want := range map[string]string{
+		"~/notes": filepath.Join(home, "notes"),
+		"~":       home, // bare "~" now expands too (shared with config.ExpandHome)
+	} {
+		got, err := expandTilde(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("expandTilde(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

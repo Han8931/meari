@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"meari/internal/fsutil"
 )
 
 // Note is a single markdown note: its frontmatter metadata plus the markdown
@@ -188,7 +190,7 @@ func (v *Vault) Write(n Note) (Note, error) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return Note{}, err
 	}
-	if err := os.WriteFile(abs, n.Marshal(), 0o644); err != nil {
+	if err := fsutil.WriteFile(abs, n.Marshal(), 0o644); err != nil {
 		return Note{}, err
 	}
 	n.Path = abs

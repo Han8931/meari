@@ -10,6 +10,7 @@ func TestResetClearsHistoryAndPersists(t *testing.T) {
 	}
 	s.RecordAttempt("py-b-vars", true)
 	s.MarkTopicDone("phys-b-motion")
+	s.RecordCompletion(Completion{CourseID: "go-beginner", Title: "Go (Beginner)", Date: "2026-06-01", Topics: 9})
 	s.SetLast("python", "beginner", "py-b-vars", "Variables")
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -18,7 +19,7 @@ func TestResetClearsHistoryAndPersists(t *testing.T) {
 	if err := s.Reset(); err != nil {
 		t.Fatalf("Reset: %v", err)
 	}
-	if len(s.Challenges) != 0 || len(s.Topics) != 0 || s.Last != nil {
+	if len(s.Challenges) != 0 || len(s.Topics) != 0 || len(s.Completions) != 0 || s.Last != nil {
 		t.Fatalf("Reset left state behind: %+v", s)
 	}
 
@@ -27,7 +28,7 @@ func TestResetClearsHistoryAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if len(reloaded.Challenges) != 0 || len(reloaded.Topics) != 0 || reloaded.Last != nil {
+	if len(reloaded.Challenges) != 0 || len(reloaded.Topics) != 0 || len(reloaded.Completions) != 0 || reloaded.Last != nil {
 		t.Fatalf("Reset did not persist: %+v", reloaded)
 	}
 }

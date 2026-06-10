@@ -141,7 +141,8 @@ func parseEssayGrade(raw string) (EssayGrade, error) {
 }
 
 // extractJSONObject pulls the first {...} JSON object out of a model reply,
-// tolerating markdown fences around it (shared shape with parseChallenge).
+// tolerating markdown fences around it. The single fence/brace extractor for
+// parseChallenge and the course parsers.
 func extractJSONObject(raw string) (string, bool) {
 	s := strings.TrimSpace(raw)
 	if i := strings.Index(s, "```"); i >= 0 {

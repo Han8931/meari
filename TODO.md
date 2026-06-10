@@ -41,6 +41,12 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## Recently done
 
+- [x] Durability + AI-client robustness — atomic writes (write-temp+rename) for
+      progress/drafts/notes, surfaced save errors; per-chunk stream idle-timeout, empty-reply
+      validation, and bounded retry on transient (network/429/5xx) AI failures
+- [x] Course-completion rewards — celebration card + markdown certificate; `:achievements`
+      ledger + 🏅 dashboard medals; fixed `:clear progress` not clearing the ledger
+- [x] Fixed goroutine leaks — cancel chat-stream and course-build workers on quit/mode-switch
 - [x] AI note editing — `:polish`/`:edit` (whole note or Visual selection) → review in chat
       → `:apply`/`:discard`; `:ask`/`:discuss` a selection with the tutor (excerpt pinned to
       every turn so follow-ups stay grounded)

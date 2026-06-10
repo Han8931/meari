@@ -8,3 +8,6 @@
 
 # Personal config stays local; the repo ships config.example.toml as the template.
 /config.toml
+
+# Stray Claude Code transcripts / exports dropped in the repo root
+/*.txt

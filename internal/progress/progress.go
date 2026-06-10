@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"meari/internal/fsutil"
 )
 
 // State is the on-disk record. Challenges is keyed by challenge ID; Topics is
@@ -138,6 +140,7 @@ func (s *State) SetLast(lang, level, topicID, title string) {
 func (s *State) Reset() error {
 	s.Challenges = map[string]*Entry{}
 	s.Topics = map[string]string{}
+	s.Completions = map[string]Completion{}
 	s.Last = nil
 	return s.Save()
 }
@@ -184,5 +187,5 @@ func (s *State) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, b, 0o644)
+	return fsutil.WriteFile(s.path, b, 0o644)
 }

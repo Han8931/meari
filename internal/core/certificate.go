@@ -7,6 +7,7 @@ package core
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"meari/internal/vault"
@@ -25,18 +26,20 @@ type Certificate struct {
 }
 
 // IssueCertificate writes (or refreshes) certificate.md in the finished
-// course's folder and returns its metadata. courseKey is an id, title, or
-// manifest path — the same keys LoadCourse accepts.
-func (s *Service) IssueCertificate(courseKey string, c Certificate) (NoteMeta, error) {
+// course's folder. courseKey is an id, title, or manifest path — the same keys
+// LoadCourse accepts. It returns the certificate note's metadata and the
+// course's resolved title (authoritative, from the manifest), so the caller
+// doesn't need a second vault scan to look the title up.
+func (s *Service) IssueCertificate(courseKey string, c Certificate) (NoteMeta, string, error) {
 	course, err := s.LoadCourse(courseKey)
 	if err != nil {
-		return NoteMeta{}, err
+		return NoteMeta{}, "", err
 	}
-	parts := strings.Split(course.Path, "/")
-	if len(parts) < 2 {
-		return NoteMeta{}, fmt.Errorf("unexpected course path %q", course.Path)
+	c.CourseTitle = course.Title // the manifest title wins over any caller hint
+	folder := path.Dir(course.Path)
+	if folder == "." || folder == "/" {
+		return NoteMeta{}, "", fmt.Errorf("unexpected course path %q", course.Path)
 	}
-	folder := strings.Join(parts[:len(parts)-1], "/") // drop the trailing "/course.md"
 	note := vault.Note{
 		RelPath: folder + "/certificate.md",
 		Title:   c.CourseTitle + " — Certificate",
@@ -45,9 +48,9 @@ func (s *Service) IssueCertificate(courseKey string, c Certificate) (NoteMeta, e
 	}
 	saved, err := s.writeNote(note)
 	if err != nil {
-		return NoteMeta{}, err
+		return NoteMeta{}, "", err
 	}
-	return metaOf(saved), nil
+	return metaOf(saved), course.Title, nil
 }
 
 // renderCertificate builds the certificate's markdown body.

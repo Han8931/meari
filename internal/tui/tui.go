@@ -683,6 +683,23 @@ func (m *Model) flash(s string) {
 	m.noticeAt = time.Now()
 }
 
+// saveProgress persists progress and surfaces a failure (e.g. a full disk)
+// instead of silently dropping it. Writes are atomic (fsutil.WriteFile), so a
+// failure leaves the previous file intact — the learner just keeps the older
+// state and is told.
+func (m *Model) saveProgress() {
+	if err := m.deps.Progress.Save(); err != nil {
+		m.flash("⚠ couldn't save progress: " + err.Error())
+	}
+}
+
+// saveDraft persists the open challenge's in-progress code, surfacing a failure.
+func (m *Model) saveDraft(id, code string) {
+	if err := m.deps.Store.Save(id, code); err != nil {
+		m.flash("⚠ couldn't save your draft: " + err.Error())
+	}
+}
+
 // handleMouse routes wheel events to the pane under the cursor, like ranger/lf:
 // scrolling never changes focus, it just moves the hovered pane. A left click
 // focuses the pane under the cursor. Other mouse events (motion, other buttons)
@@ -1857,7 +1874,7 @@ func (m *Model) startTopic(t curriculum.Topic) tea.Cmd {
 
 func (m *Model) startTopicView(t curriculum.Topic, view string) tea.Cmd {
 	if m.current.ID != "" {
-		_ = m.deps.Store.Save(m.current.ID, m.editor.Value())
+		m.saveDraft(m.current.ID, m.editor.Value())
 	}
 	if view != "quiz" {
 		view = "lesson"
@@ -1867,7 +1884,7 @@ func (m *Model) startTopicView(t curriculum.Topic, view string) tea.Cmd {
 	m.topic = t.Title
 	m.deps.Progress.MarkTopicInProgress(t.ID)
 	m.deps.Progress.SetLast(m.curr.Lang, m.curr.Level, t.ID, t.Title)
-	_ = m.deps.Progress.Save()
+	m.saveProgress()
 
 	lang := m.curr.Lang
 	if t.Lang != "" {
@@ -1942,7 +1959,7 @@ func quizChoiceLabel(i int) string {
 // starter code) into the editor and focuses it.
 func (m *Model) loadChallenge(ch tutor.Challenge) tea.Cmd {
 	if m.current.ID != "" {
-		_ = m.deps.Store.Save(m.current.ID, m.editor.Value())
+		m.saveDraft(m.current.ID, m.editor.Value())
 	}
 	m.challenges[ch.ID] = ch
 	m.addOrder(ch.ID)
@@ -1988,7 +2005,7 @@ func (m *Model) startRun() tea.Cmd {
 		m.flash("write your answer in the editor, then :submit")
 		return nil
 	}
-	_ = m.deps.Store.Save(m.current.ID, code)
+	m.saveDraft(m.current.ID, code)
 	m.chat.append(roleSystem, "▶ checking your answer…")
 	m.pending++
 	m.loadKind = "checking"
@@ -2024,7 +2041,7 @@ func (m *Model) handleRunResult(msg runResultMsg) tea.Cmd {
 		m.deps.Progress.MarkInProgress(msg.ch.ID)
 	}
 	m.deps.Progress.RecordAttempt(msg.ch.ID, msg.res.Passed)
-	_ = m.deps.Progress.Save()
+	m.saveProgress()
 	m.rebuildSidebar()
 
 	// Finishing the LAST topic earns the course-completion card + certificate.
@@ -2086,20 +2103,17 @@ func (m *Model) celebrateCompletion() {
 	}
 	date := time.Now().Format("2006-01-02")
 	if m.deps.Svc != nil {
-		if metas, err := m.deps.Svc.ListCourses(); err == nil {
-			for _, c := range metas {
-				if strings.EqualFold(c.ID, m.curr.Lang) {
-					info.title = c.Title
-					break
-				}
-			}
-		}
 		cert := core.Certificate{
-			CourseTitle: info.title, Level: info.level, Date: date,
+			Level: info.level, Date: date,
 			Topics: topics, FirstTry: firstTry, Attempts: attempts, Flawless: info.flawless,
 		}
-		if meta, err := m.deps.Svc.IssueCertificate(m.curr.Lang, cert); err == nil {
+		// One vault read: IssueCertificate loads the course (for its folder) and
+		// hands back the authoritative title, so we needn't list courses too.
+		if meta, title, err := m.deps.Svc.IssueCertificate(m.curr.Lang, cert); err == nil {
 			info.certPath = meta.Path
+			if title != "" {
+				info.title = title
+			}
 		}
 	}
 	// Record the finish in the durable ledger (behind :achievements and the
@@ -2108,7 +2122,7 @@ func (m *Model) celebrateCompletion() {
 		CourseID: m.curr.Lang, Title: info.title, Level: info.level, Date: date,
 		Topics: topics, FirstTry: firstTry, Attempts: attempts, Flawless: info.flawless,
 	})
-	_ = m.deps.Progress.Save()
+	m.saveProgress()
 
 	m.completion = info
 	m.overlay = overlayComplete
@@ -2194,10 +2208,16 @@ func (m *Model) nextChallenge() tea.Cmd {
 
 func (m *Model) quit() tea.Cmd {
 	m.cancelBackground()
+	// On the way out a flash can't render, so surface a failed final save on
+	// stderr (visible once the TUI closes) rather than dropping it silently.
 	if m.current.ID != "" {
-		_ = m.deps.Store.Save(m.current.ID, m.editor.Value())
+		if err := m.deps.Store.Save(m.current.ID, m.editor.Value()); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: could not save your draft:", err)
+		}
 	}
-	_ = m.deps.Progress.Save()
+	if err := m.deps.Progress.Save(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: could not save progress:", err)
+	}
 	return tea.Quit
 }
 

@@ -39,12 +39,16 @@ type Challenge struct {
 
 // Tutor issues model requests for one configured provider.
 type Tutor struct {
-	client  *http.Client
-	baseURL string
-	model   string
-	apiKey  string
-	offline bool
-	level   string // "beginner" | "intermediate" | "advanced" | "" (unset)
+	client *http.Client
+	// streamClient has NO whole-request timeout: a healthy long generation
+	// streams for a while, so streaming is bounded by a per-chunk idle
+	// watchdog (streamIdleTimeout) instead of cutting a working stream short.
+	streamClient *http.Client
+	baseURL      string
+	model        string
+	apiKey       string
+	offline      bool
+	level        string // "beginner" | "intermediate" | "advanced" | "" (unset)
 }
 
 // SetLevel sets the learner's experience level, which is woven into the lesson,
@@ -69,9 +73,21 @@ func (t *Tutor) levelClause() string {
 // requests, so a missing key must not force them offline.
 const openAIBaseURL = "https://api.openai.com/v1"
 
-// defaultTimeout bounds each model request when the config doesn't set one.
-// Local models can take tens of seconds to load and to generate a full lesson.
+// defaultTimeout bounds each non-streaming model request when the config
+// doesn't set one. Local models can take tens of seconds to load and to
+// generate a full lesson.
 const defaultTimeout = 120 * time.Second
+
+// streamIdleTimeout aborts a stream that produces no data for this long — a
+// stalled model can't hang the UI forever — while still allowing an actively
+// streaming (but slow) generation to run as long as it keeps producing tokens.
+// Generous enough to cover a cold local model's first-token latency. It's a var
+// so tests can shorten it.
+var streamIdleTimeout = 60 * time.Second
+
+// maxRetries is how many times a non-streaming request is retried on a
+// transient failure (network blip, 429, or 5xx) before giving up.
+const maxRetries = 2
 
 // New builds a Tutor from config. The API key comes from the configured
 // environment variable, falling back to a key pasted directly in the config
@@ -94,11 +110,12 @@ func New(cfg config.AIConfig) *Tutor {
 	}
 
 	return &Tutor{
-		client:  &http.Client{Timeout: timeout},
-		baseURL: baseURL,
-		model:   cfg.Model,
-		apiKey:  key,
-		offline: offline,
+		client:       &http.Client{Timeout: timeout},
+		streamClient: &http.Client{}, // bounded by the per-chunk idle watchdog, not a whole-request timeout
+		baseURL:      baseURL,
+		model:        cfg.Model,
+		apiKey:       key,
+		offline:      offline,
 	}
 }
 
@@ -146,10 +163,37 @@ func (t *Tutor) chatRaw(ctx context.Context, messages []chatMessage) (string, er
 		return "", err
 	}
 
+	// Retry transient failures (network blips, 429s, 5xx) — a single dropped
+	// request shouldn't kill a long course build of many sequential calls.
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(retryBackoff(attempt)):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		content, retry, err := t.chatOnce(ctx, reqBody)
+		if err == nil {
+			return content, nil
+		}
+		lastErr = err
+		if !retry {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("ai request failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
+// chatOnce performs one non-streaming request. retry reports whether the
+// failure is transient and worth retrying (vs a definitive error like a bad
+// key, a malformed request, or an empty reply).
+func (t *Tutor) chatOnce(ctx context.Context, reqBody []byte) (content string, retry bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		t.baseURL+"/chat/completions", bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if t.apiKey != "" {
@@ -158,26 +202,37 @@ func (t *Tutor) chatRaw(ctx context.Context, messages []chatMessage) (string, er
 
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return "", err
+		if ctx.Err() != nil {
+			return "", false, ctx.Err() // the caller cancelled — don't retry
+		}
+		return "", true, err // network error: transient
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ai request failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		transient := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
+		return "", transient, fmt.Errorf("ai request failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var cr chatResponse
 	if err := json.Unmarshal(body, &cr); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if cr.Error != nil {
-		return "", fmt.Errorf("ai error: %s", cr.Error.Message)
+		return "", false, fmt.Errorf("ai error: %s", cr.Error.Message)
 	}
-	if len(cr.Choices) == 0 {
-		return "", fmt.Errorf("ai returned no choices")
+	if len(cr.Choices) == 0 || strings.TrimSpace(cr.Choices[0].Message.Content) == "" {
+		// Surface emptiness here with a clear message, rather than letting an
+		// empty string flow into a downstream JSON parser and fail obscurely.
+		return "", false, fmt.Errorf("ai returned an empty reply (the model produced no content)")
 	}
-	return cr.Choices[0].Message.Content, nil
+	return cr.Choices[0].Message.Content, false, nil
+}
+
+// retryBackoff is the wait before retry attempt n (1-based): 0.5s, 1.5s, …
+func retryBackoff(attempt int) time.Duration {
+	return time.Duration(attempt-1)*time.Second + 500*time.Millisecond
 }
 
 // Lesson returns a short explanation of a topic with one worked example.
@@ -332,7 +387,12 @@ func (t *Tutor) chatStreamRaw(ctx context.Context, messages []chatMessage, onDel
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+	// A child context the per-chunk idle watchdog can cancel without disturbing
+	// the caller's ctx.
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost,
 		t.baseURL+"/chat/completions", bytes.NewReader(reqBody))
 	if err != nil {
 		return "", err
@@ -343,7 +403,7 @@ func (t *Tutor) chatStreamRaw(ctx context.Context, messages []chatMessage, onDel
 		req.Header.Set("Authorization", "Bearer "+t.apiKey)
 	}
 
-	resp, err := t.client.Do(req)
+	resp, err := t.streamClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -354,10 +414,17 @@ func (t *Tutor) chatStreamRaw(ctx context.Context, messages []chatMessage, onDel
 		return "", fmt.Errorf("ai request failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
+	// Cancel the request if no data arrives for streamIdleTimeout (a stalled
+	// model). The timer is reset on every line read, so a healthy stream — even
+	// a slow one — runs as long as it keeps producing.
+	idle := time.AfterFunc(streamIdleTimeout, cancel)
+	defer idle.Stop()
+
 	var full strings.Builder
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
+		idle.Reset(streamIdleTimeout)
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "data:") {
 			continue
@@ -381,6 +448,12 @@ func (t *Tutor) chatStreamRaw(ctx context.Context, messages []chatMessage, onDel
 			onDelta(chunk.Choices[0].Delta.Content)
 		}
 	}
+	// A stall fires our watchdog (streamCtx cancelled) while the caller's ctx is
+	// still live — report that distinctly so the UI can say "stalled", not a
+	// generic read error.
+	if streamCtx.Err() != nil && ctx.Err() == nil && full.Len() == 0 {
+		return "", fmt.Errorf("ai stream stalled: no data for %s", streamIdleTimeout)
+	}
 	if err := scanner.Err(); err != nil && full.Len() == 0 {
 		return "", err
 	}
@@ -391,26 +464,14 @@ func (t *Tutor) chatStreamRaw(ctx context.Context, messages []chatMessage, onDel
 }
 
 // parseChallenge extracts a Challenge from a model response, tolerating
-// accidental markdown fences around the JSON.
+// accidental markdown fences around the JSON (shared with extractJSONObject).
 func parseChallenge(raw string) (Challenge, error) {
-	s := strings.TrimSpace(raw)
-	if i := strings.Index(s, "```"); i >= 0 {
-		s = s[i+3:]
-		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
-			s = s[nl+1:]
-		}
-		if j := strings.LastIndex(s, "```"); j >= 0 {
-			s = s[:j]
-		}
-	}
-	start := strings.IndexByte(s, '{')
-	end := strings.LastIndexByte(s, '}')
-	if start < 0 || end <= start {
+	s, ok := extractJSONObject(raw)
+	if !ok {
 		return Challenge{}, fmt.Errorf("no JSON object found")
 	}
-
 	var ch Challenge
-	if err := json.Unmarshal([]byte(s[start:end+1]), &ch); err != nil {
+	if err := json.Unmarshal([]byte(s), &ch); err != nil {
 		return Challenge{}, err
 	}
 	return ch, nil

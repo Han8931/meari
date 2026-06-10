@@ -211,17 +211,29 @@ func resolveVaultDir(dir, baseDir string) (string, error) {
 	if dir == "" {
 		return filepath.Join(baseDir, "vault"), nil
 	}
-	if dir == "~" || strings.HasPrefix(dir, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(home, strings.TrimPrefix(dir[1:], "/")), nil
+	dir, err := ExpandHome(dir)
+	if err != nil {
+		return "", err
 	}
 	if !filepath.IsAbs(dir) {
 		return filepath.Join(baseDir, dir), nil
 	}
 	return filepath.Clean(dir), nil
+}
+
+// ExpandHome expands a leading "~" or "~/" in p to the user's home directory;
+// any other path is returned unchanged (it is NOT made absolute — callers root
+// relative paths against their own base). Shared by the config dir resolver and
+// the app-home resolver so "~" means the same thing everywhere.
+func ExpandHome(p string) (string, error) {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, strings.TrimPrefix(p[1:], "/")), nil
+	}
+	return p, nil
 }
 
 func clampInt(v, lo, hi int) int {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"meari/internal/fsutil"
 )
 
 // Store reads and writes drafts under a directory.
@@ -45,7 +47,7 @@ func (s *Store) Load(challengeID string) (string, bool) {
 
 // Save writes the in-progress code for a challenge.
 func (s *Store) Save(challengeID, code string) error {
-	return os.WriteFile(s.path(challengeID), []byte(code), 0o644)
+	return fsutil.WriteFile(s.path(challengeID), []byte(code), 0o644)
 }
 
 // Clear removes a draft (e.g. after the challenge is solved). Missing is OK.

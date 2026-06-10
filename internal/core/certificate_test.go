@@ -8,8 +8,8 @@ import (
 func TestIssueCertificate(t *testing.T) {
 	svc := newCourseVault(t)
 
-	meta, err := svc.IssueCertificate("balanced-trees", Certificate{
-		CourseTitle: "Balanced Trees", Level: "intermediate", Date: "2026-06-10",
+	meta, title, err := svc.IssueCertificate("balanced-trees", Certificate{
+		Level: "intermediate", Date: "2026-06-10",
 		Topics: 3, FirstTry: 2, Attempts: 4, Flawless: false,
 	})
 	if err != nil {
@@ -17,6 +17,9 @@ func TestIssueCertificate(t *testing.T) {
 	}
 	if meta.Path != "meari-course/Balanced Trees/certificate.md" {
 		t.Fatalf("certificate path = %q", meta.Path)
+	}
+	if title != "Balanced Trees" {
+		t.Fatalf("returned course title = %q, want the manifest title", title)
 	}
 
 	n, err := svc.OpenNote(meta.Path)
@@ -44,8 +47,8 @@ func TestIssueCertificate(t *testing.T) {
 
 func TestIssueCertificateFlawless(t *testing.T) {
 	svc := newCourseVault(t)
-	meta, err := svc.IssueCertificate("balanced-trees", Certificate{
-		CourseTitle: "Balanced Trees", Date: "2026-06-10", Topics: 3, FirstTry: 3, Attempts: 3, Flawless: true,
+	meta, _, err := svc.IssueCertificate("balanced-trees", Certificate{
+		Date: "2026-06-10", Topics: 3, FirstTry: 3, Attempts: 3, Flawless: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +61,7 @@ func TestIssueCertificateFlawless(t *testing.T) {
 
 func TestIssueCertificateUnknownCourse(t *testing.T) {
 	svc := newCourseVault(t)
-	if _, err := svc.IssueCertificate("no-such-course", Certificate{CourseTitle: "X"}); err == nil {
+	if _, _, err := svc.IssueCertificate("no-such-course", Certificate{}); err == nil {
 		t.Fatal("issuing a certificate for an unknown course should fail")
 	}
 }

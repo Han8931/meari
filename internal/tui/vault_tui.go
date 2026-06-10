@@ -1570,19 +1570,30 @@ func (m VaultModel) cmdCourse(args string) (tea.Model, tea.Cmd) {
 	return mm, tea.Batch(mm.setFocus(paneChat), cmd)
 }
 
-// startCourseGen launches the agentic pipeline, pumping its progress lines
-// into the chat pane.
+// startCourseGen launches the agentic build pipeline.
 func (m VaultModel) startCourseGen(req core.CourseRequest) (tea.Model, tea.Cmd) {
+	svc := m.svc
+	return m.startCourseBuild("building course", "▶ building the course…",
+		func(ctx context.Context, progress func(string)) (core.CourseMeta, error) {
+			return svc.GenerateCourse(ctx, req, progress)
+		})
+}
+
+// startCourseBuild runs a long, cancellable course build (generate or revise),
+// pumping its progress lines into the chat pane. The progress and final-result
+// channel sends race ctx.Done so an abandoned build (the learner quits or
+// switches modes — courseCancel fires) can't wedge on the buffer or keep
+// burning LLM calls. loadKind labels the spinner; notice opens the chat block.
+func (m VaultModel) startCourseBuild(loadKind, notice string, build func(ctx context.Context, progress func(string)) (core.CourseMeta, error)) (tea.Model, tea.Cmd) {
 	m.pending++
-	m.loadKind = "building course"
-	m.chat.append(roleSystem, "▶ building the course…")
+	m.loadKind = loadKind
+	m.chat.append(roleSystem, notice)
 	ch := make(chan tea.Msg, 16)
 	m.courseCh = ch
 	ctx, cancel := context.WithCancel(context.Background())
 	m.courseCancel = cancel
-	svc := m.svc
 	go func() {
-		meta, err := svc.GenerateCourse(ctx, req, func(line string) {
+		meta, err := build(ctx, func(line string) {
 			select {
 			case ch <- vCourseProgressMsg{line: line}:
 			case <-ctx.Done():
@@ -1609,28 +1620,11 @@ func (m VaultModel) cmdRevise(feedback string) (tea.Model, tea.Cmd) {
 		m.flash("open a course first (its course.md, or any of its lessons) — then :revise")
 		return m, nil
 	}
-	m.pending++
-	m.loadKind = "revising course"
-	m.chat.append(roleSystem, "▶ revising the course…")
-	ch := make(chan tea.Msg, 16)
-	m.courseCh = ch
-	ctx, cancel := context.WithCancel(context.Background())
-	m.courseCancel = cancel
 	svc := m.svc
-	go func() {
-		meta, err := svc.ReviseCourse(ctx, key, strings.TrimSpace(feedback),
-			func(line string) {
-				select {
-				case ch <- vCourseProgressMsg{line: line}:
-				case <-ctx.Done():
-				}
-			})
-		select {
-		case ch <- vCourseDoneMsg{meta: meta, err: err}:
-		case <-ctx.Done():
-		}
-	}()
-	return m, listenCourse(ch)
+	return m.startCourseBuild("revising course", "▶ revising the course…",
+		func(ctx context.Context, progress func(string)) (core.CourseMeta, error) {
+			return svc.ReviseCourse(ctx, key, strings.TrimSpace(feedback), progress)
+		})
 }
 
 // cmdPublish copies the open course — its manifest plus every linked topic
