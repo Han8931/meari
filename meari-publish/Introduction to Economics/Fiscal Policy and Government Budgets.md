@@ -1,0 +1,24 @@
+---
+created: "2026-06-16"
+id: fiscal-policy-and-government-budgets
+source: meari-course
+study:
+  answer: 'Fiscal policy is the government''s use of spending and taxation to influence the economy. Expansionary fiscal policy means spending more or cutting taxes to boost demand during a downturn, while contractionary policy means spending less or raising taxes to cool an overheating economy or curb inflation. These tools work partly through the multiplier: a dollar of government spending becomes income for someone, who spends part of it, which becomes income for another, so total output can rise by more than the initial outlay. When spending exceeds revenue the government runs a deficit, and accumulated deficits form the national debt, which must be serviced with interest. Built-in features called automatic stabilizers, like progressive taxes and unemployment benefits, soften the cycle without new legislation: in a recession tax receipts fall and benefit payments rise, cushioning incomes automatically. Used well, fiscal policy stabilizes the economy; used carelessly, it can pile up unsustainable debt or fuel inflation.'
+  kind: essay
+  prompt: Explain how governments use spending and taxation as fiscal policy tools, and discuss the roles of the multiplier, deficits, and automatic stabilizers.
+subject: Introduction to Economics
+title: Fiscal Policy and Government Budgets
+---
+
+## Quick Summary
+Fiscal policy is the government's use of spending and taxation to influence the economy. Expansionary fiscal policy means spending more or cutting taxes to boost demand during a downturn, while contractionary policy means spending less or raising taxes to cool an overheating economy or curb inflation. These tools work partly through the multiplier: a dollar of government spending becomes income for someone, who spends part of it, which becomes income for another, so total output can rise by more than the initial outlay.
+
+While a central bank steers the economy with interest rates, governments have a different toolkit: **fiscal policy**, the use of **government spending** and **taxation** to influence economic activity. Every year a government draws up a budget. On one side sit its revenues, mostly taxes on incomes, sales, and profits. On the other sit its expenditures: roads, schools, defense, pensions, healthcare, and interest on past borrowing. How the government sets these two sides is one of the most powerful ways to shape the whole economy.
+
+The core idea is that the government can lean against the economic cycle. In a downturn, when households and firms are spending too little and unemployment is rising, the government can use **expansionary fiscal policy**: spend more (say, on building bridges or hiring workers) or cut taxes so people have more to spend. Both inject demand into the economy. In a boom, when the economy is overheating and inflation threatens, it can do the reverse with **contractionary fiscal policy**: trim spending or raise taxes to take some heat out of demand.
+
+What makes spending especially potent is the **multiplier**. Suppose the government spends $1 billion building a new rail line. That money becomes wages for construction workers and revenue for suppliers. Those workers and firms then spend part of their new income, say 70 cents of every dollar, on groceries, rent, and cars. That spending becomes income for grocers, landlords, and dealers, who in turn spend a fraction of it, and so on. Because each dollar circulates again and again, the total boost to economic output can be larger than the original $1 billion. The leakier the spending (the more people save or buy imports), the smaller the multiplier.
+
+Spending more than you collect creates a **budget deficit**, and the government must borrow to cover the gap. Year after year of deficits accumulate into the **national debt**, the total amount owed. Debt is not automatically bad; borrowing to fight a recession or fund productive investment can pay off. But the debt has to be **serviced**, meaning interest must be paid on it, and if debt grows faster than the economy for too long, interest payments crowd out other priorities and can shake the confidence of lenders. The opposite of a deficit is a **surplus**, when revenue exceeds spending.
+
+Helpfully, some fiscal responses happen on their own through **automatic stabilizers**, features of the system that cushion the economy without any new law being passed. Most income taxes are **progressive**, so when a recession cuts people's incomes, their tax bills fall automatically, leaving more in their pockets. At the same time, programs like **unemployment benefits** automatically pay out more as job losses mount. Together these soften the swings of the business cycle, acting as shock absorbers. Used thoughtfully, fiscal policy stabilizes growth and employment; used recklessly, it can stoke inflation or build up debt that future taxpayers must repay.
