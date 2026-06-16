@@ -749,6 +749,40 @@ func TestWheelScrollsPaneUnderCursor(t *testing.T) {
 	}
 }
 
+func TestTutorClickOpensTopic(t *testing.T) {
+	m := readyModel(t)
+	startID := m.currentTopicID
+
+	// Find a selectable row that loads a DIFFERENT topic than the current one.
+	target, wantID := -1, ""
+	for i, it := range m.sidebar.items {
+		if it.header {
+			continue
+		}
+		if id := topicIDFromSidebar(it.id); id != startID {
+			target, wantID = i, id
+			break
+		}
+	}
+	if target < 0 {
+		t.Fatalf("no row for a different topic in sidebar: %+v", m.sidebar.items)
+	}
+
+	lo, _ := m.sidebar.window()
+	y := target - lo + 2 // title bar (row 0) + box top border (row 1)
+	tm, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 2, Y: y})
+	m = tm.(Model)
+
+	// The click selects the clicked row and loads its topic — just like Enter
+	// (opening then moves focus to chat/editor, so focus is not the signal here).
+	if m.sidebar.cursor != target {
+		t.Fatalf("click should select row %d, got %d", target, m.sidebar.cursor)
+	}
+	if m.currentTopicID != wantID {
+		t.Fatalf("click should open topic %q, current is %q", wantID, m.currentTopicID)
+	}
+}
+
 // readyModel returns a sized, post-setup model already in a Python beginner
 // curriculum, so command tests can act on a live session.
 func readyModel(t *testing.T) Model {

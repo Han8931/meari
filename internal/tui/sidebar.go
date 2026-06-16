@@ -99,6 +99,23 @@ func (s sidebarModel) Update(msg tea.Msg) (sidebarModel, bool) {
 	return s, false
 }
 
+// clickRow moves the cursor to the item drawn at visible-row offset row
+// (0-based within the on-screen window), for mouse selection. It returns true
+// when the row holds a selectable (non-header) item; out-of-range or header
+// rows leave the cursor put and return false.
+func (s *sidebarModel) clickRow(row int) bool {
+	if row < 0 {
+		return false
+	}
+	lo, hi := s.window()
+	idx := lo + row
+	if idx < lo || idx >= hi || idx >= len(s.items) || s.items[idx].header {
+		return false
+	}
+	s.cursor = idx
+	return true
+}
+
 // move steps the cursor by dir (±1), skipping headers and stopping at the ends.
 func (s *sidebarModel) move(dir int) {
 	for i := s.cursor + dir; i >= 0 && i < len(s.items); i += dir {

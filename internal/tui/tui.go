@@ -713,6 +713,17 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Action {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
+			if p == paneSidebar && !m.sidebarCollapsed {
+				// Click a curriculum row to select and load it, mirroring Enter.
+				// Content rows begin two cells down: the title bar (row 0) and the
+				// box's top border (row 1).
+				m.chat.clearSelect()
+				m.setFocus(paneSidebar)
+				if m.sidebar.clickRow(msg.Y - 2) {
+					return m, m.openSelected()
+				}
+				return m, nil
+			}
 			m.dragChat = p == paneChat
 			if m.dragChat {
 				lx, ly := m.chatLocal(msg.X, msg.Y)
@@ -2602,7 +2613,7 @@ func (m Model) statusView() string {
 	case m.focus == paneChat:
 		hints = "enter send · drag to copy · ⌥o/:copy copy reply · ⌃f/⌃b page"
 	case m.focus == paneSidebar:
-		hints = "j/k move · enter open · : cmds (:help) · ⌃r run · ⌃c quit"
+		hints = "j/k move · enter/click open · : cmds (:help) · ⌃r run · ⌃c quit"
 	}
 	line := left + "   " + hintStyle.Render(hints)
 	return statusBar.Width(m.width).Render(line)

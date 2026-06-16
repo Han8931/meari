@@ -308,6 +308,90 @@ func TestVaultFinderLeaderChords(t *testing.T) {
 	}
 }
 
+func TestVaultClickOpensNote(t *testing.T) {
+	m := newTestVaultModel(t)
+
+	// Create a note so the tree has a file row, then load the tree.
+	_, cmd := m.runEx("new Click Target")
+	if _, ok := cmd().(vOpenedMsg); !ok {
+		t.Fatalf("expected vOpenedMsg from :new, got %T", cmd())
+	}
+	tm, _ := m.Update(vListCmd(m.svc)())
+	m = tm.(VaultModel)
+
+	rowIdx := -1
+	for i, it := range m.sidebar.items {
+		if !it.dir && strings.Contains(it.id, "Click Target") {
+			rowIdx = i
+			break
+		}
+	}
+	if rowIdx < 0 {
+		t.Fatalf("note row not found in sidebar items: %+v", m.sidebar.items)
+	}
+
+	// Focus the editor first, so the click must move focus AND open.
+	m.setFocus(paneEditor)
+
+	lo, _ := m.sidebar.window()
+	y := rowIdx - lo + 2 // title bar (row 0) + box top border (row 1)
+	tm, cmd = m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 2, Y: y})
+	m = tm.(VaultModel)
+
+	if m.focus != paneSidebar {
+		t.Fatalf("click should focus the sidebar, got focus=%v", m.focus)
+	}
+	sel, ok := m.sidebar.selected()
+	if !ok || sel.id != m.sidebar.items[rowIdx].id {
+		t.Fatalf("click should select the clicked row, got %+v ok=%v", sel, ok)
+	}
+	if cmd == nil {
+		t.Fatal("clicking a note should return an open command")
+	}
+	opened, ok := cmd().(vOpenedMsg)
+	if !ok {
+		t.Fatalf("expected vOpenedMsg from click, got %T", cmd())
+	}
+	if opened.note.Title != "Click Target" {
+		t.Fatalf("click opened wrong note: %q", opened.note.Title)
+	}
+}
+
+// Clicking a directory row folds/unfolds it instead of opening a note.
+func TestVaultClickTogglesDir(t *testing.T) {
+	m := newTestVaultModel(t)
+
+	// A note nested in a folder gives the tree a directory row to toggle.
+	if _, ok := vSaveOpenCmd(m.svc, "Topics/Nested.md", "# Nested\n\nBody.\n")().(vOpenedMsg); !ok {
+		t.Fatal("setup: expected the nested note to open")
+	}
+	tm, _ := m.Update(vListCmd(m.svc)())
+	m = tm.(VaultModel)
+
+	dirIdx := -1
+	for i, it := range m.sidebar.items {
+		if it.dir && !it.root && strings.Contains(it.id, "Topics") {
+			dirIdx = i
+			break
+		}
+	}
+	if dirIdx < 0 {
+		t.Fatalf("directory row not found: %+v", m.sidebar.items)
+	}
+	wasExpanded := m.expanded[m.sidebar.items[dirIdx].id]
+
+	lo, _ := m.sidebar.window()
+	y := dirIdx - lo + 2
+	tm, cmd := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 2, Y: y})
+	m = tm.(VaultModel)
+	if cmd != nil {
+		t.Fatal("clicking a directory should not open a note")
+	}
+	if got := m.expanded[m.sidebar.items[dirIdx].id]; got == wasExpanded {
+		t.Fatalf("clicking a directory should toggle its fold state (was %v, still %v)", wasExpanded, got)
+	}
+}
+
 func TestVaultPublishCommand(t *testing.T) {
 	m := newTestVaultModel(t)
 	dest := t.TempDir()

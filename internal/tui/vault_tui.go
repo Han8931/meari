@@ -557,18 +557,7 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var enter bool
 		m.sidebar, enter = m.sidebar.Update(msg)
 		if enter {
-			if it, ok := m.sidebar.selected(); ok {
-				if it.dir { // enter folds/unfolds a directory
-					if m.expanded[it.id] {
-						delete(m.expanded, it.id)
-					} else {
-						m.expanded[it.id] = true
-					}
-					m.rebuildSidebar()
-					return m, nil
-				}
-				return m, vOpenCmd(m.svc, it.id)
-			}
+			return m.activateSidebarSelection()
 		}
 		return m, nil
 	case paneEditor:
@@ -675,6 +664,26 @@ func (m *VaultModel) focusDir(d int) tea.Cmd {
 
 // handleMouse routes wheel events to the pane under the cursor (scrolling never
 // steals focus) and focuses the pane under the cursor on a left click.
+// activateSidebarSelection opens the currently-selected tree row: a note opens
+// in the editor, a directory folds/unfolds. It is the shared action behind both
+// Enter and a left click on the tree.
+func (m VaultModel) activateSidebarSelection() (tea.Model, tea.Cmd) {
+	it, ok := m.sidebar.selected()
+	if !ok {
+		return m, nil
+	}
+	if it.dir { // fold/unfold a directory
+		if m.expanded[it.id] {
+			delete(m.expanded, it.id)
+		} else {
+			m.expanded[it.id] = true
+		}
+		m.rebuildSidebar()
+		return m, nil
+	}
+	return m, vOpenCmd(m.svc, it.id)
+}
+
 func (m VaultModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.cmdMode {
 		return m, nil
@@ -715,6 +724,18 @@ func (m VaultModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Action {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
+			if p == paneSidebar && !m.sidebarCollapsed {
+				// Click a tree row to select and open it — a note opens in the
+				// editor, a directory folds/unfolds, mirroring Enter. Content rows
+				// begin two cells down: the title bar (row 0) and the box's top
+				// border (row 1).
+				m.chat.clearSelect()
+				m.setFocus(paneSidebar)
+				if m.sidebar.clickRow(msg.Y - 2) {
+					return m.activateSidebarSelection()
+				}
+				return m, nil
+			}
 			m.dragChat = p == paneChat
 			if m.dragChat {
 				lx, ly := m.chatLocal(msg.X, msg.Y)
@@ -2078,7 +2099,7 @@ func (m VaultModel) statusView() string {
 	case m.studyMode:
 		hints = ":grade check answer · :answer see a model answer · :done finish"
 	case m.focus == paneSidebar:
-		hints = "j/k move · enter open · ,ff find · space mark · m node ops · r refresh · : cmds"
+		hints = "j/k move · enter/click open · ,ff find · space mark · m node ops · r refresh · : cmds"
 	case m.focus == paneEditor:
 		hints = ",ff find · :polish/:edit AI edit · select+:ask discuss · ,n fold · ⌃s save"
 	case m.focus == paneChat:
