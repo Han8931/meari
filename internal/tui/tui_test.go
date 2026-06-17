@@ -749,6 +749,26 @@ func TestWheelScrollsPaneUnderCursor(t *testing.T) {
 	}
 }
 
+func TestStartingTopicShowsLessonFromTop(t *testing.T) {
+	m := readyModel(t)
+
+	// A lesson far taller than the chat pane, so opening at the top vs. the
+	// bottom is observable.
+	lesson := strings.Repeat("A line of lesson content that the reader should see first.\n", 120)
+	topic := curriculum.Topic{ID: "synthetic-long-lesson", Title: "Long Lesson", Lesson: lesson}
+
+	_ = m.startTopic(topic)
+
+	if m.chat.vp.TotalLineCount() <= m.chat.vp.Height {
+		t.Fatalf("setup: lesson not tall enough to scroll (lines=%d height=%d)",
+			m.chat.vp.TotalLineCount(), m.chat.vp.Height)
+	}
+	if !m.chat.vp.AtTop() || m.chat.vp.AtBottom() {
+		t.Fatalf("a freshly started lesson should open at its top, got AtTop=%v AtBottom=%v",
+			m.chat.vp.AtTop(), m.chat.vp.AtBottom())
+	}
+}
+
 func TestTutorClickOpensTopic(t *testing.T) {
 	m := readyModel(t)
 	startID := m.currentTopicID

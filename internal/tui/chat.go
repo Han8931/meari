@@ -332,6 +332,10 @@ func (c *chatModel) restore(blocks []chatBlock) {
 	c.vp.GotoBottom()
 }
 
+// gotoTop scrolls the transcript to its first line — used when a lesson is first
+// shown, so the reader starts at the beginning of the content, not its end.
+func (c *chatModel) gotoTop() { c.vp.GotoTop() }
+
 // append adds a block to the transcript and re-wraps. It follows the tail only
 // when the view was already pinned to the bottom, so a new message can't yank
 // the reader away while they're scrolled up in the history.

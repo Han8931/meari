@@ -1794,6 +1794,9 @@ func (m *Model) startTopicView(t curriculum.Topic, view string) tea.Cmd {
 		} else if quiz := m.topicQuizText(t, ch); quiz != "" {
 			m.chat.append(roleQuiz, quiz)
 		}
+		// Start the freshly shown lesson/quiz at its top — append() pins to the
+		// tail, which for a long lesson would otherwise open at its very end.
+		m.chat.gotoTop()
 	}
 	if stale {
 		m.chat.append(roleSystem, staleDraftNotice)
