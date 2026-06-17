@@ -223,3 +223,52 @@ func TestWordMotionMath(t *testing.T) {
 		t.Errorf("prevWordStart(1) = %d", got)
 	}
 }
+
+func TestMouseDragSelectsAndCopies(t *testing.T) {
+	var copied string
+	old := copyToSystem
+	copyToSystem = func(s string) { copied = s }
+	defer func() { copyToSystem = old }()
+
+	m := New("alpha line\nbeta line", true, nil)
+	m.SetSize(60, 6)
+	g := m.visualGutterWidth() // x past the line-number gutter == text column 0
+
+	// Drag across "alpha" on the first row.
+	if !m.MouseSelectStart(g, 0) {
+		t.Fatal("MouseSelectStart returned false for a vim editor")
+	}
+	m.MouseSelectTo(g+4, 0) // to the final 'a' of "alpha"
+	if got := m.MouseSelectEnd(); got != "alpha" || copied != "alpha" {
+		t.Fatalf("drag copied %q (clipboard %q), want %q", got, copied, "alpha")
+	}
+	if m.mode != modeNormal {
+		t.Fatalf("editor should return to Normal after a drag, mode=%v", m.mode)
+	}
+
+	// A drag that spans rows selects across the newline.
+	copied = ""
+	m.MouseSelectStart(g, 0)
+	m.MouseSelectTo(g+3, 1) // to the 'a' of "beta" on row 1
+	if got := m.MouseSelectEnd(); got != "alpha line\nbeta" {
+		t.Fatalf("multi-line drag copied %q", got)
+	}
+
+	// A bare click (press + release, no motion) selects and copies nothing.
+	copied = "PREV"
+	m.MouseSelectStart(g+2, 0)
+	if got := m.MouseSelectEnd(); got != "" {
+		t.Fatalf("bare click copied %q, want empty", got)
+	}
+	if copied != "PREV" {
+		t.Fatalf("bare click clobbered the clipboard: %q", copied)
+	}
+}
+
+func TestMouseDragIsNoopWithoutVim(t *testing.T) {
+	m := New("alpha", false, nil) // default keybindings: no Visual mode to render into
+	m.SetSize(60, 6)
+	if m.MouseSelectStart(0, 0) {
+		t.Fatal("non-vim editor should not start a mouse selection")
+	}
+}

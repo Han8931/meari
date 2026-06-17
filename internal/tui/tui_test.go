@@ -769,6 +769,26 @@ func TestStartingTopicShowsLessonFromTop(t *testing.T) {
 	}
 }
 
+func TestLoadedLessonShowsFromTop(t *testing.T) {
+	m := readyModel(t)
+
+	// The chat starts pinned to the tail (as it is while the "loading lesson"
+	// spinner runs), so a naive append would open the lesson at its end.
+	m.chat.vp.GotoBottom()
+
+	lesson := strings.Repeat("A line of lesson content that the reader should see first.\n", 120)
+	m = step(t, m, lessonMsg{text: lesson})
+
+	if m.chat.vp.TotalLineCount() <= m.chat.vp.Height {
+		t.Fatalf("setup: lesson not tall enough to scroll (lines=%d height=%d)",
+			m.chat.vp.TotalLineCount(), m.chat.vp.Height)
+	}
+	if !m.chat.vp.AtTop() || m.chat.vp.AtBottom() {
+		t.Fatalf("a freshly loaded lesson should open at its top, got AtTop=%v AtBottom=%v",
+			m.chat.vp.AtTop(), m.chat.vp.AtBottom())
+	}
+}
+
 func TestTutorClickOpensTopic(t *testing.T) {
 	m := readyModel(t)
 	startID := m.currentTopicID

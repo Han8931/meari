@@ -183,6 +183,9 @@ type Model struct {
 	// Chat drag-selection state: a left press on the chat anchors a selection;
 	// motion with the button held sweeps it out (Alt-C copies).
 	dragChat bool
+	// dragEditor mirrors dragChat for the editor pane, so a drag over the editor
+	// sweeps out (and on release copies) its text.
+	dragEditor bool
 
 	// pendingLeader is set after "," in the editor's Normal mode; it starts a
 	// leader chord. "n" folds the sidebar; any other key replays the swallowed
@@ -464,6 +467,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case lessonMsg:
 		m.pending--
 		m.chat.append(roleLesson, msg.text)
+		// append() pins to the tail, so a long lesson would otherwise open at its
+		// very end — start the reader at the beginning of the freshly loaded lesson.
+		m.chat.gotoTop()
 		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: msg.text})
 		return m, nil
 
@@ -724,26 +730,42 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			m.dragChat = p == paneChat
-			if m.dragChat {
+			m.chat.clearSelect()
+			m.dragChat, m.dragEditor = false, false
+			switch p {
+			case paneChat:
+				m.dragChat = true
 				lx, ly := m.chatLocal(msg.X, msg.Y)
 				m.chat.startSelect(lx, ly)
-			} else {
-				m.chat.clearSelect()
+			case paneEditor:
+				lx, ly := m.editorLocal(msg.X, msg.Y)
+				m.dragEditor = m.editor.MouseSelectStart(lx, ly)
 			}
 			return m, m.setFocus(p)
 		}
 	case tea.MouseActionMotion:
-		if m.dragChat && msg.Button == tea.MouseButtonLeft {
-			lx, ly := m.chatLocal(msg.X, msg.Y)
-			m.chat.dragSelect(lx, ly)
-			return m, nil
+		if msg.Button == tea.MouseButtonLeft {
+			if m.dragChat {
+				lx, ly := m.chatLocal(msg.X, msg.Y)
+				m.chat.dragSelect(lx, ly)
+				return m, nil
+			}
+			if m.dragEditor {
+				lx, ly := m.editorLocal(msg.X, msg.Y)
+				m.editor.MouseSelectTo(lx, ly)
+				return m, nil
+			}
 		}
 	case tea.MouseActionRelease:
 		if m.dragChat && m.chat.sel.active { // a real drag, not a bare click
 			m.flash(copySelection(&m.chat))
 		}
-		m.dragChat = false
+		if m.dragEditor {
+			if text := m.editor.MouseSelectEnd(); text != "" {
+				m.flash(fmt.Sprintf("✓ copied selection (%d chars)", len([]rune(text))))
+			}
+		}
+		m.dragChat, m.dragEditor = false, false
 	}
 	return m, nil
 }
@@ -764,6 +786,23 @@ func (m Model) chatLocal(x, y int) (int, int) {
 		editorSpan = 0
 	}
 	return x - (sidebarSpan + editorSpan + 1), y - 2
+}
+
+// editorLocal converts a terminal cell to editor-textarea-local coordinates: past
+// the title row, the box border, the panes above/left of the editor, and the
+// editor pane's own header (the language label plus any pinned prompt lines). x
+// lands inside the editor box; the line-number gutter is subtracted by the editor.
+func (m Model) editorLocal(x, y int) (int, int) {
+	sidebarSpan := m.sidebarW + 2
+	if m.sidebarCollapsed {
+		sidebarSpan = 0
+	}
+	if m.horizontal {
+		headerRows := 1 + len(m.promptHeaderLines(m.rightW))
+		return x - (sidebarSpan + 1), y - (m.chatH + 4 + headerRows)
+	}
+	headerRows := 1 + len(m.promptHeaderLines(m.editorW))
+	return x - (sidebarSpan + 1), y - (2 + headerRows)
 }
 
 // paneAt maps a terminal cell to the pane drawn there, accounting for the title

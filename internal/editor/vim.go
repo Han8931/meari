@@ -660,6 +660,89 @@ func (m *Model) electricClose() {
 	m.moveTo(row, len([]rune(dedented)))
 }
 
+// --- mouse drag selection ---
+//
+// The parent forwards editor-pane mouse drags here so the note body can be
+// swept out with the pointer, mirroring the chat transcript. The selection is
+// rendered through Visual mode (the textarea cannot draw one), so these are
+// no-ops unless the Vim editor is active. Coordinates are cells measured from
+// the textarea's top-left; x still counts the line-number gutter.
+
+// MouseSelectStart positions the cursor under the pointer and arms a drag. It
+// does NOT enter Visual mode yet, so a bare click just moves the cursor instead
+// of selecting (and copying) a stray character. Returns false — telling the
+// parent not to route the drag here — when there is nothing to select against.
+func (m *Model) MouseSelectStart(x, y int) bool {
+	if !m.vim || m.mode == modeCommand {
+		return false
+	}
+	m.mode = modeNormal
+	m.syncVisualTop() // map against the textarea's current scroll position
+	m.mouseMoveTo(x, y)
+	return true
+}
+
+// MouseSelectTo extends the drag to (x, y). The first motion opens the Visual
+// selection, anchored at the press position the cursor still rests on.
+func (m *Model) MouseSelectTo(x, y int) {
+	if !m.vim {
+		return
+	}
+	if m.mode != modeVisual {
+		if m.mode != modeNormal {
+			return // mid-insert/command: don't hijack into a selection
+		}
+		m.enterVisual(false)
+	}
+	m.mouseMoveTo(x, y)
+	m.scrollVisual()
+}
+
+// MouseSelectEnd finishes a drag: it copies the selection to the system
+// clipboard, returns to Normal mode, and reports the copied text. It returns ""
+// for a bare click (no Visual selection was ever opened), so the parent can tell
+// a click from a real drag.
+func (m *Model) MouseSelectEnd() string {
+	if !m.vim || m.mode != modeVisual {
+		return ""
+	}
+	runes, start, cut := m.visualSpan()
+	m.mode = modeNormal
+	if start >= cut {
+		return ""
+	}
+	text := string(runes[start:cut])
+	m.setYank(text, false) // register + system clipboard, like a Visual 'y'
+	return text
+}
+
+// mouseMoveTo moves the cursor to the buffer position under textarea-local cell
+// (x, y), matching what's on screen: it reuses the Visual layout (the same gutter
+// width and soft-wrap segmentation the view renders with) and the current scroll
+// offset (visualTop).
+func (m *Model) mouseMoveTo(x, y int) {
+	segs, _ := m.visualLayout()
+	if len(segs) == 0 {
+		return
+	}
+	idx := m.visualTop + y
+	if idx < 0 {
+		idx = 0
+	} else if idx >= len(segs) {
+		idx = len(segs) - 1
+	}
+	seg := segs[idx]
+	col := x - m.visualGutterWidth()
+	if col < 0 {
+		col = 0
+	}
+	col += seg.start
+	if col > seg.end {
+		col = seg.end
+	}
+	m.moveTo(seg.lineIdx, col)
+}
+
 // --- Visual mode ---
 
 // enterVisual starts a selection anchored at the cursor. linewise selects whole

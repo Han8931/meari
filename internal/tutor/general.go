@@ -140,9 +140,46 @@ func parseEssayGrade(raw string) (EssayGrade, error) {
 	return g, nil
 }
 
-// extractJSONObject pulls the first {...} JSON object out of a model reply,
-// tolerating markdown fences around it (shared shape with parseChallenge).
+// extractJSONObject pulls the first complete {...} JSON object out of a model
+// reply and normalizes it for Go's strict parser. It tolerates the quirks local
+// models routinely emit: markdown ``` fences, commentary before or after the
+// object, and trailing commas before a closing } or ] (shared shape with
+// parseChallenge).
 func extractJSONObject(raw string) (string, bool) {
+	s := stripCodeFence(raw)
+	start := strings.IndexByte(s, '{')
+	if start < 0 {
+		return "", false
+	}
+	// Walk from the first '{' tracking brace depth, skipping string literals so
+	// braces inside values don't count. This isolates exactly the first object
+	// even when the model appends a closing fence or chatty commentary after it.
+	depth, inStr, esc := 0, false, false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case esc:
+			esc = false
+		case inStr && c == '\\':
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+			// inside a string literal: ignore structural characters
+		case c == '{':
+			depth++
+		case c == '}':
+			if depth--; depth == 0 {
+				return stripTrailingCommas(s[start : i+1]), true
+			}
+		}
+	}
+	return "", false // unbalanced — a truncated reply, nothing salvageable
+}
+
+// stripCodeFence removes a leading ```lang fence (and its closing ```), so a
+// brace appearing in prose before a fenced object doesn't get picked up first.
+func stripCodeFence(raw string) string {
 	s := strings.TrimSpace(raw)
 	if i := strings.Index(s, "```"); i >= 0 {
 		s = s[i+3:]
@@ -153,10 +190,43 @@ func extractJSONObject(raw string) (string, bool) {
 			s = s[:j]
 		}
 	}
-	start := strings.IndexByte(s, '{')
-	end := strings.LastIndexByte(s, '}')
-	if start < 0 || end <= start {
-		return "", false
+	return s
+}
+
+// stripTrailingCommas drops commas that sit immediately before a closing } or ]
+// (e.g. {"a":1,} or [1,2,]). Local models emit these constantly and Go's
+// encoding/json rejects them; strings are left untouched.
+func stripTrailingCommas(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inStr, esc := false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			b.WriteByte(c)
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case ',':
+			j := i + 1
+			for j < len(s) && (s[j] == ' ' || s[j] == '\n' || s[j] == '\t' || s[j] == '\r') {
+				j++
+			}
+			if j < len(s) && (s[j] == '}' || s[j] == ']') {
+				continue // drop the trailing comma
+			}
+		}
+		b.WriteByte(c)
 	}
-	return s[start : end+1], true
+	return b.String()
 }

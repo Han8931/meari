@@ -256,16 +256,23 @@ func (s *Service) buildTopic(ctx context.Context, courseTitle, folder string,
 	if _, has := n.Extra["study"]; !has {
 		report("✎ %s authoring exercise: %s", label, t.Title)
 		item, err := s.tutor.CourseStudyItem(ctx, t.Title, t.Kind, t.Lang, n.Body)
-		if err != nil {
-			return "", err
-		}
-		item = s.verifyStudyItem(ctx, t.Title, n.Body, item, report)
-		if block := studyBlock(item); block != nil {
-			if n.Extra == nil {
-				n.Extra = map[string]any{}
+		switch {
+		case err != nil && ctx.Err() != nil:
+			return "", ctx.Err() // canceled mid-build: stop cleanly
+		case err != nil:
+			// A malformed exercise (common with local models that emit slightly
+			// off JSON) shouldn't throw away the whole course near the end — keep
+			// the lesson, skip just this exercise, and carry on.
+			report("⚠ %s: skipping exercise for %q (%v)", label, t.Title, err)
+		default:
+			item = s.verifyStudyItem(ctx, t.Title, n.Body, item, report)
+			if block := studyBlock(item); block != nil {
+				if n.Extra == nil {
+					n.Extra = map[string]any{}
+				}
+				n.Extra["study"] = block
+				changed = true
 			}
-			n.Extra["study"] = block
-			changed = true
 		}
 	} else if revise {
 		// Maintenance: re-run existing code exercises against the executor;

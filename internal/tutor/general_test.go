@@ -1,6 +1,9 @@
 package tutor
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestParseNoteContent(t *testing.T) {
 	raw := "```json\n" +
@@ -37,6 +40,34 @@ func TestExtractJSONObject(t *testing.T) {
 	}
 	if _, ok := extractJSONObject("no object here"); ok {
 		t.Fatalf("should not find an object")
+	}
+
+	// Quirks local models routinely emit.
+	cases := []struct{ name, raw, want string }{
+		{"fenced", "```json\n{\"a\":1}\n```", `{"a":1}`},
+		{"chatty suffix", "{\"a\":1}\n\nHope that helps!", `{"a":1}`},
+		{"brace in trailing prose", "{\"a\":1}\nuse {braces} freely", `{"a":1}`},
+		{"trailing comma object", "{\"a\":1,}", `{"a":1}`},
+		{"trailing comma array", "{\"a\":[1,2,],}", `{"a":[1,2]}`},
+		{"trailing comma with newline", "{\n\"a\":1,\n}", "{\n\"a\":1\n}"},
+		{"comma inside string kept", `{"a":"x,}"}`, `{"a":"x,}"}`},
+		{"brace inside string", `{"a":"}{","b":2}`, `{"a":"}{","b":2}`},
+		{"nested object", `{"a":{"b":2}} tail`, `{"a":{"b":2}}`},
+	}
+	for _, c := range cases {
+		got, ok := extractJSONObject(c.raw)
+		if !ok || got != c.want {
+			t.Fatalf("%s: got %q ok=%v, want %q", c.name, got, ok, c.want)
+		}
+		var v any
+		if err := json.Unmarshal([]byte(got), &v); err != nil {
+			t.Fatalf("%s: extracted JSON does not parse: %v", c.name, err)
+		}
+	}
+
+	// Truncated output (a cut-off local model) has no matching close brace.
+	if _, ok := extractJSONObject(`{"a":1, "b":`); ok {
+		t.Fatalf("truncated object should not be reported as found")
 	}
 }
 

@@ -9,6 +9,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -136,6 +137,9 @@ type VaultModel struct {
 	// Chat drag-selection state: a left press on the chat anchors a selection;
 	// motion with the button held sweeps it out (Alt-C copies).
 	dragChat bool
+	// dragEditor mirrors dragChat for the editor pane, so a drag over an open
+	// note sweeps out (and on release copies) its text.
+	dragEditor bool
 
 	// editorBias shifts the editor/chat split (":wide" grows the editor,
 	// ":compact" grows the chat), sharing the classic TUI's step/clamp.
@@ -736,26 +740,42 @@ func (m VaultModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			m.dragChat = p == paneChat
-			if m.dragChat {
+			m.chat.clearSelect()
+			m.dragChat, m.dragEditor = false, false
+			switch p {
+			case paneChat:
+				m.dragChat = true
 				lx, ly := m.chatLocal(msg.X, msg.Y)
 				m.chat.startSelect(lx, ly)
-			} else {
-				m.chat.clearSelect()
+			case paneEditor:
+				lx, ly := m.editorLocal(msg.X, msg.Y)
+				m.dragEditor = m.editor.MouseSelectStart(lx, ly)
 			}
 			return m, m.setFocus(p)
 		}
 	case tea.MouseActionMotion:
-		if m.dragChat && msg.Button == tea.MouseButtonLeft {
-			lx, ly := m.chatLocal(msg.X, msg.Y)
-			m.chat.dragSelect(lx, ly)
-			return m, nil
+		if msg.Button == tea.MouseButtonLeft {
+			if m.dragChat {
+				lx, ly := m.chatLocal(msg.X, msg.Y)
+				m.chat.dragSelect(lx, ly)
+				return m, nil
+			}
+			if m.dragEditor {
+				lx, ly := m.editorLocal(msg.X, msg.Y)
+				m.editor.MouseSelectTo(lx, ly)
+				return m, nil
+			}
 		}
 	case tea.MouseActionRelease:
 		if m.dragChat && m.chat.sel.active { // a real drag, not a bare click
 			m.flash(copySelection(&m.chat))
 		}
-		m.dragChat = false
+		if m.dragEditor {
+			if text := m.editor.MouseSelectEnd(); text != "" {
+				m.flash(fmt.Sprintf("✓ copied selection (%d chars)", len([]rune(text))))
+			}
+		}
+		m.dragChat, m.dragEditor = false, false
 	}
 	return m, nil
 }
@@ -768,6 +788,20 @@ func (m VaultModel) chatLocal(x, y int) (int, int) {
 		sidebarSpan = 0
 	}
 	return x - (sidebarSpan + m.editorW + 2 + 1), y - 2
+}
+
+// editorLocal converts a terminal cell to editor-textarea-local coordinates:
+// past the title row and the box border (y-2), then past the pane's own header
+// (the NOTE/ESSAY label plus any pinned essay-prompt lines) that sits above the
+// textarea. x lands inside the editor box; the line-number gutter is subtracted
+// later, by the editor itself.
+func (m VaultModel) editorLocal(x, y int) (int, int) {
+	sidebarSpan := m.sidebarW + 2
+	if m.sidebarCollapsed {
+		sidebarSpan = 0
+	}
+	headerRows := 1 + len(m.essayHeaderLines(m.editorW)) // label + essay prompt
+	return x - (sidebarSpan + 1), y - (2 + headerRows)
 }
 
 // paneAt maps a terminal cell to the pane drawn there: row 0 is the title bar,

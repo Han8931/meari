@@ -390,27 +390,15 @@ func (t *Tutor) chatStreamRaw(ctx context.Context, messages []chatMessage, onDel
 	return full.String(), nil
 }
 
-// parseChallenge extracts a Challenge from a model response, tolerating
-// accidental markdown fences around the JSON.
+// parseChallenge extracts a Challenge from a model response, tolerating the
+// markdown fences and stray JSON quirks local models add around the object.
 func parseChallenge(raw string) (Challenge, error) {
-	s := strings.TrimSpace(raw)
-	if i := strings.Index(s, "```"); i >= 0 {
-		s = s[i+3:]
-		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
-			s = s[nl+1:]
-		}
-		if j := strings.LastIndex(s, "```"); j >= 0 {
-			s = s[:j]
-		}
-	}
-	start := strings.IndexByte(s, '{')
-	end := strings.LastIndexByte(s, '}')
-	if start < 0 || end <= start {
+	s, ok := extractJSONObject(raw)
+	if !ok {
 		return Challenge{}, fmt.Errorf("no JSON object found")
 	}
-
 	var ch Challenge
-	if err := json.Unmarshal([]byte(s[start:end+1]), &ch); err != nil {
+	if err := json.Unmarshal([]byte(s), &ch); err != nil {
 		return Challenge{}, err
 	}
 	return ch, nil
