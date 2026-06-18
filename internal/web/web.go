@@ -51,10 +51,11 @@ func Serve(addr string, svc *core.Service) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("GET /api/tree", s.handleTree)
+	mux.HandleFunc("GET /api/courses", s.handleCourses)
+	mux.HandleFunc("GET /api/course", s.handleCourse)
 	mux.HandleFunc("GET /api/note", s.handleGetNote)
 	mux.HandleFunc("PUT /api/note", s.handleSaveNote)
 	mux.HandleFunc("POST /api/preview", s.handlePreview)
-	mux.HandleFunc("POST /api/generate", s.handleGenerate)
 	mux.HandleFunc("GET /api/backlinks", s.handleBacklinks)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
 	mux.HandleFunc("POST /api/study/essay", s.handleEssay)
@@ -81,12 +82,35 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
-	notes, err := s.svc.ListNotes()
+	entries, err := s.svc.Tree()
 	if err != nil {
 		httpErr(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{"notes": notes})
+	writeJSON(w, map[string]any{"entries": entries})
+}
+
+func (s *Server) handleCourses(w http.ResponseWriter, r *http.Request) {
+	courses, err := s.svc.ListCourses()
+	if err != nil {
+		httpErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"courses": courses})
+}
+
+func (s *Server) handleCourse(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	c, err := s.svc.LoadCourse(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, c)
 }
 
 func (s *Server) handleGetNote(w http.ResponseWriter, r *http.Request) {
@@ -138,25 +162,6 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"html": renderWikilinks(buf.String())})
 }
 
-func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Request string `json:"request"`
-	}
-	if !readJSON(w, r, &req) {
-		return
-	}
-	if strings.TrimSpace(req.Request) == "" {
-		http.Error(w, "missing request", http.StatusBadRequest)
-		return
-	}
-	meta, err := s.svc.GenerateLesson(r.Context(), req.Request)
-	if err != nil {
-		httpErr(w, err)
-		return
-	}
-	writeJSON(w, meta)
-}
-
 func (s *Server) handleBacklinks(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -176,8 +181,9 @@ func (s *Server) handleBacklinks(w http.ResponseWriter, r *http.Request) {
 // currently reading.
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		History []tutor.ChatTurn `json:"history"`
-		Path    string           `json:"path"`
+		History   []tutor.ChatTurn `json:"history"`
+		Path      string           `json:"path"`
+		Selection string           `json:"selection"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -188,6 +194,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		if n, err := s.svc.OpenNote(req.Path); err == nil {
 			ctxText = "Current note — " + n.Title + "\n\nNote content:\n" + n.Body
 		}
+	}
+	// A passage the learner highlighted to ask about — surface it to the tutor
+	// so the question is grounded in that text, without cluttering the chat UI.
+	if sel := strings.TrimSpace(req.Selection); sel != "" {
+		ctxText += "\n\nThe learner has selected this passage to ask about:\n" + sel
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

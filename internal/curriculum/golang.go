@@ -22,6 +22,7 @@ before the program even starts.
 
 Every Go file belongs to a package. A runnable program lives in package main and
 begins at the function main:
+
     package main
 
     import "fmt"
@@ -36,6 +37,7 @@ prints a line of text.
 
 In these lessons you don't write the package or main — that scaffolding is taken
 care of. Instead the editor hands you one small function to complete:
+
     func Greeting() string {
         return ""
     }
@@ -59,12 +61,14 @@ statically typed, every value is one specific type, and the compiler won't
 silently mix them.
 
 The everyday built-in types are:
+
     int      whole numbers like 42 or -7    (also sized: int8, int32, int64…)
     float64  numbers with a fraction, 3.14
     string   text in double quotes, "hello"  (immutable)
     bool     true or false
 
 You can compute directly with literal values:
+
     1 + 1          // 2          integer arithmetic
     7.0 / 2.0      // 3.5        floating-point division
     "go" + "pher"  // "gopher"   + joins two strings
@@ -86,6 +90,7 @@ That strictness is on purpose: it keeps surprising bugs out of your programs.`,
 					ID:    "go-b-vars",
 					Title: "Variables",
 					Lesson: `A variable is named storage for a value. Go gives you three ways to declare one:
+
     var name string = "Ada"   // explicit type
     var age = 36              // type inferred from the value
     height := 1.7             // short form (only inside a function)
@@ -97,6 +102,7 @@ code tidy.
 
 To build text from values, fmt.Printf prints using format verbs, and fmt.Sprintf
 returns the result as a string instead of printing it:
+
     %v the value, %T its type, %d an integer, %s a string, %q a quoted string
     fmt.Sprintf("%s is %d", name, age)   // "Ada is 36"`,
 					Challenge: Challenge{
@@ -115,12 +121,14 @@ returns the result as a string instead of printing it:
 					Lesson: `Go's const declares a value fixed at compile time. A constant can be typed or
 "untyped" — an untyped constant adapts to whatever numeric type the expression
 needs, so the same 3 works as an int or a float64:
+
     const greeting = "hi"
     const pi = 3.14159
     const shift = 1 << 20      // 1048576
 
 iota counts up automatically inside a const block — this is how Go writes enums.
 Each line increments iota, starting from 0:
+
     const (
         Sun = iota   // 0
         Mon          // 1
@@ -128,6 +136,7 @@ Each line increments iota, starting from 0:
     )
 
 You can skip or scale values, since iota is just the line's index in the block:
+
     const (
         _  = iota
         KB = 1 << (10 * iota)   // 1024
@@ -149,21 +158,25 @@ You can skip or scale values, since iota is just the line's index in the block:
 					Title: "Arithmetic",
 					Lesson: `The numeric operators are + - * / and % (remainder). On integers, / TRUNCATES
 toward zero — the remainder is what % is for:
+
     7 / 2    // 3   (not 3.5)
     7 % 2    // 1
     17 / 5   // 3
     17 % 5   // 2
 
 Precedence works as in math (* / % before + -); use parentheses to be explicit:
+
     (a + b) / 2
 
 Compound assignment updates a variable in place, and ++/-- add or subtract one
 (they are statements, not expressions):
+
     total := 0
     total += 5      // total = total + 5
     total++         // 6
 
 Worked example — splitting minutes into hours and minutes:
+
     minutes := 130
     h := minutes / 60       // 2
     m := minutes % 60       // 10`,
@@ -183,20 +196,24 @@ Worked example — splitting minutes into hours and minutes:
 					ID:    "go-b-bools",
 					Title: "Booleans & comparisons",
 					Lesson: `A bool is true or false. Comparisons produce bools:
+
     ==  !=  <  <=  >  >=
     age >= 18          // true or false
     name == "Ada"      // strings compare with == too
 
 Combine bools with && (and), || (or), and ! (not):
+
     age >= 13 && age <= 19      // a teenager
     day == "Sat" || day == "Sun"
     !done
 
 && and || short-circuit: the right side is only evaluated when it can still
 change the answer. That makes guards safe and idiomatic:
+
     n != 0 && total/n > 10      // never divides by zero
 
 Worked example — is a year a leap year?
+
     leap := year%4 == 0 && (year%100 != 0 || year%400 == 0)`,
 					Challenge: Challenge{
 						Prompt:      "Write InRange(n, lo, hi int) bool reporting whether n is between lo and hi inclusive (use && with two comparisons).",
@@ -214,6 +231,7 @@ Worked example — is a year a leap year?
 					Title: "Branches: if & switch",
 					Lesson: `Branching uses if/else — no parentheses around the condition, braces always
 required:
+
     if score >= 50 {
         result = "pass"
     } else if score >= 40 {
@@ -223,10 +241,12 @@ required:
     }
 
 if can begin with a short statement whose variables exist only in the branch:
+
     if r := n % 2; r == 0 { ... }
 
 switch is a cleaner if/else-if chain. Cases don't fall through (no break
 needed), and a bare "switch {" with condition cases reads top to bottom:
+
     switch {
     case score >= 90:
         grade = "A"
@@ -253,17 +273,20 @@ A switch can also match values directly: switch day { case "Sat", "Sun": ... }`,
 					ID:    "go-b-loops",
 					Title: "Loops",
 					Lesson: `Go has one loop keyword — for — covering every case:
+
     for i := 0; i < n; i++ { ... }   // classic counter
     for cond { ... }                 // like while
     for { ... }                      // infinite (use break to leave)
 
 A fourth form, "for ... range", walks a sequence and hands you each position and
 value — useful for text now, and for slices and maps later:
+
     for i, c := range "hi" {         // i = 0,1   c = each character
         fmt.Println(i, c)
     }
 
 break leaves the loop; continue skips to the next iteration:
+
     for i := 1; i <= 100; i++ {
         if i%2 == 1 {
             continue        // skip odd numbers
@@ -274,6 +297,7 @@ break leaves the loop; continue skips to the next iteration:
     }
 
 Worked example — multiplying the numbers 1..n:
+
     fact := 1
     for i := 2; i <= n; i++ {
         fact *= i
@@ -298,12 +322,14 @@ in nested blocks. Leaving the block ends its life. This keeps names local and
 state contained.
 
 A short statement in if/for/switch creates variables scoped to that construct:
+
     if r := n % 10; r != 0 {
         fmt.Println(r)      // r lives only inside this if/else
     }
 
 Declaring a name in an inner block can shadow an outer one — a common source of
 bugs:
+
     x := 1
     {
         x := 2      // a different variable, shadows the outer x
@@ -331,6 +357,7 @@ that matter, a variable accumulates the answer. This shape — loop, test,
 accumulate — solves an enormous number of small problems.
 
 Worked example — counting multiples of 3 from 1 to n:
+
     count := 0
     for i := 1; i <= n; i++ {
         if i%3 == 0 {
@@ -364,16 +391,19 @@ the example as a sum in your head before doing the challenge.`,
 					Lesson: `Real numbers use floating-point types. The default is float64 (8 bytes);
 float32 (4 bytes) trades precision for memory. A literal with a decimal point
 is inferred as float64:
+
     pi := 3.14159        // float64
 
 Floating-point can't represent every decimal exactly, so arithmetic accrues
 tiny errors:
+
     fmt.Println(0.1 + 0.2)          // 0.30000000000000004
     fmt.Println(0.1+0.2 == 0.3)     // false
 
 Never compare floats with ==. Instead check that the absolute difference is
 within a small tolerance, using math.Abs (add import "math" above your
 function to use it):
+
     math.Abs(a-b) < 1e-9
 
 Printf's %f verb controls formatting: %8.3f means width 8, 3 digits after the
@@ -398,10 +428,12 @@ uint8..uint64. int and uint are the machine word size (usually 64-bit). A whole
 
 Sized integers have a fixed range, and exceeding it wraps around rather than
 erroring:
+
     var b uint8 = 255
     b++                 // 0  (uint8 holds 0..255)
 
 Types don't mix implicitly — you must convert explicitly with T(value):
+
     var i int = 300
     var b uint8 = uint8(i)   // 300 wraps to 44
     var back int = int(b)    // 44
@@ -430,6 +462,7 @@ study methods properly later; here just follow the pattern).
 
 Create them with big.NewInt(x) from an int64, or from a string for values too
 large to write as a literal:
+
     a := big.NewInt(2)
     n := new(big.Int)
     n.Exp(a, big.NewInt(100), nil)   // 2^100
@@ -472,6 +505,7 @@ An empty string "" is the zero value — the natural starting point for an
 accumulator, just like 0 for a sum.
 
 Worked example — a separated list without a trailing separator:
+
     out := ""
     for i := 1; i <= 3; i++ {
         if out != "" {
@@ -496,12 +530,14 @@ Worked example — a separated list without a trailing separator:
 					Title: "Strings",
 					Lesson: `A string is an immutable sequence of bytes, usually UTF-8 text. You can read a
 byte by index but never assign to one:
+
     s := "shalom"
     fmt.Println(s[0])     // 115 (the byte 's')
     // s[0] = 'x'         // compile error: strings are immutable
 
 Slicing takes a substring by byte positions — s[i:j] is bytes i up to (not
 including) j; omit an end to mean "from the start" or "to the end":
+
     s[0:3]   // "sha"
     s[:1]    // "s"  (the first byte, as a string)
     s[3:]    // "lom"
@@ -513,6 +549,7 @@ take the bytes verbatim across multiple lines.
 The strings package has the everyday helpers: Fields (split on whitespace),
 Split, Join, ToUpper/ToLower, Contains, HasPrefix, ReplaceAll. Fields returns
 a collection you can walk with range:
+
     for _, w := range strings.Fields("ada lovelace") {
         fmt.Println(w)        // "ada", then "lovelace"
     }`,
@@ -534,12 +571,14 @@ a collection you can walk with range:
 8-bit unit; a rune (alias for int32) is one Unicode code point — a "character".
 Non-ASCII characters take more than one byte, so byte length and character
 count differ:
+
     s := "Héllo"
     len(s)                          // 6 bytes (é is 2 bytes)
     utf8.RuneCountInString(s)       // 5 runes
 
 Indexing a string gives bytes. To work with characters, range over the string
 (it decodes runes for you) or use the unicode/utf8 package:
+
     for i, r := range s {           // i is the byte offset, r is a rune
         fmt.Printf("%d %c\n", i, r)
     }`,
@@ -559,20 +598,24 @@ Indexing a string gives bytes. To work with characters, range over the string
 					Title: "Type conversions",
 					Lesson: `Go never converts between types implicitly. Mixing types is a compile error;
 you convert explicitly with T(value):
+
     var age int = 41
     var marsAge float64 = float64(age)
 
 Numbers and strings need the strconv package, not a plain conversion
 (string(65) gives the character "A", not "65"):
+
     s := strconv.Itoa(10)       // "10"
 
 To use a package, import it above your functions:
+
     import "strconv"
 
 (strconv.Atoi parses the other way, string to int — it returns a value AND an
 error, a two-result pattern you'll learn with functions later.)
 
 Worked example — labeling a count:
+
     msg := "items: " + strconv.Itoa(count)`,
 					Challenge: Challenge{
 						Prompt:      "Write FizzBuzzAt(n int) string: \"Fizz\" if n is divisible by 3, \"Buzz\" by 5, \"FizzBuzz\" by both, otherwise n itself as a string (strconv.Itoa).",
@@ -603,10 +646,12 @@ func goIntermediate() []Module {
 small, testable pieces — which is exactly what each challenge here asks you to
 write. A function lists its parameters and return types, and parameters of the
 same type can share it:
+
     func add(a, b int) int { return a + b }
 
 Go functions can return more than one value — used constantly for (result,
 error) and for returning related values together:
+
     func divmod(a, b int) (int, int) {
         return a / b, a % b
     }
@@ -629,6 +674,7 @@ values. Use named returns sparingly, where they aid clarity.`,
 					Title: "Methods & defined types",
 					Lesson: `You can define your own named types on top of existing ones, then attach
 methods to them. A method is a function with a receiver written before its name:
+
     type Celsius float64
 
     func (c Celsius) Fahrenheit() float64 {
@@ -658,11 +704,13 @@ accident — the type system encodes meaning.`,
 					Lesson: `Functions in Go are values: you can store one in a variable, pass it as an
 argument, and return it from another function. That lets you parameterize
 behavior instead of hard-coding it.
+
     op := func(a, b int) int { return a + b }
     fmt.Println(op(2, 3))   // 5
 
 A function that returns a function can combine behaviors. Here "twice" runs any
 int->int function two times in a row:
+
     func twice(f func(int) int) func(int) int {
         return func(x int) int { return f(f(x)) }
     }
@@ -687,6 +735,7 @@ signatures read clearly.`,
 					Lesson: `An anonymous function can capture variables from the scope where it's defined
 — that combination is a closure. The captured variables persist between calls,
 giving the function private, mutable state:
+
     func counter() func() int {
         n := 0
         return func() int {
@@ -714,6 +763,7 @@ are independent.`,
 					Title: "Recursion",
 					Lesson: `A function that calls itself is recursive. Every recursion needs a base case
 that stops the calls and a recursive case that moves toward it:
+
     func fact(n int) int {
         if n == 0 {            // base case
             return 1
@@ -741,6 +791,7 @@ and divide-and-conquer — though a plain loop is often just as clear.`,
 					Title: "Generics",
 					Lesson: `Generics let one function work with many types via type parameters, written in
 square brackets after the name. A constraint says what the type must support:
+
     func Max[T cmp.Ordered](a, b T) T {
         if a > b {
             return a
@@ -777,6 +828,7 @@ the type argument from the call, so you rarely write Max[int](...) explicitly.`,
 					Lesson: `An array has a fixed length that is part of its type: [3]int and [4]int are
 different types. Index from 0; out-of-range access is a compile error (constant
 index) or a runtime panic.
+
     var a [3]int
     a[0] = 10
     b := [3]int{1, 2, 3}     // composite literal
@@ -800,6 +852,7 @@ than slices (next topic), which are built on top of them.`,
 					Lesson: `A slice is a flexible view into an underlying array: it holds a pointer, a
 length, and a capacity. Slice an array or another slice with [low:high] (high
 is exclusive):
+
     xs := []int{10, 20, 30, 40}
     mid := xs[1:3]            // [20 30]
 
@@ -822,12 +875,14 @@ each other's changes. The empty slice []int{} has length 0.`,
 					Title: "append, len & cap",
 					Lesson: `Grow a slice with append, which returns a (possibly newly allocated) slice —
 always assign the result back:
+
     s := []int{}
     s = append(s, 1, 2, 3)
 
 len(s) is the number of elements; cap(s) is how many the backing array can hold
 before append must allocate a bigger one. When you know the size, preallocate
 to avoid repeated growth:
+
     s := make([]int, 0, 100)   // len 0, cap 100
 
 Building a result slice by appending in a loop is the standard Go pattern.`,
@@ -846,6 +901,7 @@ Building a result slice by appending in a loop is the standard Go pattern.`,
 					Title: "Variadic functions",
 					Lesson: `A variadic function accepts any number of trailing arguments of a type,
 written with ... before the type. Inside, the parameter is a slice:
+
     func sum(nums ...int) int {
         total := 0
         for _, n := range nums {
@@ -858,6 +914,7 @@ written with ... before the type. Inside, the parameter is a slice:
 
 You can pass an existing slice to a variadic function by "spreading" it with
 ...:
+
     xs := []int{1, 2, 3}
     sum(xs...)`,
 					Challenge: Challenge{
@@ -876,10 +933,12 @@ You can pass an existing slice to a variadic function by "spreading" it with
 					Title: "Maps & sets",
 					Lesson: `A map stores key/value pairs with fast lookup: map[K]V. Reading a missing key
 returns the value type's zero value, which makes counting trivial:
+
     counts := map[string]int{}
     counts["a"]++            // missing key starts at 0 -> becomes 1
 
 Use the comma-ok form to tell "absent" from "zero":
+
     v, ok := counts["b"]     // ok is false if "b" isn't present
 
 A map[T]bool is the idiomatic set: store true for members and test with the
@@ -900,17 +959,20 @@ comma-ok form. Maps are reference types — assigning one doesn't copy it.`,
 					Lesson: `"for ... range" walks the elements of a built-in collection, handing you a
 position and a value on each pass — it's how you iterate without managing an
 index by hand. Over a slice you get the index and the element:
+
     nums := []int{10, 20, 30}
     for i, n := range nums {
         // i = 0,1,2   n = 10,20,30
     }
 
 Use _ to ignore the half you don't need:
+
     for _, n := range nums { sum += n }   // values only
     for i := range nums { ... }           // indexes only
 
 Over a map you get key, value (in no guaranteed order); over a string you get the
 byte index and the decoded rune:
+
     for k, v := range counts { ... }
     for i, r := range "go" { ... }        // r is a rune`,
 					Challenge: Challenge{
@@ -939,6 +1001,7 @@ func goAdvanced() []Module {
 					Lesson: `So far you've mostly computed with built-in types. Real programs also MODEL
 things — a user, a rectangle, an order — by defining their own types. A struct is
 Go's main tool for that: it groups named fields into a single value type:
+
     type Rect struct {
         W, H int
     }
@@ -948,6 +1011,7 @@ Go's main tool for that: it groups named fields into a single value type:
 Structs are values: assigning a struct or passing it to a function copies every
 field. A slice of structs ([]Rect) is a common way to hold many records, and
 you can build one with a composite literal:
+
     rs := []Rect{{1, 2}, {3, 4}}`,
 					Challenge: Challenge{
 						Prompt:      "Given the Rect struct, write TotalWidth(rs []Rect) int returning the sum of every rectangle's W.",
@@ -964,12 +1028,14 @@ you can build one with a composite literal:
 					Title: "JSON & struct tags",
 					Lesson: `The encoding/json package converts Go values to and from JSON. json.Marshal
 returns the JSON bytes:
+
     b, err := json.Marshal(value)
 
 Only exported (capitalized) fields are encoded. A struct tag — written in
 back-quotes right after the field's type — renames a field in the output. Here
 the fields are tagged json:"x" and json:"y" (the editor stub below shows the
 real back-quote syntax):
+
     type Point struct {
         X int   // tag: json:"x"
         Y int   // tag: json:"y"
@@ -992,12 +1058,14 @@ other way, filling a struct from JSON bytes.`,
 					Lesson: `Go has no classes, but structs + methods cover the same ground. A constructor
 is just a function (by convention NewXxx) that builds and returns a value,
 often a pointer:
+
     func NewAccount(initial int) *Account {
         return &Account{balance: initial}
     }
 
 A method with a pointer receiver (*T) can modify the value; a value receiver
 (T) gets a copy and can only read:
+
     func (a *Account) Deposit(n int) { a.balance += n }   // mutates
     func (a Account) Balance() int   { return a.balance } // reads
 
@@ -1017,6 +1085,7 @@ Call them the same way: a.Deposit(50); Go takes the address automatically.`,
 					Title: "Composition & embedding",
 					Lesson: `Go favors composition over inheritance. Embedding a type in a struct (writing
 it with no field name) promotes its fields and methods to the outer struct:
+
     type Animal struct{ Name string }
     func (a Animal) Describe() string { return a.Name }
 
@@ -1047,12 +1116,14 @@ the embedded one; you can still reach the inner via d.Animal.Describe().`,
 					Lesson: `An interface is a set of method signatures. A type satisfies an interface
 simply by having those methods — there is no "implements" keyword, so types and
 interfaces can be defined independently:
+
     type Shape interface {
         Area() int
     }
 
 If Rect and Circle both have an Area() int method, both are Shapes, and one
 function can handle either:
+
     func totalArea(shapes []Shape) int {
         sum := 0
         for _, s := range shapes {
@@ -1083,6 +1154,7 @@ This implicit, structural satisfaction is the heart of Go's polymorphism.`,
 					Title: "Pointers",
 					Lesson: `A pointer holds the address of a value. &x takes the address of x; *p
 dereferences p to read or write the value it points at:
+
     x := 10
     p := &x          // p is a *int
     fmt.Println(*p)  // 10
@@ -1108,6 +1180,7 @@ mutating state across calls.`,
 					Lesson: `Because Go passes arguments by value, a function that takes a struct by value
 gets a copy — changes to it don't affect the caller's value. To mutate the
 original, pass a pointer:
+
     func grow(r *Rect, factor int) {
         r.W *= factor      // r.W is shorthand for (*r).W
         r.H *= factor
@@ -1138,12 +1211,14 @@ reference-like, so functions can modify their contents without a pointer.`,
 					Title: "Error wrapping",
 					Lesson: `Production Go code treats errors as values with context. Return early when an
 operation fails, and wrap lower-level errors so callers can still inspect them:
+
     n, err := strconv.Atoi(s)
     if err != nil {
         return 0, fmt.Errorf("parse port %q: %w", s, err)
     }
 
 For domain errors, define a sentinel with errors.New and wrap it with %w:
+
     var ErrInvalidPort = errors.New("invalid port")
     return 0, fmt.Errorf("%w: %d", ErrInvalidPort, n)
 
@@ -1165,11 +1240,13 @@ extra detail. Good app errors say what failed and preserve the cause.`,
 					Title: "Sorting",
 					Lesson: `The sort package orders slices in place. The helpers sort.Ints, sort.Float64s,
 and sort.Strings cover the common cases:
+
     xs := []int{3, 1, 2}
     sort.Ints(xs)            // [1 2 3]
 
 For anything else, sort.Slice takes a "less" function comparing two indices;
 sort.SliceStable keeps the original order of elements that compare equal:
+
     sort.SliceStable(people, func(i, j int) bool {
         return people[i].Age < people[j].Age
     })
@@ -1193,6 +1270,7 @@ pass rather than returning a new one.`,
 					Lesson: `panic stops normal flow and unwinds the stack; a deferred function can call
 recover to halt the unwinding and handle it. The classic use is turning an
 unexpected panic into an ordinary error at an API boundary:
+
     func safe() (err error) {
         defer func() {
             if r := recover(); r != nil {
@@ -1222,11 +1300,13 @@ one bad request can't crash the whole server.`,
 					Title: "Number parsing",
 					Lesson: `Text from files, flags, and HTTP requests arrives as strings; the strconv
 package converts to and from numbers. Atoi/Itoa cover base-10 ints:
+
     n, err := strconv.Atoi("42")   // 42, nil
     s := strconv.Itoa(42)          // "42"
 
 ParseInt, ParseFloat, and ParseBool give more control (base, bit size) and, like
 Atoi, return an error you must check — bad input is normal, not exceptional:
+
     f, err := strconv.ParseFloat("3.14", 64)
 
 Always handle the error: a failed parse returns the zero value plus a non-nil
@@ -1246,6 +1326,7 @@ err describing the bad input.`,
 					ID:    "go-a-io-writer",
 					Title: "io.Writer",
 					Lesson: `The io package gives Go apps small interfaces that compose well. io.Writer is:
+
     type Writer interface {
         Write([]byte) (int, error)
     }
@@ -1271,12 +1352,14 @@ visible to the caller.`,
 					ID:    "go-a-http-json",
 					Title: "HTTP JSON handlers",
 					Lesson: `A Go web API is often just functions with this shape:
+
     func handler(w http.ResponseWriter, r *http.Request)
 
 Read from the request, set response headers, choose a status code, and write a
 body. For JSON APIs, set Content-Type and use json.NewEncoder(w).Encode(value).
 
 Handlers are easy to test with net/http/httptest:
+
     req := httptest.NewRequest(http.MethodGet, "/hello?name=Ada", nil)
     rec := httptest.NewRecorder()
     handler(rec, req)
@@ -1296,11 +1379,13 @@ That lets you verify status, headers, and body without opening a real port.`,
 					ID:    "go-a-channels",
 					Title: "Goroutines & channels",
 					Lesson: `A goroutine runs a function concurrently:
+
     go doWork()
 
 Channels let goroutines communicate. Send with ch <- v, receive with v := <-ch,
 and close a channel when no more values will be sent. A range loop over a
 channel receives until it is closed:
+
     for v := range ch {
         use(v)
     }
@@ -1325,6 +1410,7 @@ through app code. The most important rule: if your function may block, accept a
 context and stop when ctx.Done() is closed.
 
 The pattern is usually a select:
+
     select {
     case v := <-work:
         return v, nil
@@ -1353,6 +1439,7 @@ timeouts can unwind work instead of leaking goroutines.`,
 					ID:    "go-a-bubbletea-model",
 					Title: "Model, Update, View",
 					Lesson: `Bubble Tea uses The Elm Architecture. A TUI is a loop around three ideas:
+
     Model   // all state needed to draw the screen
     Update  // takes a message, returns the next model
     View    // renders the model as a string
@@ -1378,6 +1465,7 @@ on the new Model and View output.`,
 					Title: "Commands & messages",
 					Lesson: `Bubble Tea keeps Update pure-ish by representing side effects as commands.
 A command is a function that eventually returns a message:
+
     type Cmd func() Msg
 
 Update can return a new model and a command. Bubble Tea runs the command and
@@ -1404,6 +1492,7 @@ The model usually stores the items and the selected index. Update handles keys
 like up/down and clamps the cursor so it never points outside the slice.
 
 View then renders every row, using a marker for the selected item:
+
     > current
       other
 
@@ -1447,6 +1536,7 @@ recovery from panics:
 
 A deferred call's ARGUMENTS are evaluated right away, when the defer statement is
 reached — only the call itself is postponed to return time:
+
     defer fmt.Println("t", t)   // the value of t is captured here, not at return
 
 Use defer for cleanup at function entry - it's cleaner than multiple close()
@@ -1497,6 +1587,7 @@ This pattern lets you launch many concurrent tasks and wait for them all:
 When several goroutines touch the same variable, you also need a sync.Mutex so
 only one enters the critical section at a time. Lock before the shared access
 and Unlock after (defer is handy):
+
     var mu sync.Mutex
     mu.Lock()
     total += n       // safe: one goroutine here at a time

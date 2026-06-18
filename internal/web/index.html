@@ -6,8 +6,12 @@
 <title>Meari</title>
 <style>
   :root {
-    --bg: #1e1f26; --panel: #25262e; --panel2: #2c2e38; --border: #3a3d4a;
-    --text: #e6e7ea; --muted: #9aa0ad; --accent: #6ea8fe; --ok: #6ee7a8;
+    /* Monokai */
+    --bg: #272822; --panel: #2d2e28; --panel2: #383930; --border: #49483e;
+    --text: #f8f8f2; --muted: #a59f85; --accent: #66d9ef; --ok: #a6e22e;
+    --code-bg: #1d1e19;
+    --mk-pink: #f92672; --mk-green: #a6e22e; --mk-orange: #fd971f;
+    --mk-yellow: #e6db74; --mk-blue: #66d9ef; --mk-purple: #ae81ff;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -19,11 +23,14 @@
     display: flex; align-items: center; gap: 12px; padding: 8px 14px;
     background: var(--panel); border-bottom: 1px solid var(--border);
   }
-  header .brand { font-weight: 700; letter-spacing: .3px; }
+  header .brand { font-weight: 700; letter-spacing: .3px; color: var(--mk-pink); }
   header .status { color: var(--muted); font-size: 12px; margin-left: auto; }
-  main { flex: 1; display: grid; grid-template-columns: 240px 1fr 320px; min-height: 0; }
+  main { flex: 1; display: grid;
+    grid-template-columns: var(--col-left, 240px) 6px minmax(0, 1fr) 6px var(--col-right, 440px);
+    min-height: 0; }
   .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-  .pane + .pane { border-left: 1px solid var(--border); }
+  .resizer { background: var(--border); cursor: col-resize; }
+  .resizer:hover, .resizer.active { background: var(--accent); }
   .pane h2 {
     font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted);
     margin: 0; padding: 10px 12px 6px;
@@ -43,44 +50,147 @@
   .row { display: flex; gap: 6px; margin-top: 6px; }
   .row > * { flex: 1; }
   .search { padding: 8px 12px; }
-  .tree { padding: 4px 6px; }
-  .subject { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; margin: 8px 8px 2px; }
-  .note { padding: 5px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .note:hover { background: var(--panel2); }
+  .tree { padding: 4px 6px; font-size: 13px; }
+  .row-item {
+    display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px;
+    cursor: pointer; white-space: nowrap; overflow: hidden; line-height: 1.4;
+  }
+  .row-item:hover { background: var(--panel2); }
+  .row-item .label { overflow: hidden; text-overflow: ellipsis; }
+  .folder .chev { color: var(--muted); font-size: 9px; width: 10px; flex: none; text-align: center; }
+  .folder .label { font-weight: 600; }
+  .folder .icon, .note .icon { flex: none; opacity: .7; }
   .note.active { background: var(--accent); color: #11131a; }
+  .note.active .icon { opacity: 1; }
 
   /* editor */
   .editor-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
   .editor-head .title { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .editor-body { flex: 1; display: grid; grid-template-columns: 1fr; min-height: 0; }
-  .editor-body.split { grid-template-columns: 1fr 1fr; }
+  /* read/edit segmented toggle */
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg-btn { border: none; border-radius: 0; background: var(--panel); color: var(--muted);
+    padding: 5px 12px; font-size: 13px; }
+  .seg-btn:hover { color: var(--text); border-color: var(--border); }
+  .seg-btn.active { background: var(--accent); color: #11131a; font-weight: 600; }
+
+  .editor-body { flex: 1; display: flex; min-height: 0; }
+  .editor-body > #editor, .editor-body > .preview { flex: 1; min-height: 0; min-width: 0; }
+  /* mode toggles which child is visible */
+  .editor-body.mode-read  > #editor  { display: none; }
+  .editor-body.mode-edit  > .preview { display: none; }
   textarea#editor { width: 100%; height: 100%; resize: none; border: none; border-radius: 0;
-    background: #1b1c22; padding: 14px; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .preview { padding: 14px 18px; overflow: auto; border-left: 1px solid var(--border); }
-  .preview h1, .preview h2, .preview h3 { line-height: 1.25; }
-  .preview pre { background: #1b1c22; padding: 10px; border-radius: 6px; overflow: auto; }
-  .preview code { background: #1b1c22; padding: 1px 4px; border-radius: 4px; }
-  .wikilink { color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--accent); }
+    background: var(--code-bg); color: var(--text); padding: 14px; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* read mode: a readable, colored markdown theme */
+  .preview { padding: 28px 32px; overflow: auto; }
+  .preview .doc { max-width: 760px; margin: 0 auto; font-size: 15px; line-height: 1.7; }
+  .preview h1, .preview h2, .preview h3, .preview h4 { line-height: 1.25; font-weight: 700; }
+  .preview h1 { font-size: 1.9em; margin: .2em 0 .5em; padding-bottom: .3em; color: var(--mk-pink);
+    border-bottom: 2px solid var(--mk-pink); }
+  .preview h2 { font-size: 1.45em; margin: 1.6em 0 .5em; padding-bottom: .25em; color: var(--mk-green);
+    border-bottom: 1px solid var(--border); }
+  .preview h3 { font-size: 1.18em; margin: 1.4em 0 .4em; color: var(--mk-blue); }
+  .preview h4 { font-size: 1.02em; margin: 1.2em 0 .3em; color: var(--mk-orange); text-transform: uppercase; letter-spacing: .5px; }
+  .preview p { margin: .7em 0; }
+  .preview a, .wikilink { color: var(--mk-blue); text-decoration: none; }
+  .preview a:hover { text-decoration: underline; }
+  .wikilink { border-bottom: 1px dashed var(--mk-blue); cursor: pointer; }
+  .preview strong { color: var(--mk-orange); }
+  .preview em { color: var(--mk-yellow); font-style: italic; }
+  .preview ul, .preview ol { padding-left: 1.5em; margin: .6em 0; }
+  .preview li { margin: .25em 0; }
+  .preview li::marker { color: var(--mk-pink); }
+  .preview blockquote { margin: 1em 0; padding: .2em 1em; border-left: 3px solid var(--mk-purple);
+    color: var(--muted); background: var(--panel); border-radius: 0 6px 6px 0; }
+  .preview hr { border: none; border-top: 1px solid var(--border); margin: 1.6em 0; }
+  .preview pre { background: var(--code-bg); border: 1px solid var(--border); padding: 12px 14px;
+    border-radius: 8px; overflow: auto; margin: 1em 0; }
+  .preview pre code { background: none; padding: 0; color: var(--text); }
+  .preview code { background: var(--code-bg); color: var(--mk-green); padding: 2px 5px; border-radius: 4px;
+    font: .88em ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .preview table { border-collapse: collapse; margin: 1em 0; width: 100%; }
+  .preview th, .preview td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  .preview th { background: var(--panel); color: var(--mk-pink); }
+  .preview img { max-width: 100%; border-radius: 6px; }
+  /* selection feedback: vivid while selecting, and a persistent band on the asked passage */
+  .preview ::selection { background: var(--mk-yellow); color: #272822; }
+  ::highlight(asked) { background: rgba(230, 219, 116, .30); color: var(--mk-yellow); }
+  /* attached-selection chip above the chat composer */
+  .ctx-chip { display: flex; align-items: center; gap: 6px; margin: 0 12px 6px;
+    padding: 5px 8px; background: var(--panel2); border: 1px solid var(--mk-yellow);
+    border-radius: 7px; font-size: 12px; }
+  .ctx-chip .ctx-q { color: var(--mk-yellow); }
+  .ctx-chip .ctx-text { flex: 1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
+  .ctx-chip .ctx-x { cursor: pointer; color: var(--muted); padding: 0 2px; }
+  .ctx-chip .ctx-x:hover { color: var(--mk-pink); }
   .backlinks { border-top: 1px solid var(--border); padding: 8px 12px; }
   .backlinks .blink { color: var(--accent); cursor: pointer; font-size: 13px; }
 
   /* right pane */
-  .tabs { display: flex; gap: 4px; padding: 8px 12px 0; }
-  .tab { padding: 5px 10px; border-radius: 6px 6px 0 0; cursor: pointer; color: var(--muted); }
-  .tab.active { background: var(--panel2); color: var(--text); }
+  .tabs { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 5px 13px; border-radius: 7px; cursor: pointer; color: var(--muted); font-size: 13px; }
+  .tab:hover { color: var(--text); background: var(--panel2); }
+  .tab.active { background: var(--accent); color: #11131a; font-weight: 600; }
   .tabpane { display: none; flex-direction: column; flex: 1; min-height: 0; }
   .tabpane.active { display: flex; }
-  .messages { flex: 1; overflow: auto; padding: 10px 12px; }
-  .msg { margin-bottom: 10px; }
-  .msg .who { font-size: 11px; color: var(--muted); }
-  .msg .body { white-space: pre-wrap; }
-  .msg.user .body { color: var(--ok); }
-  .composer { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border); }
-  .composer textarea { flex: 1; height: 52px; resize: none; }
+  .messages { flex: 1; overflow: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { display: flex; flex-direction: column; max-width: 88%; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.tutor { align-self: flex-start; align-items: flex-start; }
+  .msg .who { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 6px 3px; }
+  .msg .body { white-space: pre-wrap; line-height: 1.55; padding: 9px 13px; border-radius: 14px; }
+  .msg.user .who { color: var(--mk-blue); }
+  .msg.user .body { background: var(--accent); color: #11131a; border-bottom-right-radius: 4px; }
+  .msg.tutor .who { color: var(--mk-green); }
+  .msg.tutor .body { background: var(--panel2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  /* streaming typing indicator */
+  .msg .body.typing { display: flex; gap: 4px; align-items: center; }
+  .body.typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite both; }
+  .body.typing span:nth-child(2) { animation-delay: .2s; }
+  .body.typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  .composer { display: flex; gap: 8px; padding: 6px 12px 12px; align-items: flex-end; }
+  .composer textarea:focus { border-color: var(--accent); outline: none; }
+  .composer textarea { flex: 1; height: 90px; max-height: 240px; resize: vertical; border-radius: 11px; padding: 10px 12px; }
   .study { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
   .study textarea { height: 120px; resize: vertical; }
   .grade { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 10px; white-space: pre-wrap; }
   .empty { color: var(--muted); padding: 24px; text-align: center; }
+  .messages .empty { margin: auto; }
+
+  /* courses tab */
+  .courses-head { display: flex; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid var(--border); }
+  .course-back { color: var(--mk-blue); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .course-back:hover { text-decoration: underline; }
+  .course-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .course-body { padding: 10px 12px; }
+  .course-card { padding: 11px 13px; margin-bottom: 8px; background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 9px; cursor: pointer; }
+  .course-card:hover { border-color: var(--accent); }
+  .course-card .cc-title { font-weight: 600; }
+  .course-card .cc-meta { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 3px; }
+  .course-prog { height: 5px; background: var(--panel); border-radius: 3px; overflow: hidden; margin: 4px 0 14px; }
+  .course-prog > div { height: 100%; background: var(--mk-green); width: 0; transition: width .2s; }
+  .course-prog-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .course-mod { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--mk-orange); margin: 14px 4px 6px; }
+  .topic { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; cursor: pointer; }
+  .topic:hover { background: var(--panel2); }
+  .topic.current { background: var(--panel2); box-shadow: inset 2px 0 0 var(--accent); }
+  .topic .check { flex: none; width: 16px; height: 16px; border: 1.5px solid var(--muted); border-radius: 50%;
+    font-size: 11px; line-height: 13px; text-align: center; color: var(--mk-green); }
+  .topic.done .check { border-color: var(--mk-green); }
+  .topic .t-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topic.done .t-title { color: var(--muted); }
+  /* left pane: files / courses toggle + views */
+  .leftbar { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .leftbar .seg { display: flex; width: 100%; }
+  .leftbar .seg-btn { flex: 1; }
+  .leftview { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .ask-pop { position: fixed; z-index: 60; display: none; transform: translate(-50%, -100%);
+    background: var(--accent); color: #11131a; font-size: 12px; font-weight: 600;
+    padding: 6px 11px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+    box-shadow: 0 6px 18px rgba(0,0,0,.45); user-select: none; }
+  .ask-pop:hover { filter: brightness(1.06); }
   .toast { position: fixed; bottom: 14px; right: 14px; background: var(--panel2); border: 1px solid var(--border);
     border-radius: 8px; padding: 8px 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: 1; }
@@ -94,33 +204,52 @@
 </header>
 
 <main>
-  <!-- LEFT: vault -->
+  <!-- LEFT: vault files / courses -->
   <section class="pane">
-    <h2>Vault</h2>
-    <div class="gen">
-      <input id="genInput" placeholder="Learn something… e.g. the Cold War">
-      <div class="row">
-        <button class="primary" id="genBtn">Generate lesson</button>
-        <button id="newBtn" title="New blank note">New</button>
+    <div class="leftbar">
+      <div class="seg" id="vaultToggle">
+        <button class="seg-btn active" data-view="files">Files</button>
+        <button class="seg-btn" data-view="courses">Courses</button>
       </div>
     </div>
-    <div class="search"><input id="searchInput" placeholder="Filter notes…"></div>
-    <div class="scroll"><div class="tree" id="tree"></div></div>
+    <!-- files view -->
+    <div class="leftview" id="view-files">
+      <div class="gen">
+        <button id="newBtn" title="New blank note" style="width:100%">New note</button>
+      </div>
+      <div class="search"><input id="searchInput" placeholder="Filter notes…"></div>
+      <div class="scroll"><div class="tree" id="tree"></div></div>
+    </div>
+    <!-- courses view -->
+    <div class="leftview" id="view-courses" style="display:none">
+      <div class="courses-head">
+        <span id="courseBack" class="course-back" style="display:none">← Courses</span>
+        <span id="courseTitle" class="course-title">Courses</span>
+      </div>
+      <div class="scroll"><div id="courseBody" class="course-body"></div></div>
+    </div>
   </section>
+
+  <div class="resizer" id="resizeL" title="Drag to resize"></div>
 
   <!-- CENTER: editor + preview -->
   <section class="pane">
     <div class="editor-head">
       <span class="title" id="noteTitle">No note open</span>
-      <button id="previewBtn">Preview</button>
+      <div class="seg" id="modeToggle">
+        <button class="seg-btn active" data-mode="read">Read</button>
+        <button class="seg-btn" data-mode="edit">Edit</button>
+      </div>
       <button class="primary" id="saveBtn">Save</button>
     </div>
     <div class="editor-body" id="editorBody">
       <textarea id="editor" placeholder="Open a note from the vault, or generate a lesson…" spellcheck="false"></textarea>
-      <div class="preview" id="preview" style="display:none"></div>
+      <div class="preview" id="preview"></div>
     </div>
     <div class="backlinks" id="backlinks" style="display:none"></div>
   </section>
+
+  <div class="resizer" id="resizeR" title="Drag to resize"></div>
 
   <!-- RIGHT: chat + study -->
   <section class="pane">
@@ -130,9 +259,13 @@
     </div>
     <div class="tabpane active" id="tab-chat">
       <div class="messages" id="messages"><div class="empty">Ask the tutor anything.</div></div>
+      <div id="ctxChip" class="ctx-chip" style="display:none">
+        <span class="ctx-q">✦</span>
+        <span class="ctx-text" id="ctxText"></span>
+        <span class="ctx-x" id="ctxClear" title="Remove selected passage">✕</span>
+      </div>
       <div class="composer">
         <textarea id="chatInput" placeholder="Ask a question… (Enter to send)"></textarea>
-        <button class="primary" id="chatSend">Send</button>
       </div>
     </div>
     <div class="tabpane" id="tab-study">
@@ -151,12 +284,15 @@
   </section>
 </main>
 
+<div class="ask-pop" id="askPopover">✦ Ask the tutor</div>
 <div class="toast" id="toast"></div>
 
 <script>
 const $ = (s) => document.querySelector(s);
-let notes = [];
+let entries = [];       // flat [{path, name, dir}] from /api/tree
 let current = null;     // current note path
+let collapsed = new Set();   // folder paths the user has collapsed
+let treeInit = false;        // first load seeds all folders collapsed
 let chatHist = [];      // [{role, content}]
 
 function toast(msg) {
@@ -177,29 +313,84 @@ async function api(method, url, body) {
 // ---- vault tree ----
 async function loadTree() {
   const data = await api("GET", "/api/tree");
-  notes = data.notes || [];
+  entries = data.entries || [];
+  if (!treeInit) {   // start with every folder collapsed; user expands what they want
+    for (const e of entries) if (e.dir) collapsed.add(e.path);
+    treeInit = true;
+  }
   renderTree();
 }
+
+// Build a nested tree from the flat, path-sorted entry list. Intermediate
+// folders are synthesized when only a deeper note carries the path.
+function buildTree() {
+  const root = { name: "", path: "", dir: true, children: {} };
+  for (const e of entries) {
+    const parts = e.path.split("/");
+    let node = root;
+    for (let i = 0; i < parts.length; i++) {
+      const seg = parts[i], last = i === parts.length - 1;
+      if (!node.children[seg]) {
+        node.children[seg] = {
+          name: seg, path: parts.slice(0, i + 1).join("/"),
+          dir: true, children: {},
+        };
+      }
+      node = node.children[seg];
+      if (last) { node.dir = e.dir; node.name = e.name || seg; }
+    }
+  }
+  return root;
+}
+
+// A subtree is visible under a filter when it (a note) or any descendant matches.
+function subtreeMatches(node, filter) {
+  if (!filter) return true;
+  if (!node.dir) return node.name.toLowerCase().includes(filter);
+  return Object.values(node.children).some(c => subtreeMatches(c, filter));
+}
+
 function renderTree() {
   const filter = $("#searchInput").value.trim().toLowerCase();
   const tree = $("#tree"); tree.innerHTML = "";
-  const shown = notes.filter(n => !filter ||
-    n.title.toLowerCase().includes(filter) || (n.subject||"").toLowerCase().includes(filter));
-  if (shown.length === 0) {
+  const root = buildTree();
+  if (Object.keys(root.children).length === 0) {
     tree.innerHTML = '<div class="empty">No notes yet.<br>Generate a lesson to begin.</div>';
     return;
   }
-  const groups = {};
-  for (const n of shown) { (groups[n.subject || "—"] ||= []).push(n); }
-  for (const subject of Object.keys(groups).sort()) {
-    const h = document.createElement("div"); h.className = "subject"; h.textContent = subject;
-    tree.appendChild(h);
-    for (const n of groups[subject]) {
+  renderChildren(root, tree, 0, filter);
+  if (!tree.childElementCount) tree.innerHTML = '<div class="empty">No matches.</div>';
+}
+
+function renderChildren(node, container, depth, filter) {
+  const kids = Object.values(node.children).sort((a, b) =>
+    a.dir !== b.dir ? (a.dir ? -1 : 1) : a.name.localeCompare(b.name));
+  for (const k of kids) {
+    if (filter && !subtreeMatches(k, filter)) continue;
+    const indent = 6 + depth * 14;
+    if (k.dir) {
+      const open = filter ? true : !collapsed.has(k.path);
+      const row = document.createElement("div");
+      row.className = "row-item folder";
+      row.style.paddingLeft = indent + "px";
+      row.innerHTML = `<span class="chev">${open ? "▾" : "▸"}</span><span class="icon">📁</span><span class="label"></span>`;
+      row.querySelector(".label").textContent = k.name;
+      row.title = k.path;
+      row.onclick = () => {
+        if (collapsed.has(k.path)) collapsed.delete(k.path); else collapsed.add(k.path);
+        renderTree();
+      };
+      container.appendChild(row);
+      if (open) renderChildren(k, container, depth + 1, filter);
+    } else {
       const el = document.createElement("div");
-      el.className = "note" + (n.path === current ? " active" : "");
-      el.textContent = n.title; el.title = n.path;
-      el.onclick = () => openNote(n.path);
-      tree.appendChild(el);
+      el.className = "row-item note" + (k.path === current ? " active" : "");
+      el.style.paddingLeft = (indent + 16) + "px";
+      el.innerHTML = `<span class="icon">📄</span><span class="label"></span>`;
+      el.querySelector(".label").textContent = k.name;
+      el.title = k.path;
+      el.onclick = () => openNote(k.path);
+      container.appendChild(el);
     }
   }
 }
@@ -211,7 +402,7 @@ async function openNote(path) {
     current = n.path;
     $("#noteTitle").textContent = n.title + (n.subject ? "  ·  " + n.subject : "");
     $("#editor").value = n.body;
-    showPreview(false);
+    setMode("read");          // reading-first: open notes rendered
     renderTree();
     loadBacklinks();
   } catch (e) { toast("Open failed: " + e.message); }
@@ -221,7 +412,7 @@ async function saveNote() {
   try {
     await api("PUT", "/api/note", { path: current, body: $("#editor").value });
     toast("Saved");
-    if ($("#preview").style.display !== "none") refreshPreview();
+    if (mode === "read") refreshPreview();
   } catch (e) { toast("Save failed: " + e.message); }
 }
 async function newNote() {
@@ -233,35 +424,28 @@ async function newNote() {
   $("#editor").value = "# " + title + "\n\n";
   await saveNote();
   await loadTree();
-}
-async function generate() {
-  const req = $("#genInput").value.trim();
-  if (!req) { toast("Type what you want to learn"); return; }
-  setStatus("generating lesson…");
-  $("#genBtn").disabled = true;
-  try {
-    const r = await api("POST", "/api/generate", { request: req });
-    $("#genInput").value = "";
-    await loadTree();
-    await openNote(r.path);
-    toast("Created: " + r.title);
-  } catch (e) { toast("Generate failed: " + e.message); }
-  finally { setStatus(""); $("#genBtn").disabled = false; }
+  setMode("edit");            // new note → straight into editing
 }
 
 // ---- preview + backlinks ----
-let previewOn = false;
-function showPreview(on) {
-  previewOn = on;
-  $("#preview").style.display = on ? "block" : "none";
-  $("#editorBody").classList.toggle("split", on);
-  $("#previewBtn").textContent = on ? "Hide preview" : "Preview";
-  if (on) refreshPreview();
+let mode = "read";            // "read" (rendered) | "edit" (textarea)
+function setMode(m) {
+  mode = m;
+  hideAsk();
+  $("#editorBody").classList.toggle("mode-read", m === "read");
+  $("#editorBody").classList.toggle("mode-edit", m === "edit");
+  $("#saveBtn").style.display = m === "edit" ? "" : "none";
+  document.querySelectorAll("#modeToggle .seg-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.mode === m));
+  if (m === "read") refreshPreview();
+  else $("#editor").focus();
 }
 async function refreshPreview() {
+  if (!current) { $("#preview").innerHTML = '<div class="doc"><p style="color:var(--muted)">Open a note to read it.</p></div>'; return; }
   try {
     const r = await api("POST", "/api/preview", { body: $("#editor").value });
-    $("#preview").innerHTML = r.html;
+    clearAsked();   // ranges from a prior render are now stale
+    $("#preview").innerHTML = '<div class="doc">' + r.html + '</div>';
     $("#preview").querySelectorAll(".wikilink").forEach(a => {
       a.onclick = (e) => { e.preventDefault(); openByTarget(a.dataset.target); };
     });
@@ -269,9 +453,49 @@ async function refreshPreview() {
 }
 function openByTarget(target) {
   const t = target.toLowerCase();
-  const hit = notes.find(n => n.title.toLowerCase() === t ||
-    n.path.toLowerCase().endsWith("/" + t + ".md") || n.path.toLowerCase() === t + ".md");
+  const hit = entries.find(n => !n.dir && (n.name.toLowerCase() === t ||
+    n.path.toLowerCase().endsWith("/" + t + ".md") || n.path.toLowerCase() === t + ".md"));
   if (hit) openNote(hit.path); else toast('No note named "' + target + '" yet');
+}
+
+// ---- ask the tutor about a selected passage (read mode) ----
+let askSelection = "";   // the text last selected inside the rendered note
+let askRange = null;     // its DOM range, so we can keep it highlighted after asking
+const HL = window.CSS && CSS.highlights;  // Custom Highlight API (no DOM mutation)
+function clearAsked() { if (HL) CSS.highlights.delete("asked"); }
+function hideAsk() { $("#askPopover").style.display = "none"; }
+function refreshAsk() {
+  if (mode !== "read") { hideAsk(); return; }
+  const sel = window.getSelection();
+  const text = sel && sel.rangeCount ? sel.toString().trim() : "";
+  if (!text || !$("#preview").contains(sel.anchorNode)) { hideAsk(); return; }
+  askSelection = text;
+  askRange = sel.getRangeAt(0).cloneRange();
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  const pop = $("#askPopover");
+  pop.style.display = "block";
+  pop.style.left = (rect.left + rect.width / 2) + "px";
+  pop.style.top = (rect.top - 8) + "px";
+}
+let pendingSelection = "";   // passage attached to the next chat message (not pasted)
+function showCtxChip() {
+  const chip = $("#ctxChip");
+  if (!pendingSelection) { chip.style.display = "none"; return; }
+  const s = pendingSelection.replace(/\s+/g, " ");
+  $("#ctxText").textContent = "“" + (s.length > 90 ? s.slice(0, 90) + "…" : s) + "”";
+  chip.style.display = "flex";
+}
+function clearCtxChip() { pendingSelection = ""; $("#ctxChip").style.display = "none"; }
+function askAboutSelection() {
+  if (!askSelection) return;
+  // keep the asked passage visibly highlighted after the selection clears
+  if (HL && askRange) { CSS.highlights.set("asked", new Highlight(askRange)); }
+  window.getSelection().removeAllRanges();
+  pendingSelection = askSelection;   // attached as context; the input stays clean
+  showCtxChip();
+  selectTab("chat");
+  $("#chatInput").focus();
+  hideAsk();
 }
 async function loadBacklinks() {
   if (!current) return;
@@ -299,8 +523,14 @@ function renderChat() {
   for (const m of chatHist) {
     const el = document.createElement("div");
     el.className = "msg " + (m.role === "user" ? "user" : "tutor");
-    el.innerHTML = '<div class="who">' + (m.role === "user" ? "you" : "tutor") + '</div>';
-    const b = document.createElement("div"); b.className = "body"; b.textContent = m.content;
+    el.innerHTML = '<div class="who">' + (m.role === "user" ? "You" : "Tutor") + '</div>';
+    const b = document.createElement("div"); b.className = "body";
+    if (m.role !== "user" && m.content === "") {   // reply not started yet — show typing dots
+      b.classList.add("typing");
+      b.innerHTML = "<span></span><span></span><span></span>";
+    } else {
+      b.textContent = m.content;
+    }
     el.appendChild(b); box.appendChild(el);
   }
   box.scrollTop = box.scrollHeight;
@@ -308,17 +538,18 @@ function renderChat() {
 async function sendChat() {
   const text = $("#chatInput").value.trim();
   if (!text) return;
+  const selection = pendingSelection;   // attached passage, sent as context only
   chatHist.push({ role: "user", content: text });
-  $("#chatInput").value = ""; renderChat();
+  $("#chatInput").value = ""; clearCtxChip(); renderChat();
   setStatus("tutor thinking…");
   // The reply streams as plain text chunks; grow a live assistant message.
-  // `path` grounds the reply in the currently open note.
+  // `path` grounds the reply in the open note; `selection` in the highlighted passage.
   chatHist.push({ role: "assistant", content: "" });
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ history: chatHist.slice(0, -1), path: current || "" }),
+      body: JSON.stringify({ history: chatHist.slice(0, -1), path: current || "", selection }),
     });
     if (!res.ok) { throw new Error((await res.text()) || res.statusText); }
     const reader = res.body.getReader();
@@ -350,9 +581,15 @@ async function submitEssay() {
   } catch (e) { toast("Grade failed: " + e.message); }
   finally { setStatus(""); $("#essaySubmit").disabled = false; }
 }
+let studyAnswerStash = "";   // a course topic's authored model answer, if any
 async function revealAnswer() {
   const prompt = $("#essayPrompt").value.trim();
   if (!prompt) { toast("Type the prompt first"); return; }
+  if (studyAnswerStash) {   // course lecture ships its own reference answer
+    const el = $("#essayModel"); el.style.display = "block";
+    el.textContent = "Model answer\n\n" + studyAnswerStash;
+    return;
+  }
   setStatus("writing model answer…"); $("#essayReveal").disabled = true;
   try {
     const r = await api("POST", "/api/study/answer", { prompt });
@@ -362,29 +599,159 @@ async function revealAnswer() {
   finally { setStatus(""); $("#essayReveal").disabled = false; }
 }
 
+// ---- courses: list -> outline -> walk lectures ----
+let curCourse = null;     // loaded course detail
+let curTopicKey = null;   // highlighted lecture
+function topicKey(t) { return t.id || t.notePath; }
+function progKey(id) { return "meari-progress:" + id; }
+function getDone(id) { try { return new Set(JSON.parse(localStorage.getItem(progKey(id)) || "[]")); } catch { return new Set(); } }
+function saveDone(id, set) { localStorage.setItem(progKey(id), JSON.stringify([...set])); }
+
+async function loadCourses() {
+  curCourse = null;
+  $("#courseBack").style.display = "none";
+  $("#courseTitle").textContent = "Courses";
+  const body = $("#courseBody");
+  body.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const list = (await api("GET", "/api/courses")).courses || [];
+    if (!list.length) { body.innerHTML = '<div class="empty">No courses yet.<br>Build one in the TUI with :course.</div>'; return; }
+    body.innerHTML = "";
+    for (const c of list) {
+      const done = getDone(c.id), card = document.createElement("div");
+      card.className = "course-card";
+      card.innerHTML = '<div class="cc-title"></div><div class="cc-meta"></div>';
+      card.querySelector(".cc-title").textContent = c.title;
+      card.querySelector(".cc-meta").textContent = (c.level || "course") + (done.size ? " · " + done.size + " done" : "");
+      card.onclick = () => openCourse(c.id);
+      body.appendChild(card);
+    }
+  } catch (e) { body.innerHTML = '<div class="empty">Failed: ' + e.message + '</div>'; }
+}
+
+async function openCourse(id) {
+  $("#courseBody").innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    curCourse = await api("GET", "/api/course?id=" + encodeURIComponent(id));
+    $("#courseBack").style.display = "inline";
+    $("#courseTitle").textContent = curCourse.title;
+    renderCourse();
+  } catch (e) { $("#courseBody").innerHTML = '<div class="empty">Failed: ' + e.message + '</div>'; }
+}
+
+function renderCourse() {
+  const c = curCourse; if (!c) return;
+  const done = getDone(c.id);
+  const topics = (c.modules || []).flatMap(m => m.topics || []);
+  const ndone = topics.filter(t => done.has(topicKey(t))).length;
+  const body = $("#courseBody"); body.innerHTML = "";
+  const lbl = document.createElement("div"); lbl.className = "course-prog-label";
+  lbl.textContent = ndone + " / " + topics.length + " complete";
+  const bar = document.createElement("div"); bar.className = "course-prog";
+  const fill = document.createElement("div"); fill.style.width = topics.length ? (100 * ndone / topics.length) + "%" : "0";
+  bar.appendChild(fill); body.appendChild(lbl); body.appendChild(bar);
+  for (const m of c.modules || []) {
+    const h = document.createElement("div"); h.className = "course-mod"; h.textContent = m.name; body.appendChild(h);
+    for (const t of m.topics || []) {
+      const key = topicKey(t), isDone = done.has(key);
+      const row = document.createElement("div");
+      row.className = "topic" + (isDone ? " done" : "") + (key === curTopicKey ? " current" : "");
+      row.innerHTML = '<span class="check"></span><span class="t-title"></span>';
+      row.querySelector(".check").textContent = isDone ? "✓" : "";
+      row.querySelector(".t-title").textContent = t.title;
+      row.querySelector(".check").onclick = (e) => { e.stopPropagation(); toggleDone(t); };
+      row.onclick = () => openLecture(t);
+      body.appendChild(row);
+    }
+  }
+}
+
+function toggleDone(t) {
+  const done = getDone(curCourse.id), key = topicKey(t);
+  done.has(key) ? done.delete(key) : done.add(key);
+  saveDone(curCourse.id, done); renderCourse();
+}
+
+async function openLecture(t) {
+  curTopicKey = topicKey(t);
+  if (t.notePath) await openNote(t.notePath);   // lesson opens in the center pane (read mode)
+  // load its study item into the Study tab without switching away from Courses
+  $("#essayPrompt").value = t.prompt || ("Explain " + t.title + " in your own words.");
+  $("#essayAnswer").value = "";
+  $("#essayGrade").style.display = "none";
+  $("#essayModel").style.display = "none";
+  studyAnswerStash = t.answer || "";
+  renderCourse();
+  toast("Lesson opened · study prompt ready in the Study tab");
+}
+
 // ---- wiring ----
-$("#genBtn").onclick = generate;
-$("#genInput").addEventListener("keydown", e => { if (e.key === "Enter") generate(); });
 $("#newBtn").onclick = newNote;
 $("#saveBtn").onclick = saveNote;
-$("#previewBtn").onclick = () => showPreview(!previewOn);
+document.querySelectorAll("#modeToggle .seg-btn").forEach(b =>
+  b.onclick = () => setMode(b.dataset.mode));
 $("#searchInput").addEventListener("input", renderTree);
-$("#chatSend").onclick = sendChat;
+// selection -> "Ask the tutor" popover in read mode
+$("#preview").addEventListener("mouseup", () => setTimeout(refreshAsk, 0));
+$("#preview").addEventListener("scroll", hideAsk);
+$("#askPopover").addEventListener("mousedown", e => e.preventDefault()); // keep the selection
+$("#askPopover").addEventListener("click", askAboutSelection);
+$("#ctxClear").addEventListener("click", () => { clearCtxChip(); clearAsked(); });
+// draggable pane splitters: left handle resizes the vault pane, right handle the chat pane
+function makeResizer(handle, cssVar, side) {
+  handle.addEventListener("mousedown", e => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const pane = side === "left" ? handle.previousElementSibling : handle.nextElementSibling;
+    const startW = pane.offsetWidth;
+    handle.classList.add("active");
+    document.body.style.userSelect = "none";
+    const move = ev => {
+      const dx = ev.clientX - startX;
+      const w = Math.max(160, Math.min(720, side === "left" ? startW + dx : startW - dx));
+      document.documentElement.style.setProperty(cssVar, w + "px");
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      handle.classList.remove("active");
+      document.body.style.userSelect = "";
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+}
+makeResizer($("#resizeL"), "--col-left", "left");
+makeResizer($("#resizeR"), "--col-right", "right");
+document.addEventListener("selectionchange", () => {
+  if (!window.getSelection().toString().trim()) hideAsk();
+});
 $("#chatInput").addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
 });
 $("#essaySubmit").onclick = submitEssay;
 $("#essayReveal").onclick = revealAnswer;
-document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
-  document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+$("#essayPrompt").addEventListener("input", () => studyAnswerStash = "");  // manual edit drops the authored answer
+$("#courseBack").addEventListener("click", loadCourses);
+function selectTab(name) {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x.dataset.tab === name));
   document.querySelectorAll(".tabpane").forEach(x => x.classList.remove("active"));
-  t.classList.add("active");
-  $("#tab-" + t.dataset.tab).classList.add("active");
-});
+  $("#tab-" + name).classList.add("active");
+}
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => selectTab(t.dataset.tab));
+// left pane: switch between the file tree and the course navigator
+function selectLeftView(view) {
+  document.querySelectorAll("#vaultToggle .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.view === view));
+  $("#view-files").style.display = view === "files" ? "flex" : "none";
+  $("#view-courses").style.display = view === "courses" ? "flex" : "none";
+  if (view === "courses" && !curCourse) loadCourses();   // (re)load the list, unless a course is already open
+}
+document.querySelectorAll("#vaultToggle .seg-btn").forEach(b => b.onclick = () => selectLeftView(b.dataset.view));
 document.addEventListener("keydown", e => {
   if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); saveNote(); }
 });
 
+setMode("read");
 loadTree().catch(e => toast("Load failed: " + e.message));
 </script>
 </body>
