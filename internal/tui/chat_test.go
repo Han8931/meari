@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	runewidth "github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 
@@ -632,6 +633,79 @@ func TestVaultPerNoteTutorHistorySeparate(t *testing.T) {
 	}
 }
 
+// A GFM table in a lesson renders as a box-drawing grid, not word-wrapped
+// prose: the raw pipes/dashes disappear, grid characters appear, and no line
+// exceeds the pane width.
+func TestChatRendersTableAsGrid(t *testing.T) {
+	forceColorTUI(t)
+	c := newChat()
+	c.setSize(60, 20)
+	c.append(roleLesson, "Before the table.\n\n"+
+		"| Type | Owns? |\n"+
+		"| --- | --- |\n"+
+		"| String | yes |\n\n"+
+		"After the table.")
+	content := ansi.Strip(c.renderBlock(c.blocks[0]))
+	for _, want := range []string{"┌", "│ Type", "├", "│ String", "└", "Before the table.", "After the table."} {
+		if !strings.Contains(content, want) {
+			t.Errorf("%q missing from rendered table block:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "| ---") || strings.Contains(content, "| Type") {
+		t.Errorf("raw markdown table leaked through:\n%s", content)
+	}
+	for i, ln := range strings.Split(content, "\n") {
+		if w := lipgloss.Width(ln); w > 60 {
+			t.Errorf("line %d width %d > pane 60: %q", i, w, ln)
+		}
+	}
+}
+
+// A table that IS the whole message still renders (open at line 0, flush at
+// message end).
+func TestChatTableAtMessageEdges(t *testing.T) {
+	forceColorTUI(t)
+	c := newChat()
+	c.setSize(60, 20)
+	c.append(roleLesson, "| A | B |\n| --- | --- |\n| 1 | 2 |")
+	content := ansi.Strip(c.renderBlock(c.blocks[0]))
+	if !strings.Contains(content, "┌") || !strings.Contains(content, "└") {
+		t.Errorf("whole-message table not rendered as grid:\n%s", content)
+	}
+}
+
+// A wide table in a narrow pane shrinks its columns and wraps cell text —
+// every visual line stays within the pane.
+func TestChatNarrowTableWraps(t *testing.T) {
+	forceColorTUI(t)
+	c := newChat()
+	c.setSize(40, 20)
+	c.append(roleLesson,
+		"| Approach | Dispatch | Cost | Use when |\n"+
+			"| --- | --- | --- | --- |\n"+
+			"| generics or impl Trait | static, compile time | zero cost, inlined | the type is known at compile time |")
+	for i, ln := range strings.Split(c.renderBlock(c.blocks[0]), "\n") {
+		if w := lipgloss.Width(ln); w > 40 {
+			t.Errorf("line %d width %d > pane 40: %q", i, w, ansi.Strip(ln))
+		}
+	}
+}
+
+// A pipe-leading line with no separator beneath is prose, not a table.
+func TestChatPipeLineWithoutSeparatorStaysProse(t *testing.T) {
+	forceColorTUI(t)
+	c := newChat()
+	c.setSize(60, 20)
+	c.append(roleLesson, "| just a pipe line\nand ordinary prose")
+	content := ansi.Strip(c.renderBlock(c.blocks[0]))
+	if strings.Contains(content, "┌") {
+		t.Errorf("prose misdetected as table:\n%s", content)
+	}
+	if !strings.Contains(content, "| just a pipe line") {
+		t.Errorf("pipe line lost:\n%s", content)
+	}
+}
+
 // Tutor/lesson prose is markdown and must arrive styled in the transcript
 // (headings, bold, inline code, wikilinks) — not as flat body text.
 func TestChatRendersMarkdownProse(t *testing.T) {
@@ -641,14 +715,17 @@ func TestChatRendersMarkdownProse(t *testing.T) {
 
 	c := newChat()
 	c.setSize(60, 20)
-	c.append(roleLesson, "# Heading\n\nuse **bold** and ****strong**** and `code` with [[Link]]")
+	c.append(roleLesson, "# Heading\n\n## Sub\n\nuse **bold** and ****strong**** and `code` with [[Link]]\n\n> Takeaway: quotes are callouts")
 	content := c.renderBlock(c.blocks[0])
 	for what, want := range map[string]string{
-		"heading":  "\x1b[1;38;5;81m# Heading",
-		"bold":     "\x1b[1;38;5;222m**bold**",
-		"strong":   "\x1b[1;38;5;213m****strong****",
-		"code":     "\x1b[38;5;222m`code`",
-		"wikilink": "\x1b[38;5;79m[[Link]]",
+		"heading":    "\x1b[1;38;5;81m# Heading",
+		"H2 heading": "\x1b[1;38;5;75m## Sub",
+		"bold":       "\x1b[1;38;5;222m**bold**",
+		"strong":     "\x1b[1;38;5;213m****strong****",
+		"code":       "\x1b[38;5;222m`code`",
+		"wikilink":   "\x1b[38;5;79m[[Link]]",
+		"quote bar":  "\x1b[1;38;5;214m>",
+		"quote text": "\x1b[3;38;5;187m Takeaway: quotes are callouts",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("%s not styled in chat prose:\n%q", what, content)

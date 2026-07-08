@@ -291,6 +291,7 @@
 const $ = (s) => document.querySelector(s);
 let entries = [];       // flat [{path, name, dir}] from /api/tree
 let current = null;     // current note path
+let previewedPath = null;    // note the read pane is currently scrolled within
 let collapsed = new Set();   // folder paths the user has collapsed
 let treeInit = false;        // first load seeds all folders collapsed
 let chatHist = [];      // [{role, content}]
@@ -446,6 +447,15 @@ async function refreshPreview() {
     const r = await api("POST", "/api/preview", { body: $("#editor").value });
     clearAsked();   // ranges from a prior render are now stale
     $("#preview").innerHTML = '<div class="doc">' + r.html + '</div>';
+    // Opening a different note must start at its first line. Replacing innerHTML
+    // does NOT reset the scroll container, so a taller note would otherwise keep
+    // the previous scroll offset and open mid-lecture. Only reset when the note
+    // actually changed, so re-rendering the same note (e.g. after a save) keeps
+    // the reader's position.
+    if (previewedPath !== current) {
+      $("#preview").scrollTop = 0;
+      previewedPath = current;
+    }
     $("#preview").querySelectorAll(".wikilink").forEach(a => {
       a.onclick = (e) => { e.preventDefault(); openByTarget(a.dataset.target); };
     });

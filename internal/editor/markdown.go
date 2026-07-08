@@ -25,8 +25,17 @@ import (
 )
 
 var (
-	mdHeadingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
-	mdCodeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
+	// mdHeadingRamp differentiates heading levels the way the web reader does:
+	// H1 stays the historical bright cyan (its SGR is pinned by tests and the
+	// chat transcript), deeper levels step down so a lesson's structure reads
+	// at a glance.
+	mdHeadingRamp = []lipgloss.Style{
+		lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true),  // H1
+		lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true),  // H2
+		lipgloss.NewStyle().Foreground(lipgloss.Color("110")).Bold(true), // H3
+		lipgloss.NewStyle().Foreground(lipgloss.Color("246")).Bold(true), // H4+
+	}
+	mdCodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))
 	mdLinkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("79"))
 	// mdURLStyle dims the "(url)" target of a [text](url) link so the link text
 	// carries the color and the noisy URL recedes.
@@ -40,7 +49,44 @@ var (
 	mdBoldStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("222"))
 	mdBoldItalic  = lipgloss.NewStyle().Bold(true).Italic(true).Foreground(lipgloss.Color("219"))
 	mdStrongStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
+
+	// Blockquotes render as callouts, not asides: lessons lean on
+	// "> Takeaway:" summaries that the old dim comment style made recede.
+	// The > marker gets a warm gold bar (the lesson-badge family) and the
+	// quoted text stays readable — tinted and italic, not dimmed.
+	mdQuoteBar  = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	mdQuoteText = lipgloss.NewStyle().Foreground(lipgloss.Color("187")).Italic(true)
 )
+
+// mdHeadingStyle returns the ramp style for a heading level (1-based),
+// clamping deeper levels to the last step.
+func mdHeadingStyle(level int) lipgloss.Style {
+	if level < 1 {
+		level = 1
+	}
+	if level > len(mdHeadingRamp) {
+		level = len(mdHeadingRamp)
+	}
+	return mdHeadingRamp[level-1]
+}
+
+// headingLevel counts the leading '#' runes of an already-classified heading.
+func headingLevel(content string) int {
+	n := 0
+	for n < len(content) && content[n] == '#' {
+		n++
+	}
+	return n
+}
+
+// stylePrefix returns the raw SGR sequence that opens style — used to seed
+// the ambient state so a whole span keeps a tint across inline tokens'
+// trailing resets (the chatInputBGSeq trick). Empty when the color profile
+// renders no styling, so NO_COLOR stays honest.
+func stylePrefix(st lipgloss.Style) string {
+	out := strings.TrimSuffix(st.Render("\x01"), "\x1b[0m")
+	return strings.TrimSuffix(out, "\x01")
+}
 
 // lineState is the block context at the START of a buffer line: whether it
 // sits inside a fenced code block (and that fence's language) or a blockquote.
@@ -66,6 +112,8 @@ func fenceRules(lang string) (syntaxRules, bool) {
 		return goSyntax(), true
 	case "python", "py":
 		return pythonSyntax(), true
+	case "rust", "rs":
+		return rustSyntax(), true
 	}
 	return syntaxRules{}, false
 }
@@ -87,8 +135,9 @@ func classify(content string, st *lineState) {
 		// fenced rows change nothing
 	case content == "":
 		st.inQuote = false // a blank line ends a blockquote
-	case isMDHeading(content), isMDBullet(content), mdNumberedLen(content) > 0, isMDRule(content):
-		st.inQuote = false // headings, list items, and rules interrupt one
+	case isMDHeading(content), isMDBullet(content), mdNumberedLen(content) > 0, isMDRule(content),
+		strings.HasPrefix(content, "|"):
+		st.inQuote = false // headings, list items, rules, and table rows interrupt one
 	case strings.HasPrefix(content, ">"):
 		st.inQuote = true
 	}
@@ -197,7 +246,7 @@ func highlightMarkdownRow(row string, st *mdState) string {
 	case content == "":
 		return row
 	case isMDHeading(content):
-		return styleRowText(row, mdHeadingStyle, st.gutter)
+		return styleRowText(row, mdHeadingStyle(headingLevel(content)), st.gutter)
 	case isMDRule(content):
 		return styleRowText(row, mdRuleStyle, st.gutter)
 	case isMDBullet(content):
@@ -205,12 +254,79 @@ func highlightMarkdownRow(row string, st *mdState) string {
 		return mdMarkerRow(row, st.gutter, 1)
 	case mdNumberedLen(content) > 0:
 		return mdMarkerRow(row, st.gutter, mdNumberedLen(content))
+	case IsTableSeparator(content):
+		// |---|:--:| is pure table chrome — dim the whole row like a rule.
+		return styleRowText(row, mdRuleStyle, st.gutter)
+	case strings.HasPrefix(content, "|"):
+		// Table rows keep their buffer bytes (the editor never re-boxes); the
+		// pipes tint like grid borders and the cells get the inline pass.
+		return mdTableEditorRow(row, st.gutter)
 	case strings.HasPrefix(content, ">") || before.inQuote:
 		// "> …" opens a quote; soft-wrapped rows of a long quoted line and
 		// lazy paragraph continuations stay quoted.
-		return styleRowText(row, commentStyle, st.gutter)
+		return mdQuoteRow(row, st.gutter)
 	}
 	return mdInline(row)
+}
+
+// mdQuoteRow renders a blockquote row as a callout: the leading '>' run (and
+// the '>'s of a nested quote) tints as a warm bar, and the quoted text keeps
+// a readable italic tint that inline tokens re-assert via the seeded ambient.
+// Continuation rows without a '>' get only the tinted inline pass. Buffer
+// bytes are never substituted — the '>' stays a '>' for cursor mapping and
+// selection-copy.
+func mdQuoteRow(row string, gutter bool) string {
+	i := gutterEnd(row, gutter)
+	for i < len(row) { // step over the quote's indentation
+		if e := ansiEscapeEnd(row, i); e > i {
+			i = e
+			continue
+		}
+		if row[i] != ' ' {
+			break
+		}
+		i++
+	}
+	ambient := ""
+	updateAmbient(row[:i], &ambient)
+	var b strings.Builder
+	b.WriteString(row[:i])
+
+	// The bar: '>' runs, including nested "> >" markers (spaces between two
+	// '>'s belong to the bar; the space before the text does not).
+	j := i
+	for j < len(row) {
+		if e := ansiEscapeEnd(row, j); e > j {
+			j = e
+			continue
+		}
+		if row[j] == '>' {
+			j++
+			continue
+		}
+		if row[j] == ' ' {
+			if c, ok := nextTextByte(row, j+1); ok && c == '>' {
+				j++
+				continue
+			}
+		}
+		break
+	}
+	if j > i {
+		b.WriteString(renderToken(row[i:j], mdQuoteBar, &ambient))
+	}
+
+	// The text: seed the quote tint into the ambient so every inline token's
+	// trailing reset re-asserts it, then close the row cleanly.
+	qt := stylePrefix(mdQuoteText)
+	amb := ambient + qt
+	b.WriteString(qt)
+	b.WriteString(mdInlineSeg(row[j:], &amb))
+	if qt != "" {
+		b.WriteString("\x1b[0m")
+		b.WriteString(ambient)
+	}
+	return b.String()
 }
 
 // mdInline styles the inline spans — `code`, [[wikilinks]], ***emphasis*** —
@@ -344,6 +460,43 @@ func mdMarkerRow(row string, gutter bool, markerLen int) string {
 	b.WriteString(row[:i])
 	b.WriteString(renderToken(row[i:j], mdBulletStyle, &ambient))
 	b.WriteString(mdInlineSeg(row[j:], &ambient))
+	return b.String()
+}
+
+// mdTableEditorRow tints a table row's unescaped pipes like grid borders and
+// gives the cell text between them the inline treatment. The walk is escape-
+// aware (the cursor splits bytes with SGR sequences) and the buffer bytes are
+// preserved exactly — the editable textarea is never re-boxed.
+func mdTableEditorRow(row string, gutter bool) string {
+	i := gutterEnd(row, gutter)
+	ambient := ""
+	updateAmbient(row[:i], &ambient)
+	var b strings.Builder
+	b.WriteString(row[:i])
+	seg := i        // start of the current between-pipes text segment
+	prev := byte(0) // previous text byte, to leave \| escaped pipes as cell text
+	flushSeg := func(to int) {
+		if to > seg {
+			b.WriteString(mdInlineSeg(row[seg:to], &ambient))
+		}
+	}
+	for j := i; j < len(row); {
+		if e := ansiEscapeEnd(row, j); e > j {
+			j = e
+			continue
+		}
+		if row[j] == '|' && prev != '\\' {
+			flushSeg(j)
+			b.WriteString(renderToken("|", mdTableBorder, &ambient))
+			j++
+			seg = j
+			prev = '|'
+			continue
+		}
+		prev = row[j]
+		j++
+	}
+	flushSeg(len(row))
 	return b.String()
 }
 

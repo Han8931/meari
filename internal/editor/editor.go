@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -939,6 +940,8 @@ func highlightSyntax(lang, s string) string {
 		return highlightCode(s, goSyntax())
 	case "python", "py":
 		return highlightCode(s, pythonSyntax())
+	case "rust", "rs":
+		return highlightCode(s, rustSyntax())
 	case "markdown", "md":
 		return highlightMarkdown(s, false, nil)
 	case "physics", "plain", "text", "essay", "":
@@ -959,6 +962,10 @@ type syntaxRules struct {
 	lineComments []string
 	blockStart   string
 	blockEnd     string
+	// charQuotes: a single quote opens a char literal ('x', '\n') or marks a
+	// lifetime ('a) — never a full string. Without this, Rust's `&'a str`
+	// would paint everything to the next quote (or line end) as a string.
+	charQuotes bool
 }
 
 func goSyntax() syntaxRules {
@@ -990,6 +997,19 @@ func pythonSyntax() syntaxRules {
 		lineComments: []string{
 			"#",
 		},
+	}
+}
+
+func rustSyntax() syntaxRules {
+	return syntaxRules{
+		keywords: words("as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait type unsafe use where while"),
+		types:    words("bool char str String i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64 Vec Option Some None Result Ok Err Box Rc Arc RefCell Cell HashMap HashSet BTreeMap true false"),
+		lineComments: []string{
+			"//",
+		},
+		blockStart: "/*",
+		blockEnd:   "*/",
+		charQuotes: true,
 	}
 }
 
@@ -1104,6 +1124,24 @@ func highlightLine(line string, rules syntaxRules, inBlock *bool) string {
 		if isLineComment(line[i:], rules.lineComments) {
 			styled(line[i:], commentStyle)
 			return b.String()
+		}
+
+		if line[i] == '\'' && rules.charQuotes {
+			// Rust-style single quotes: a closing quote within a rune (or
+			// escape) makes a char literal; a bare 'ident is a lifetime, which
+			// reads as a type-level name. A stray quote stays plain — never
+			// string-bleed to the end of the line.
+			if end := charLiteralEnd(line, i); end > i {
+				styled(line[i:end], stringStyle)
+				i = end
+			} else if end := lifetimeEnd(line, i); end > i {
+				styled(line[i:end], typeStyle)
+				i = end
+			} else {
+				b.WriteByte(line[i])
+				i++
+			}
+			continue
 		}
 
 		if line[i] == '"' || line[i] == '\'' || line[i] == '`' {
@@ -1223,6 +1261,56 @@ func stringEnd(s string, i int) int {
 		j++
 	}
 	return j
+}
+
+// charLiteralEnd returns the offset just past a char literal opening at s[i]
+// ('x', '\'', '\n', '\u{1F600}'), or i when the quote opens none. Byte-level
+// like stringEnd — the cursor row's escapes degrade it the same way strings
+// already degrade. Raw strings r#"…"# keep their inner string colored by the
+// ordinary double-quote branch; the # fences stay plain.
+func charLiteralEnd(s string, i int) int {
+	j := i + 1
+	if j >= len(s) {
+		return i
+	}
+	if s[j] == '\\' { // escape: \n, \', \\, \xNN, \u{…}
+		j++
+		if j >= len(s) {
+			return i
+		}
+		switch s[j] {
+		case 'u':
+			if j+1 < len(s) && s[j+1] == '{' {
+				close := strings.IndexByte(s[j+1:], '}')
+				if close < 0 {
+					return i
+				}
+				j += 1 + close + 1
+			} else {
+				return i
+			}
+		case 'x':
+			j += 3 // \xNN
+		default:
+			j++ // single-char escape
+		}
+	} else {
+		_, size := utf8.DecodeRuneInString(s[j:])
+		j += size
+	}
+	if j < len(s) && s[j] == '\'' {
+		return j + 1
+	}
+	return i
+}
+
+// lifetimeEnd returns the offset just past a lifetime ('a, 'static) — a quote
+// followed by an identifier with no closing quote — or i when s[i] opens none.
+func lifetimeEnd(s string, i int) int {
+	if i+1 < len(s) && isIdentStart(s[i+1]) {
+		return identEnd(s, i+1)
+	}
+	return i
 }
 
 func numberEnd(s string, i int) int {

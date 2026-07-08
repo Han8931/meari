@@ -450,11 +450,28 @@ func (c chatModel) renderRichBody(text string) string {
 		renderCodeRows(indented, "")
 		indented = nil
 	}
+	// GFM tables render as a box-drawing grid pre-fitted to the pane, so they
+	// bypass the prose word-wrap (which would destroy column alignment) the
+	// same way code blocks do.
+	var table []string
+	flushTable := func() {
+		if len(table) == 0 {
+			return
+		}
+		if rows, ok := editor.RenderTable(table, c.w); ok {
+			out = append(out, strings.Join(rows, "\n"))
+		} else {
+			prose = append(prose, table...) // can't happen (opened on a verified separator); degrade to prose
+		}
+		table = nil
+	}
 
-	for _, ln := range lines {
+	for idx := 0; idx < len(lines); idx++ {
+		ln := lines[idx]
 		trimmed := strings.TrimSpace(ln)
 		if marker, info, ok := chatFenceOpen(trimmed); ok && (!inCode || marker == fenceMarker) {
 			flushIndented()
+			flushTable()
 			if inCode {
 				flushCode()
 				inCode = false
@@ -471,6 +488,21 @@ func (c chatModel) renderRichBody(text string) string {
 			code = append(code, ln)
 			continue
 		}
+		if len(table) > 0 {
+			if strings.HasPrefix(trimmed, "|") {
+				table = append(table, trimmed)
+				continue
+			}
+			flushTable() // first non-pipe line closes the table
+		} else if strings.HasPrefix(trimmed, "|") && idx+1 < len(lines) &&
+			editor.IsTableSeparator(strings.TrimSpace(lines[idx+1])) {
+			// A pipe row over a |---|---| separator opens a table; a lone pipe
+			// line without one stays prose.
+			flushProse()
+			flushIndented()
+			table = append(table, trimmed)
+			continue
+		}
 		// Markdown's other code idiom: 4-space-indented lines (lessons use it a
 		// lot). Word-wrapping them as prose breaks identifiers mid-word, so they
 		// render through the code path instead.
@@ -482,6 +514,7 @@ func (c chatModel) renderRichBody(text string) string {
 		flushIndented()
 		prose = append(prose, ln)
 	}
+	flushTable() // a table may end the message (may degrade into prose, so flush first)
 	flushProse()
 	flushIndented()
 	flushCode() // tolerate an unterminated fence

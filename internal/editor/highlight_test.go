@@ -55,6 +55,60 @@ func TestHighlightReassertsAmbientSGR(t *testing.T) {
 	}
 }
 
+// Rust gets full keyword/type rules, and its single quotes must never behave
+// like string openers: `&'a str` used to paint everything to the next quote
+// (or the line's end) as one string.
+func TestHighlightRust(t *testing.T) {
+	withANSI(t)
+	src := `fn largest<'a>(list: &'a [i32]) -> &'a str { let s = "hi"; s } // done`
+	out := highlightSyntax("rust", src)
+
+	if !strings.Contains(out, "\x1b[1;38;5;81mfn\x1b[0m") {
+		t.Errorf("rust keyword fn not styled: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[38;5;214m'a\x1b[0m") {
+		t.Errorf("lifetime 'a not styled as type: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[38;5;114m\"hi\"\x1b[0m") {
+		t.Errorf("string literal not styled: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[3;38;5;244m// done") {
+		t.Errorf("line comment not styled: %q", out)
+	}
+	// The classic bleed: text between two lifetimes must NOT be string-styled.
+	if strings.Contains(out, "\x1b[38;5;114m'a>(list: &'") {
+		t.Errorf("lifetime bled into a string span: %q", out)
+	}
+	if got := stripANSI(out); got != src {
+		t.Errorf("visible text changed: %q", got)
+	}
+}
+
+func TestHighlightRustCharLiterals(t *testing.T) {
+	withANSI(t)
+	for _, c := range []struct{ src, want, desc string }{
+		{`let c = 'x';`, "\x1b[38;5;114m'x'\x1b[0m", "plain char literal"},
+		{`let n = '\n';`, "\x1b[38;5;114m'\\n'\x1b[0m", "escaped char literal"},
+		{`let q = '\'';`, "\x1b[38;5;114m'\\''\x1b[0m", "escaped quote literal"},
+		{`let u = '\u{1F600}';`, "\x1b[38;5;114m'\\u{1F600}'\x1b[0m", "unicode escape literal"},
+		{`Vec<'static>`, "\x1b[38;5;214m'static\x1b[0m", "static lifetime as type"},
+	} {
+		out := highlightSyntax("rust", c.src)
+		if !strings.Contains(out, c.want) {
+			t.Errorf("%s: %q not found in %q", c.desc, c.want, out)
+		}
+	}
+	// A stray quote stays plain — no styling, no bleed, text unchanged.
+	stray := `let x = 5; ' oops`
+	out := highlightSyntax("rust", stray)
+	if strings.Contains(out, "\x1b[38;5;114m'") {
+		t.Errorf("stray quote string-styled: %q", out)
+	}
+	if got := stripANSI(out); got != stray {
+		t.Errorf("stray quote changed text: %q", got)
+	}
+}
+
 // Fences in languages without dedicated rules (sql, js, …) still highlight
 // strings, numbers, and comments; prose languages stay untouched.
 func TestHighlightGenericLanguages(t *testing.T) {

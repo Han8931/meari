@@ -187,9 +187,10 @@ type Model struct {
 	// sweeps out (and on release copies) its text.
 	dragEditor bool
 
-	// pendingLeader is set after "," in the editor's Normal mode; it starts a
-	// leader chord. "n" folds the sidebar; any other key replays the swallowed
-	// "," to the editor so its repeat-find binding still works.
+	// pendingLeader is set after "," in the editor's Normal mode, in the
+	// sidebar, or in the chat's Vim Normal mode; it starts a leader chord.
+	// "n" folds the sidebar; from the editor any other key replays the
+	// swallowed "," so its repeat-find binding still works.
 	pendingLeader bool
 
 	// Global ex-command line (":topic", ":clear", ":progress"). cmdMode shows the
@@ -587,8 +588,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.focus {
 	case paneSidebar:
-		if msg.String() == ":" {
+		// The ",n" fold chord works from the course list too — same keys as
+		// the editor's Normal mode (mirrors the vault TUI's sidebar).
+		if leader {
+			if msg.String() == "n" {
+				return m.cmdFold()
+			}
+			return m, nil
+		}
+		switch msg.String() {
+		case ":":
 			return m.openCmdLine()
+		case ",":
+			m.pendingLeader = true
+			return m, nil
 		}
 		var enter bool
 		m.sidebar, enter = m.sidebar.Update(msg)
@@ -638,6 +651,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// delivers it as a bracketed paste straight into the input.
 		case "alt+v", "√":
 			m.flash(pasteChat(&m.chat))
+			return m, nil
+		}
+		// The ",n" fold chord works from the chat's Vim Normal mode too (never
+		// from Insert, where "," must type a comma).
+		if leader {
+			if msg.String() == "n" {
+				return m.cmdFold()
+			}
+			return m, nil
+		}
+		if m.chat.inNormal() && msg.String() == "," {
+			m.pendingLeader = true
 			return m, nil
 		}
 		// The input's Vim Normal mode (Esc): ":" opens the command line right
@@ -1328,7 +1353,7 @@ func helpView() string {
 		"  :help              this screen",
 		"  :topic <course>    switch course (any meari-course, by id or title)",
 		"  :subject <course>  alias for :topic",
-		"  :fold              fold/unfold the left tree pane",
+		"  :fold              fold/unfold the left tree pane (also ,n)",
 		"  :compact / :wide   shrink/grow the editor (frees chat space)",
 		"  :answer            reveal a model solution for the open challenge",
 		"  :vault             switch to the notes vault (Obsidian-style)",
@@ -1827,14 +1852,20 @@ func (m *Model) startTopicView(t curriculum.Topic, view string) tea.Cmd {
 	m.rebuildSidebar()
 	// Each lesson/quiz row keeps its own chat context. The lesson row shows only
 	// lecture content; the quiz/reflection/challenge row shows only the prompt.
-	if m.switchChatContext("topic:" + t.ID + "#" + view) {
+	fresh := m.switchChatContext("topic:" + t.ID + "#" + view)
+	if fresh {
 		if view == "lesson" {
 			m.chat.append(roleLesson, t.Title+"\n\n"+t.Lesson)
 		} else if quiz := m.topicQuizText(t, ch); quiz != "" {
 			m.chat.append(roleQuiz, quiz)
 		}
-		// Start the freshly shown lesson/quiz at its top — append() pins to the
-		// tail, which for a long lesson would otherwise open at its very end.
+	}
+	// A lesson is lecture content read top-to-bottom, so it must always open at
+	// the first line — whether it's freshly shown or restored from an earlier
+	// visit. (restore() jumps to the transcript tail, which is right for an
+	// interactive chat but wrong for a lecture; append() also pins to the tail.)
+	// Interactive views (quiz/reflection) only reset to the top when fresh.
+	if view == "lesson" || fresh {
 		m.chat.gotoTop()
 	}
 	if stale {

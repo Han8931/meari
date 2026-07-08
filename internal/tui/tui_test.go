@@ -1044,6 +1044,45 @@ func TestFoldHidesSidebarAndReclaimsWidth(t *testing.T) {
 	}
 }
 
+// The ",n" leader chord folds the course list from every pane in the course
+// learning mode: the sidebar itself and the chat's Vim Normal mode (never
+// Insert, where "," must type a comma). The editor's Normal-mode chord is
+// long-standing behavior covered by the fold test above.
+func TestLeaderFoldChordFromSidebarAndChat(t *testing.T) {
+	m := readyModel(t)
+
+	// From the course list.
+	m.setFocus(paneSidebar)
+	m = step(t, m, keyRunes(","))
+	m = step(t, m, keyRunes("n"))
+	if !m.sidebarCollapsed {
+		t.Fatal(",n from the course list should fold it")
+	}
+	if m.focus == paneSidebar {
+		t.Fatal("folding the focused sidebar should move focus away")
+	}
+
+	// From the chat's Vim Normal mode (toggles it back open).
+	m.setFocus(paneChat)
+	m.chat.enterNormal()
+	m = step(t, m, keyRunes(","))
+	m = step(t, m, keyRunes("n"))
+	if m.sidebarCollapsed {
+		t.Fatal(",n from chat Normal mode should unfold the sidebar")
+	}
+
+	// While typing in the chat, "," and "n" are just text.
+	m.chat.exitNormal()
+	m = step(t, m, keyRunes(","))
+	m = step(t, m, keyRunes("n"))
+	if m.sidebarCollapsed {
+		t.Fatal(",n while typing in chat must not fold the sidebar")
+	}
+	if got := m.chat.input.Value(); !strings.Contains(got, ",n") {
+		t.Fatalf("chat input should contain the typed \",n\", got %q", got)
+	}
+}
+
 func TestCompactAndWideResizeEditor(t *testing.T) {
 	m := readyModel(t)
 	if tpc, ok := m.topicByID[m.currentTopicID]; ok {

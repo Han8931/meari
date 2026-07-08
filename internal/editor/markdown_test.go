@@ -68,7 +68,8 @@ func TestHighlightMarkdown(t *testing.T) {
 		{0, "\x1b[1;38;5;81m# Title", "heading styled bold cyan"},
 		{1, "\x1b[38;5;222m`x := 1`", "inline code span styled"},
 		{1, "\x1b[38;5;79m[[Other Note]]", "wikilink styled"},
-		{2, "\x1b[3;38;5;244m> quoted wisdom", "blockquote styled"},
+		{2, "\x1b[1;38;5;214m>", "blockquote bar styled gold"},
+		{2, "\x1b[3;38;5;187m quoted wisdom", "blockquote text tinted italic"},
 		{3, "\x1b[38;5;222m```go", "fence delimiter styled"},
 		{4, "\x1b[1;38;5;81mfunc\x1b[0m", "go keyword highlighted inside fence"},
 	}
@@ -99,6 +100,104 @@ func TestHighlightMarkdown(t *testing.T) {
 	}
 	if row := highlightMarkdownRow("1 # not a heading", &mdState{}); strings.Contains(row, "\x1b[1;38;5;81m") {
 		t.Errorf("digit-leading text misread as gutter+heading: %q", row)
+	}
+}
+
+// ```rust fences get full rust rules in markdown notes and lessons — keywords,
+// lifetimes, strings — not the generic fallback.
+func TestHighlightMarkdownRustFence(t *testing.T) {
+	withANSI(t)
+	src := "```rust\n" +
+		`fn main() { let s: &'static str = "hi"; }` + "\n" +
+		"```\n"
+	out := highlightMarkdown(src, false, nil)
+	rows := strings.Split(out, "\n")
+	if !strings.Contains(rows[1], "\x1b[1;38;5;81mfn\x1b[0m") {
+		t.Errorf("rust keyword not highlighted inside fence: %q", rows[1])
+	}
+	if !strings.Contains(rows[1], "\x1b[38;5;214m'static\x1b[0m") {
+		t.Errorf("lifetime not highlighted inside fence: %q", rows[1])
+	}
+	if got := stripANSI(out); got != src {
+		t.Errorf("visible text changed: %q", got)
+	}
+}
+
+// Heading levels step down a color ramp so a note's structure reads at a
+// glance; H1 keeps the historical bright cyan.
+func TestHighlightMarkdownHeadingLevels(t *testing.T) {
+	withANSI(t)
+	out := highlightMarkdown("# A\n## B\n### C\n#### D\n##### E\n", false, nil)
+	rows := strings.Split(out, "\n")
+	for i, want := range []string{
+		"\x1b[1;38;5;81m# A",
+		"\x1b[1;38;5;75m## B",
+		"\x1b[1;38;5;110m### C",
+		"\x1b[1;38;5;246m#### D",
+		"\x1b[1;38;5;246m##### E", // clamps to the last ramp step
+	} {
+		if !strings.Contains(rows[i], want) {
+			t.Errorf("H%d: want %q in %q", i+1, want, rows[i])
+		}
+	}
+}
+
+// A quote is a callout: gold bar on the > run (nested included), tinted
+// readable text, and inline tokens re-assert the tint after their resets.
+func TestHighlightMarkdownQuoteBar(t *testing.T) {
+	withANSI(t)
+	out := highlightMarkdown("> see `x` here\n> > deep\n", false, nil)
+	rows := strings.Split(out, "\n")
+	if !strings.Contains(rows[0], "\x1b[38;5;222m`x`\x1b[0m\x1b[3;38;5;187m") {
+		t.Errorf("inline code inside quote must re-assert the quote tint: %q", rows[0])
+	}
+	if !strings.Contains(rows[1], "\x1b[1;38;5;214m> >") {
+		t.Errorf("nested quote markers share one bar: %q", rows[1])
+	}
+	src := "> quoted\nstill quoted\n"
+	if got := stripANSI(highlightMarkdown(src, false, nil)); got != src {
+		t.Errorf("quote styling changed visible text: %q", got)
+	}
+}
+
+// Table rows in the note editor keep their bytes but read as structure: pipes
+// tint like grid borders, the separator row dims whole, and cell text keeps
+// its inline styling. A table row also interrupts a blockquote.
+func TestHighlightMarkdownTableRows(t *testing.T) {
+	withANSI(t)
+	src := "> quote\n" +
+		"| Col | **bold** |\n" +
+		"| --- | --- |\n" +
+		"| a | b |\n"
+	out := highlightMarkdown(src, false, nil)
+	rows := strings.Split(out, "\n")
+
+	if !strings.Contains(rows[1], "\x1b[38;5;240m|") {
+		t.Errorf("pipes not tinted: %q", rows[1])
+	}
+	if !strings.Contains(rows[1], "\x1b[1;38;5;222m**bold**") {
+		t.Errorf("inline bold lost inside a cell: %q", rows[1])
+	}
+	if !strings.Contains(rows[2], "\x1b[38;5;240m| --- | --- |") {
+		t.Errorf("separator row not dimmed whole: %q", rows[2])
+	}
+	// The table row after a quote must not render as a quote continuation.
+	if strings.Contains(rows[1], "\x1b[3;38;5;244m") {
+		t.Errorf("table row styled as blockquote: %q", rows[1])
+	}
+	// Bytes are only recolored, never changed.
+	if got := stripANSI(out); got != src {
+		t.Errorf("visible text changed:\n got %q\nwant %q", got, src)
+	}
+	// Gutter variant: the line number survives, pipes still tint.
+	gut := highlightMarkdownRow("  3 | a | b |", &mdState{gutter: true})
+	if !strings.HasPrefix(gut, "  3 ") || !strings.Contains(gut, "\x1b[38;5;240m|") {
+		t.Errorf("gutter table row = %q", gut)
+	}
+	// An escaped \| stays cell text — not tinted as a border.
+	esc := highlightMarkdownRow(`| a \| b |`, &mdState{})
+	if strings.Contains(esc, "\x1b[38;5;240m|\x1b[0m b") {
+		t.Errorf("escaped pipe tinted as border: %q", esc)
 	}
 }
 
@@ -233,12 +332,15 @@ func TestHighlightMarkdownQuoteSpansRows(t *testing.T) {
 	out := highlightMarkdown(src, false, nil)
 	rows := strings.Split(out, "\n")
 
-	quote := "\x1b[3;38;5;244m"
-	if !strings.Contains(rows[0], quote+"> quoted first row") {
+	quote := "\x1b[3;38;5;187m"
+	if !strings.Contains(rows[0], "\x1b[1;38;5;214m>") || !strings.Contains(rows[0], quote+" quoted first row") {
 		t.Errorf("quote row unstyled: %q", rows[0])
 	}
 	if !strings.Contains(rows[1], quote+"wrapped continuation row") {
 		t.Errorf("continuation row should stay quoted: %q", rows[1])
+	}
+	if strings.Contains(rows[1], "\x1b[1;38;5;214m") {
+		t.Errorf("continuation row has no > and should get no bar: %q", rows[1])
 	}
 	if rows[3] != "plain after blank" {
 		t.Errorf("blank row should end the quote: %q", rows[3])
