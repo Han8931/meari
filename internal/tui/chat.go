@@ -44,6 +44,10 @@ type chatModel struct {
 	blocks  []chatBlock
 	w, h    int
 	focused bool
+	// noInput turns the pane into a read-only document view (the tutor's
+	// lesson pane): no input box, no busy line, full-height viewport, bare
+	// keys scroll. Defaults false — the conversational default is untouched.
+	noInput bool
 	// normal is the input's Vim Normal mode (Esc toggles in): motions and
 	// edits work on the draft, ":" opens the parent's command line, i/a
 	// return to typing. pendingOp holds the first key of dd/cc.
@@ -122,6 +126,15 @@ func newChat() chatModel {
 	}
 }
 
+// newLessonPane builds a read-only document view: the tutor's lesson pane.
+// The textarea stays initialized (never rendered), avoiding zero-value
+// hazards in code paths shared with the conversational chat.
+func newLessonPane() chatModel {
+	c := newChat()
+	c.noInput = true
+	return c
+}
+
 // setSize lays the pane out within w×h: the input block at the bottom, an
 // optional busy line above it, and the transcript in the remaining rows.
 func (c *chatModel) setSize(w, h int) {
@@ -135,6 +148,10 @@ func (c *chatModel) setSize(w, h int) {
 // the stored size and current busy state.
 func (c *chatModel) relayout() {
 	if c.w <= 0 || c.h <= 0 {
+		return
+	}
+	if c.noInput { // read-only document view: the viewport is the whole pane
+		c.vp.Width, c.vp.Height = c.w, c.h
 		return
 	}
 	inputH := chatInputRows
@@ -545,6 +562,9 @@ func chatFenceLang(info string) string {
 
 func (c *chatModel) focus() tea.Cmd {
 	c.focused = true
+	if c.noInput {
+		return nil // nothing to type into; focus only drives the border color
+	}
 	c.exitNormal() // focusing the pane means "I want to type"
 	return c.input.Focus()
 }
@@ -620,6 +640,10 @@ func (c chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 		c.vp, cmd = c.vp.Update(msg)
 		return c, cmd
 	case tea.KeyMsg:
+		if c.noInput {
+			c.readOnlyKey(msg)
+			return c, nil
+		}
 		if c.scrollKey(msg) {
 			return c, nil
 		}
@@ -643,6 +667,31 @@ func (c chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 	var cmd tea.Cmd
 	c.input, cmd = c.input.Update(msg)
 	return c, cmd
+}
+
+// readOnlyKey scrolls the document view: bare Vim keys are safe here because
+// there is no input box to type into.
+func (c *chatModel) readOnlyKey(msg tea.KeyMsg) {
+	switch msg.String() {
+	case "j", "down":
+		c.vp.ScrollDown(1)
+	case "k", "up":
+		c.vp.ScrollUp(1)
+	case "g", "home":
+		c.vp.GotoTop()
+	case "G", "end":
+		c.vp.GotoBottom()
+	default:
+		c.scrollKey(msg) // ⌃d/⌃u/⌃f/⌃b, PgUp/PgDn, Shift-arrows
+	}
+}
+
+// setLesson replaces the document with one lesson block and opens at the top.
+func (c *chatModel) setLesson(text string) {
+	c.clearSelect()
+	c.blocks = []chatBlock{{role: roleLesson, text: strings.TrimRight(text, "\n")}}
+	c.reflow()
+	c.vp.GotoTop()
 }
 
 // inNormal reports whether the input sits in Normal mode (the parent routes
@@ -917,6 +966,9 @@ func pasteChat(c *chatModel) string {
 }
 
 func (c chatModel) view() string {
+	if c.noInput { // read-only document view: transcript only
+		return c.overlaySelection(c.vp.View())
+	}
 	parts := make([]string, 0, 4)
 	parts = append(parts, c.overlaySelection(c.vp.View()))
 	if c.busy != "" {

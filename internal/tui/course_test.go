@@ -168,19 +168,21 @@ func TestVaultCourseRunsInTutor(t *testing.T) {
 		t.Fatalf("prompt = %q", m.current.Prompt)
 	}
 	// The default course row opens the lesson only; the quiz/task prompt lives
-	// in its own child row.
-	blocks := m.chat.snapshot()
+	// in its own child row. The lecture renders in the lesson pane (split
+	// view), never in the conversation transcript.
 	lesson := false
-	for _, b := range blocks {
+	for _, b := range m.lesson.blocks {
 		if b.role == roleLesson && strings.Contains(b.text, "keeps keys ordered") {
 			lesson = true
 		}
-		if b.role == roleQuiz || strings.Contains(b.text, "Implement insert") {
-			t.Fatalf("lesson row should not include quiz prompt, got %+v", blocks)
-		}
 	}
 	if !lesson {
-		t.Fatalf("lesson row did not show lecture, got %+v", blocks)
+		t.Fatalf("lesson row did not show lecture in the lesson pane, got %+v", m.lesson.blocks)
+	}
+	for _, b := range m.chat.snapshot() {
+		if b.role == roleLesson || b.role == roleQuiz || strings.Contains(b.text, "Implement insert") {
+			t.Fatalf("lesson row must keep lecture/quiz out of the chat, got %+v", m.chat.snapshot())
+		}
 	}
 
 	// Advance to the essay topic (no study block on the AVL note): it takes

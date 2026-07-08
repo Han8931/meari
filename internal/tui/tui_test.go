@@ -752,40 +752,324 @@ func TestWheelScrollsPaneUnderCursor(t *testing.T) {
 func TestStartingTopicShowsLessonFromTop(t *testing.T) {
 	m := readyModel(t)
 
-	// A lesson far taller than the chat pane, so opening at the top vs. the
-	// bottom is observable.
+	// A lesson far taller than the pane, so opening at the top vs. the
+	// bottom is observable. On lesson rows the lecture lives in the lesson
+	// pane (the split view), not the chat transcript.
 	lesson := strings.Repeat("A line of lesson content that the reader should see first.\n", 120)
 	topic := curriculum.Topic{ID: "synthetic-long-lesson", Title: "Long Lesson", Lesson: lesson}
+	m.topicByID[topic.ID] = topic
 
 	_ = m.startTopic(topic)
 
-	if m.chat.vp.TotalLineCount() <= m.chat.vp.Height {
-		t.Fatalf("setup: lesson not tall enough to scroll (lines=%d height=%d)",
-			m.chat.vp.TotalLineCount(), m.chat.vp.Height)
+	if !m.lessonSplit() || m.lessonW == 0 {
+		t.Fatalf("lesson row should enable the split (split=%v lessonW=%d)", m.lessonSplit(), m.lessonW)
 	}
-	if !m.chat.vp.AtTop() || m.chat.vp.AtBottom() {
+	if m.lesson.vp.TotalLineCount() <= m.lesson.vp.Height {
+		t.Fatalf("setup: lesson not tall enough to scroll (lines=%d height=%d)",
+			m.lesson.vp.TotalLineCount(), m.lesson.vp.Height)
+	}
+	if !m.lesson.vp.AtTop() || m.lesson.vp.AtBottom() {
 		t.Fatalf("a freshly started lesson should open at its top, got AtTop=%v AtBottom=%v",
-			m.chat.vp.AtTop(), m.chat.vp.AtBottom())
+			m.lesson.vp.AtTop(), m.lesson.vp.AtBottom())
+	}
+	// The chat holds only the conversation — no lecture block.
+	for _, b := range m.chat.blocks {
+		if b.role == roleLesson {
+			t.Fatal("the lecture must not appear in the chat transcript in split mode")
+		}
 	}
 }
 
 func TestLoadedLessonShowsFromTop(t *testing.T) {
 	m := readyModel(t)
 
-	// The chat starts pinned to the tail (as it is while the "loading lesson"
-	// spinner runs), so a naive append would open the lesson at its end.
-	m.chat.vp.GotoBottom()
-
 	lesson := strings.Repeat("A line of lesson content that the reader should see first.\n", 120)
-	m = step(t, m, lessonMsg{text: lesson})
 
-	if m.chat.vp.TotalLineCount() <= m.chat.vp.Height {
+	// Split mode (curriculum lesson row): the async lecture lands in the
+	// lesson pane, opened at the top.
+	m.pending = 1
+	m = step(t, m, lessonMsg{text: lesson})
+	if m.lesson.vp.TotalLineCount() <= m.lesson.vp.Height {
 		t.Fatalf("setup: lesson not tall enough to scroll (lines=%d height=%d)",
+			m.lesson.vp.TotalLineCount(), m.lesson.vp.Height)
+	}
+	if !m.lesson.vp.AtTop() || m.lesson.vp.AtBottom() {
+		t.Fatalf("a freshly loaded lesson should open at its top of the lesson pane, got AtTop=%v AtBottom=%v",
+			m.lesson.vp.AtTop(), m.lesson.vp.AtBottom())
+	}
+
+	// Legacy single-pane mode (:view chat): the lecture appends to the chat
+	// transcript, which starts pinned to the tail (as while the "loading
+	// lesson" spinner runs) — it must still open at the top.
+	m = ex(t, m, "view chat")
+	m.chat.vp.GotoBottom()
+	m.pending = 1
+	m = step(t, m, lessonMsg{text: lesson})
+	if m.chat.vp.TotalLineCount() <= m.chat.vp.Height {
+		t.Fatalf("setup: legacy lesson not tall enough to scroll (lines=%d height=%d)",
 			m.chat.vp.TotalLineCount(), m.chat.vp.Height)
 	}
 	if !m.chat.vp.AtTop() || m.chat.vp.AtBottom() {
-		t.Fatalf("a freshly loaded lesson should open at its top, got AtTop=%v AtBottom=%v",
+		t.Fatalf("a legacy-mode lesson should open at the chat's top, got AtTop=%v AtBottom=%v",
 			m.chat.vp.AtTop(), m.chat.vp.AtBottom())
+	}
+}
+
+// A lesson row renders three columns — sidebar | lesson | chat — with the
+// lecture in the lesson pane and the chat holding only the conversation.
+// Quiz rows revert to sidebar | editor | chat.
+func TestLessonRowShowsThreeColumns(t *testing.T) {
+	m := readyModel(t)
+	if !m.lessonSplit() {
+		t.Fatal("a curriculum lesson row should enable the lesson split")
+	}
+	if m.lessonW == 0 || m.editorW != 0 {
+		t.Fatalf("split geometry wrong: lessonW=%d editorW=%d", m.lessonW, m.editorW)
+	}
+	if m.sidebarW+m.lessonW+m.chatW+6 > m.width {
+		t.Fatalf("panes overflow: %d+%d+%d+6 > %d", m.sidebarW, m.lessonW, m.chatW, m.width)
+	}
+	tpc := m.topicByID[m.currentTopicID]
+	if len(m.lesson.blocks) != 1 || m.lesson.blocks[0].text != lessonBlockText(tpc) {
+		t.Fatalf("lesson pane should hold exactly the lecture, got %+v", m.lesson.blocks)
+	}
+	for _, b := range m.chat.blocks {
+		if b.role == roleLesson {
+			t.Fatal("the lecture must not be duplicated in the chat")
+		}
+	}
+
+	// The quiz row swaps the lesson pane for the editor.
+	m = step(t, m, func() tea.Msg { return nil }()) // no-op; keep m addressable style
+	_ = m.startTopicView(tpc, "quiz")
+	if m.lessonW != 0 || m.editorW == 0 {
+		t.Fatalf("quiz row geometry wrong: lessonW=%d editorW=%d", m.lessonW, m.editorW)
+	}
+}
+
+// Focus moves linearly through the visible panes: sidebar → lesson → chat,
+// clamped at the edges; a folded sidebar makes the lesson the left edge.
+func TestLessonPaneFocusOrderLinear(t *testing.T) {
+	m := readyModel(t)
+	m.setFocus(paneSidebar)
+
+	next := func() { m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlW}); m = step(t, m, keyRunes("l")) }
+	prev := func() { m = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlW}); m = step(t, m, keyRunes("h")) }
+
+	next()
+	if m.focus != paneLesson {
+		t.Fatalf("sidebar → l should focus the lesson pane, got %v", m.focus)
+	}
+	next()
+	if m.focus != paneChat {
+		t.Fatalf("lesson → l should focus the chat, got %v", m.focus)
+	}
+	next()
+	if m.focus != paneChat {
+		t.Fatalf("chat is the right edge; focus moved to %v", m.focus)
+	}
+	prev()
+	prev()
+	if m.focus != paneSidebar {
+		t.Fatalf("two h steps should return to the sidebar, got %v", m.focus)
+	}
+
+	m = ex(t, m, "fold")
+	if m.focus != paneLesson {
+		t.Fatalf("folding the focused sidebar should land on the lesson pane, got %v", m.focus)
+	}
+	prev()
+	if m.focus != paneLesson {
+		t.Fatalf("with the sidebar folded the lesson pane is the left edge, got %v", m.focus)
+	}
+}
+
+// :view chat materializes the lecture into the transcript exactly once and
+// :view auto strips it back out — repeatedly, without duplicates, preserving
+// the conversation and any ":answer" model-solution blocks.
+func TestViewToggleMaterializesLessonOnce(t *testing.T) {
+	m := readyModel(t)
+	tpc := m.topicByID[m.currentTopicID]
+	lecture := lessonBlockText(tpc)
+
+	m.chat.append(roleUser, "why though?")
+	m.chat.append(roleTutor, "because ownership.")
+	m.chat.append(roleLesson, "Model answer\n\nfn main() {}") // :answer block — must survive
+
+	for i := 0; i < 3; i++ {
+		m = ex(t, m, "view chat")
+		if m.lessonW != 0 {
+			t.Fatalf("round %d: :view chat should collapse the lesson pane", i)
+		}
+		var lessons int
+		for _, b := range m.chat.blocks {
+			if b.role == roleLesson && b.text == lecture {
+				lessons++
+			}
+		}
+		if lessons != 1 {
+			t.Fatalf("round %d: lecture materialized %d times, want 1", i, lessons)
+		}
+		if m.chat.blocks[0].text != lecture {
+			t.Fatalf("round %d: lecture should be the first block, got %q", i, m.chat.blocks[0].text)
+		}
+
+		m = ex(t, m, "view auto")
+		if m.lessonW == 0 {
+			t.Fatalf("round %d: :view auto should restore the split", i)
+		}
+		for _, b := range m.chat.blocks {
+			if b.role == roleLesson && b.text == lecture {
+				t.Fatalf("round %d: lecture not stripped from the chat", i)
+			}
+		}
+		if len(m.lesson.blocks) != 1 || m.lesson.blocks[0].text != lecture {
+			t.Fatalf("round %d: lesson pane not repopulated", i)
+		}
+	}
+
+	// The conversation and the model answer are intact after all the churn.
+	var user, tutor, answer bool
+	for _, b := range m.chat.blocks {
+		user = user || (b.role == roleUser && b.text == "why though?")
+		tutor = tutor || (b.role == roleTutor && b.text == "because ownership.")
+		answer = answer || (b.role == roleLesson && strings.HasPrefix(b.text, "Model answer"))
+	}
+	if !user || !tutor || !answer {
+		t.Fatalf("conversation damaged by toggling: user=%v tutor=%v answer=%v", user, tutor, answer)
+	}
+}
+
+// Toggling the split away while the lesson pane holds focus must not leave
+// focus on a hidden pane.
+func TestViewToggleWhileLessonFocused(t *testing.T) {
+	m := readyModel(t)
+	m.setFocus(paneLesson)
+	m = ex(t, m, "view chat")
+	if m.focus != paneChat {
+		t.Fatalf(":view chat with the lesson focused should land on the chat, got %v", m.focus)
+	}
+	m = ex(t, m, "view auto")
+	if m.focus != paneChat {
+		t.Fatalf("restoring the split must not steal focus, got %v", m.focus)
+	}
+}
+
+// Wheel, click, and drag land on the lesson pane at its column; the chat's
+// hit-box shifts right by the lesson span.
+func TestLessonPaneMouseWheelClickDrag(t *testing.T) {
+	m := readyModel(t)
+	m.lesson.setLesson(strings.Repeat("scrollable lecture line\n", 200))
+	lessonX := m.sidebarW + 2 + 3            // inside the lesson box
+	chatX := m.sidebarW + 2 + m.lessonW + 2 + 3 // inside the chat box
+
+	m.setFocus(paneSidebar)
+	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: lessonX, Y: 5})
+	if m.lesson.vp.YOffset == 0 {
+		t.Fatal("wheel over the lesson pane should scroll it")
+	}
+	if m.focus != paneSidebar {
+		t.Fatal("wheel must not steal focus")
+	}
+
+	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: lessonX, Y: 5})
+	if m.focus != paneLesson || !m.dragLesson {
+		t.Fatalf("click should focus the lesson pane and arm the drag (focus=%v drag=%v)", m.focus, m.dragLesson)
+	}
+	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft, X: lessonX + 8, Y: 6})
+	if !m.lesson.sel.active {
+		t.Fatal("drag should sweep out a lesson selection")
+	}
+	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionRelease, X: lessonX + 8, Y: 6})
+	if m.dragLesson {
+		t.Fatal("release should end the lesson drag")
+	}
+
+	m = step(t, m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: chatX, Y: 5})
+	if m.focus != paneChat {
+		t.Fatalf("click right of the lesson span should focus the chat, got %v", m.focus)
+	}
+}
+
+// The ",n" fold chord and ":" command line work from the lesson pane.
+func TestLeaderFoldAndColonFromLessonPane(t *testing.T) {
+	m := readyModel(t)
+	m.setFocus(paneLesson)
+	m = step(t, m, keyRunes(","))
+	m = step(t, m, keyRunes("n"))
+	if !m.sidebarCollapsed {
+		t.Fatal(",n from the lesson pane should fold the sidebar")
+	}
+	m = step(t, m, keyRunes(":"))
+	if !m.cmdMode {
+		t.Fatal(": from the lesson pane should open the command line")
+	}
+}
+
+// :compact on a lesson row trades width from the lesson pane to the chat.
+func TestCompactWidensChatInLessonSplit(t *testing.T) {
+	m := readyModel(t)
+	lessonW, chatW := m.lessonW, m.chatW
+	m = ex(t, m, "compact")
+	if m.chatW <= chatW || m.lessonW >= lessonW {
+		t.Fatalf(":compact should widen chat and narrow the lesson: chat %d->%d lesson %d->%d",
+			chatW, m.chatW, lessonW, m.lessonW)
+	}
+	if m.sidebarW+m.lessonW+m.chatW+6 > m.width {
+		t.Fatalf("panes overflow after :compact")
+	}
+}
+
+// The horizontal layout keeps today's chat-centric lecture — no split.
+func TestHorizontalKeepsLegacyLectureView(t *testing.T) {
+	m := readyModel(t)
+	m.horizontal = true
+	tpc := m.topicByID[m.currentTopicID]
+	_ = m.startTopicView(tpc, "lesson")
+	if m.lessonSplit() || m.lessonW != 0 {
+		t.Fatalf("horizontal must not split (split=%v lessonW=%d)", m.lessonSplit(), m.lessonW)
+	}
+	var lecture bool
+	for _, b := range m.chat.blocks {
+		if b.role == roleLesson && b.text == lessonBlockText(tpc) {
+			lecture = true
+		}
+	}
+	if !lecture {
+		t.Fatal("horizontal lesson rows must keep the lecture in the transcript")
+	}
+}
+
+// Switching topics mid-stream keeps both surfaces coherent: the lesson pane
+// shows the new lecture and the streaming tail block survives the round trip.
+func TestTopicSwitchDuringStreamKeepsLessonCoherent(t *testing.T) {
+	m := readyModel(t)
+	topics := m.curr.Topics()
+	if len(topics) < 2 {
+		t.Skip("course too small")
+	}
+	first := m.topicByID[m.currentTopicID]
+
+	m.chat.beginStream()
+	m.chat.appendStream("partial reply that is still stream")
+
+	_ = m.startTopicView(topics[1], "lesson")
+	if m.lesson.blocks[0].text != lessonBlockText(m.topicByID[topics[1].ID]) {
+		t.Fatal("lesson pane should show the new topic's lecture")
+	}
+
+	_ = m.startTopicView(first, "lesson")
+	if m.lesson.blocks[0].text != lessonBlockText(first) {
+		t.Fatal("returning should restore the first lecture")
+	}
+	var tail bool
+	for _, b := range m.chat.blocks {
+		if b.role == roleTutor && strings.Contains(b.text, "partial reply") {
+			tail = true
+		}
+	}
+	if !tail {
+		t.Fatalf("the streaming tail block was lost, blocks=%+v", m.chat.blocks)
 	}
 }
 
@@ -882,13 +1166,20 @@ func TestBareTopicOpensPicker(t *testing.T) {
 
 func TestClearChatTranscript(t *testing.T) {
 	m := readyModel(t)
-	if len(m.chat.blocks) == 0 {
-		t.Fatal("expected lesson/challenge blocks after setup")
+	// On a lesson row the lecture lives in the lesson pane; the chat holds
+	// the conversation. Seed one and confirm :clear empties the conversation
+	// while the lecture survives.
+	if len(m.lesson.blocks) == 0 {
+		t.Fatal("expected the lecture in the lesson pane after setup")
 	}
+	m.chat.append(roleUser, "a question")
 	m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "user", Content: "hi"})
 	m = ex(t, m, "clear")
 	if len(m.chat.blocks) != 0 || len(m.chatHist) != 0 {
 		t.Fatalf("clear did not empty the transcript: %d blocks, %d hist", len(m.chat.blocks), len(m.chatHist))
+	}
+	if len(m.lesson.blocks) == 0 {
+		t.Fatal(":clear must not wipe the lecture pane")
 	}
 }
 

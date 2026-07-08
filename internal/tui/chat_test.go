@@ -283,6 +283,90 @@ func TestChatDragReleaseCopies(t *testing.T) {
 	}
 }
 
+// A read-only lesson pane renders only the document: no input prompt, no
+// separator rule, and the viewport spans the full pane height.
+func TestLessonPaneReadOnlyView(t *testing.T) {
+	forceColorTUI(t)
+	c := newLessonPane()
+	c.setSize(40, 12)
+	c.setLesson("Lesson Title\n\nBody line one.\nBody line two.")
+	if c.vp.Height != 12 {
+		t.Fatalf("read-only viewport height = %d, want the full 12", c.vp.Height)
+	}
+	view := c.view()
+	if strings.Contains(view, "> ") || strings.Contains(view, "ask the tutor") {
+		t.Fatalf("read-only pane rendered an input prompt:\n%q", view)
+	}
+	if rows := strings.Count(view, "\n") + 1; rows > 12 {
+		t.Fatalf("view has %d rows, want <= 12", rows)
+	}
+	if !strings.Contains(view, "Lesson Title") {
+		t.Fatalf("lesson content missing:\n%q", view)
+	}
+	if !c.vp.AtTop() {
+		t.Fatal("setLesson should open the document at the top")
+	}
+}
+
+// Bare keys scroll the read-only pane; nothing ever reaches the (hidden) input.
+func TestLessonPaneKeysScroll(t *testing.T) {
+	c := newLessonPane()
+	c.setSize(40, 5)
+	c.setLesson(strings.Repeat("line of the lecture\n", 40))
+
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if c.vp.YOffset != 1 {
+		t.Fatalf("j should scroll down one line, offset = %d", c.vp.YOffset)
+	}
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	if c.vp.YOffset != 0 {
+		t.Fatalf("k should scroll back up, offset = %d", c.vp.YOffset)
+	}
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	if !c.vp.AtBottom() {
+		t.Fatal("G should jump to the bottom")
+	}
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if !c.vp.AtTop() {
+		t.Fatal("g should jump to the top")
+	}
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	if c.vp.YOffset == 0 {
+		t.Fatal("ctrl+d should half-page down")
+	}
+	if c.input.Value() != "" {
+		t.Fatalf("keys must not reach the hidden input, got %q", c.input.Value())
+	}
+}
+
+// Drag-to-copy works on the lesson pane exactly like the chat transcript.
+func TestLessonPaneDragSelect(t *testing.T) {
+	forceColorTUI(t)
+	c := newLessonPane()
+	c.setSize(40, 12)
+	c.setLesson("alpha beta gamma")
+	// contentLines: 0 = " lesson " badge, 1 = the body line.
+	c.startSelect(0, 1)
+	c.dragSelect(9, 1)
+	got, ok := c.selectionText()
+	if !ok || !strings.HasPrefix(got, "alpha beta") {
+		t.Fatalf("selection = %q ok=%v, want alpha beta…", got, ok)
+	}
+}
+
+// The conversational default must stay exactly as before — the vault TUI and
+// the tutor chat both depend on it.
+func TestNewChatDefaultIsInteractive(t *testing.T) {
+	c := newChat()
+	if c.noInput {
+		t.Fatal("newChat must not be read-only")
+	}
+	c.setSize(40, 12)
+	if c.vp.Height >= 12 {
+		t.Fatalf("interactive chat must reserve input rows, vp height = %d", c.vp.Height)
+	}
+}
+
 func TestVaultCompactGrowsChat(t *testing.T) {
 	m := newTestVaultModel(t)
 	before := m.chatW
