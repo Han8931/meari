@@ -19,13 +19,26 @@ this file tracks concrete, actionable items. Check things off as they land.
 - [ ] Spaced repetition / flashcards with SM-2 scheduling + `:review` due-queue
 - [ ] Quiz mode — multiple-choice generated from a note, AI-graded
 - [ ] Cloze deletions — auto fill-in-the-blank cards from a note's key sentences
+- [ ] AI Q&A cards — generate question/answer pairs from a note (same pipeline as essay/challenge)
+- [ ] Guided course tutoring — `:study` a course topic-by-topic (teach → quiz → next) instead of
+      only essay/challenge study, so a built course closes the recall loop
 - [ ] Daily review streak + "due today" counts on the launch screen (uses progress.json)
 
 ## Vault & knowledge graph
 
 - [ ] `[[wikilink]]` autocomplete in the editor
+- [ ] Full-text search across the vault (in-memory inverted index now; SQLite-backed later)
 - [ ] Tag support (`#tag` / frontmatter tags) + tag browser in the left pane
 - [ ] Link graph view (start with an ASCII/adjacency summary)
+- [ ] Note templates / daily notes — `:today` and `:template` (trivial over `vSaveOpenCmd`)
+
+## Web app
+
+The browser front-end exposes a fraction of the TUI — bring the AI/vault features across:
+
+- [ ] AI note editing in the web app — `:polish`/`:edit`/`:ask` on a selection
+- [ ] `:course` / `:revise` / `:publish` from the browser
+- [ ] Fuzzy find (`,ff` files, `,fg` grep) and a backlinks panel UI (`handleBacklinks` already exists)
 
 ## AI tutor
 
@@ -37,6 +50,16 @@ this file tracks concrete, actionable items. Check things off as they land.
 - [ ] Index — SQLite-backed search, backlinks, SRS/progress store
 - [ ] Desktop packaging (Wails, cgo-free)
 - [ ] Vault git auto-commit (`vault.autocommit`) for free history/sync
+
+## Correctness & safety
+
+- [ ] **Path traversal** — `vault.Read`/`Write` use bare `filepath.Join` and skip `safeAbs()`
+      (unlike `Delete`/`Rename`/`MakeDir`); the web server passes `?path=` straight through, so
+      `GET /api/note?path=../../etc/passwd` escapes the vault. Route both through `safeAbs()`.
+- [ ] Atomic writes (temp-file + rename) for notes, `progress.json`, and drafts — a crash
+      mid-`os.WriteFile` can truncate progress/drafts today
+- [ ] Web server hardening — request body size limit, `Read`/`Write`/`Idle` timeouts, graceful
+      shutdown on SIGINT, sanitize rendered markdown (XSS), and refuse to bind a routable address
 
 ## Recently done
 

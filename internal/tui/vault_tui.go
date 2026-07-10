@@ -588,6 +588,16 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pendingLeader = true
 			return m, nil
 		}
+		// ":" from the editor's Normal mode opens the global command line in the
+		// status row — not the editor's own in-pane ":" line. (Visual mode keeps
+		// forwarding to the editor so a ":"-launched command captures the
+		// selection.)
+		if msg.String() == ":" && m.editor.NormalMode() {
+			m.cmdMode = true
+			m.cmdLine.SetValue("")
+			m.cmdHist.Open()
+			return m, m.cmdLine.Focus()
+		}
 		tm, cmd := m.editor.Update(msg)
 		m.editor = tm.(editor.Model)
 		return m, cmd
@@ -1134,7 +1144,7 @@ var vaultExCmds = []string{
 	"answer", "apply", "ask", "backlinks", "code", "compact", "copy", "course",
 	"discard", "discuss", "done", "edit", "essay", "export", "fold", "gen", "grade",
 	"learn", "lesson", "links", "new", "paste", "polish", "publish", "q", "quit",
-	"revise", "sidebar", "tutor", "wide", "yank",
+	"revise", "sidebar", "submit", "tutor", "w", "wide", "wq", "write", "yank",
 }
 
 // runEx dispatches a vault ex-command (without the leading colon).
@@ -1223,6 +1233,16 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 	case "tutor", "code":
 		m.exit = SwitchToTutor
 		return m, tea.Quit // the shell loop opens the coding TUI
+	case "w", "write", "submit":
+		// Save the open note (or grade, in study mode) — same as Ctrl-S. These
+		// were the editor's own ":" commands before the global command line took
+		// over the editor pane's Normal-mode ":".
+		return m.submitEditor()
+	case "wq", "x":
+		if !m.studyMode && m.current != "" {
+			_, _ = m.svc.SaveNote(m.current, m.editor.Value())
+		}
+		return m, tea.Quit
 	case "q", "quit":
 		return m, tea.Quit
 	default:
