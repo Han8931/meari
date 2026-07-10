@@ -75,6 +75,7 @@ esac
 if $clean; then
     # Remove every other meari binary on PATH so nothing stale can shadow
     # the one just installed.
+    removed_old=false
     IFS=':' read -ra path_dirs <<<"$PATH"
     for dir in "${path_dirs[@]}"; do
         [ -n "$dir" ] || continue
@@ -83,10 +84,14 @@ if $clean; then
         [ "$candidate" -ef "$BIN_DIR/meari" ] && continue
         if rm -f "$candidate" 2>/dev/null; then
             info "Removed old binary: $candidate"
+            removed_old=true
         else
             warn "could not remove $candidate — run: sudo rm \"$candidate\""
         fi
     done
+    if $removed_old; then
+        warn "your shell may have cached the old location — run: hash -r"
+    fi
 
     # The build artifact from `go build -o meari .` shadows the install when
     # run as ./meari.
