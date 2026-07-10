@@ -3,11 +3,17 @@
 # Meari install script: builds the binary and puts it on your PATH.
 #
 #   ./install.sh                 # install to ~/.local/bin
+#   ./install.sh --clean         # also remove old binaries and regenerable
+#                                # app state (learning progress is kept)
 #   BIN_DIR=/usr/local/bin ./install.sh
 #
 # Meari roots its files (config.toml, vault/, data/, workspace/, ...) at the
 # directory you run it from, so after installing, launch it from the folder
 # you want as your Meari home.
+#
+# --clean never touches: config.toml, vault/ (your notes), data/ (progress),
+# workspace/drafts/ (in-progress challenge solutions), meari-course/
+# (progress references these), meari-publish/ (your sharing repo).
 
 set -euo pipefail
 
@@ -16,7 +22,15 @@ GO_MIN_MINOR=26 # requires go 1.26+
 
 repo_dir="$(cd "$(dirname "$0")" && pwd)"
 
+clean=false
+case "${1:-}" in
+    --clean) clean=true ;;
+    '') ;;
+    *) printf 'usage: %s [--clean]\n' "$0" >&2; exit 2 ;;
+esac
+
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33mnote:\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # --- check Go toolchain ------------------------------------------------------
@@ -34,22 +48,65 @@ fi
 
 # --- build -------------------------------------------------------------------
 
+# Build to a temp location so no stale ./meari artifact is left in the repo
+# to shadow the installed binary.
+build_dir="$(mktemp -d)"
+trap 'rm -rf "$build_dir"' EXIT
+
 info "Building meari ($go_version)"
-(cd "$repo_dir" && go build -trimpath -ldflags="-s -w" -o meari .)
+(cd "$repo_dir" && go build -trimpath -ldflags="-s -w" -o "$build_dir/meari" .)
 
 # --- install -----------------------------------------------------------------
 
 info "Installing to $BIN_DIR/meari"
 mkdir -p "$BIN_DIR"
-install -m 0755 "$repo_dir/meari" "$BIN_DIR/meari"
+install -m 0755 "$build_dir/meari" "$BIN_DIR/meari"
 
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
     *)
-        printf '\033[1;33mnote:\033[0m %s is not on your PATH. Add this to your shell profile:\n' "$BIN_DIR"
+        warn "$BIN_DIR is not on your PATH. Add this to your shell profile:"
         printf '      export PATH="%s:$PATH"\n' "$BIN_DIR"
         ;;
 esac
+
+# --- clean: previous binaries + regenerable app state ------------------------
+
+if $clean; then
+    # Remove every other meari binary on PATH so nothing stale can shadow
+    # the one just installed.
+    IFS=':' read -ra path_dirs <<<"$PATH"
+    for dir in "${path_dirs[@]}"; do
+        [ -n "$dir" ] || continue
+        candidate="$dir/meari"
+        [ -f "$candidate" ] && [ -x "$candidate" ] || continue
+        [ "$candidate" -ef "$BIN_DIR/meari" ] && continue
+        if rm -f "$candidate" 2>/dev/null; then
+            info "Removed old binary: $candidate"
+        else
+            warn "could not remove $candidate — run: sudo rm \"$candidate\""
+        fi
+    done
+
+    # The build artifact from `go build -o meari .` shadows the install when
+    # run as ./meari.
+    if [ -f "$repo_dir/meari" ]; then
+        rm -f "$repo_dir/meari"
+        info "Removed build artifact: $repo_dir/meari"
+    fi
+
+    # Regenerable app state. Progress is kept: data/ (progress.json) and
+    # workspace/drafts/ (in-progress challenge solutions survive).
+    if [ -d "$repo_dir/workspace" ]; then
+        find "$repo_dir/workspace" -mindepth 1 -maxdepth 1 ! -name drafts \
+            -exec rm -rf {} +
+        info "Cleared workspace/ (kept workspace/drafts/)"
+    fi
+    if [ -d "$repo_dir/exports" ]; then
+        find "$repo_dir/exports" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        info "Cleared exports/"
+    fi
+fi
 
 # --- done --------------------------------------------------------------------
 
