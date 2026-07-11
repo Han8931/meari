@@ -2,6 +2,22 @@
 created: "2026-07-08"
 id: rust-b-types
 source: meari-course
+study:
+  answer: |
+    fn average(a: i32, b: i32) -> f64 {
+        (a as f64 + b as f64) / 2.0
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `average(a: i32, b: i32) -> f64` returning the mean of the two values as an f64 (cast with `as f64`).'
+  starter: |
+    fn average(a: i32, b: i32) -> f64 {
+        0.0
+    }
+  tests:
+    - assert_eq!(average(2, 4), 3.0);
+    - assert_eq!(average(1, 2), 1.5);
+    - assert_eq!(average(-3, 3), 0.0);
 subject: Rust (Beginner)
 title: Data Types & Type Casting
 ---
@@ -71,9 +87,10 @@ Casting to a smaller type can silently lose information:
       u8 :          [ 44 ]        (300 - 256)
 ```
 
-So `as` is a blunt tool — it always succeeds and never warns. For fallible,
-checked conversions you'll later use `TryFrom`/`try_into`, but `as` is the
-beginner's workhorse.
+An `as` conversion always produces a value, even when information is lost. Use
+it when that behavior is understood and intentional. When a value might not fit,
+`TryFrom` or `try_into` can report failure instead; the checked example below
+shows what that difference looks like.
 
 ### The same in Python
 
@@ -113,6 +130,38 @@ x.saturating_add(1); // 255 — clamp at the max
 
 That `Option` return connects to [[Option & Result]], where absence-as-a-value
 becomes a central theme. Next: putting values to work in [[Control Flow]].
+
+## Literals, annotations, and suffixes
+
+The text `42` is an integer **literal**. Context usually determines its type:
+
+```rust
+let a = 42;          // defaults to i32
+let b: u64 = 42;     // annotation supplies the type
+let c = 42u8;        // a suffix supplies the type
+let d = 1_000_000;   // underscores improve readability only
+```
+
+When an error says “expected `usize`, found `i32`,” it is describing the two
+sides of an operation, not claiming either type is universally wrong.
+
+## Prefer checked conversion for uncertain data
+
+Use `as` when truncation or wrapping is intentional. For uncertain input, a
+checked conversion is safer:
+
+```rust
+let large: u16 = 300;
+let byte = u8::try_from(large);
+
+match byte {
+    Ok(n) => println!("converted: {n}"),
+    Err(_) => println!("300 does not fit in a u8"),
+}
+```
+
+You will learn `Result` and `match` later. For now, notice that `as` produces a
+value unconditionally, while `try_from` reports failure.
 
 
 ## Try it

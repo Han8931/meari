@@ -1,6 +1,9 @@
 package executor
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
+)
 
 func TestRunPythonPass(t *testing.T) {
 	code := "def is_even(n):\n    return n % 2 == 0\n"
@@ -74,6 +77,47 @@ func TestRunGoUsesReflect(t *testing.T) {
 	}
 	if !res.Passed {
 		t.Fatalf("expected pass, got output:\n%s", res.Output)
+	}
+}
+
+// rustReady reports whether rustc can actually compile — a bare rustup shim
+// with no default toolchain is on PATH but fails, so LookPath alone isn't enough.
+func rustReady(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("rustc"); err != nil {
+		t.Skip("rustc not installed")
+	}
+	if err := exec.Command("rustc", "--version").Run(); err != nil {
+		t.Skip("rustc has no usable toolchain (run: rustup default stable)")
+	}
+}
+
+func TestRunRustPass(t *testing.T) {
+	rustReady(t)
+	code := "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n"
+	tests := []string{
+		`assert_eq!(add(2, 3), 5, "add(2,3)");`,
+		`assert_eq!(add(-1, 1), 0, "add(-1,1)");`,
+	}
+	res, err := Run("rust", code, tests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Passed {
+		t.Fatalf("expected pass, got output:\n%s", res.Output)
+	}
+}
+
+func TestRunRustFail(t *testing.T) {
+	rustReady(t)
+	code := "fn add(a: i32, b: i32) -> i32 {\n    a - b\n}\n" // wrong
+	tests := []string{`assert_eq!(add(2, 3), 5, "add(2,3)");`}
+	res, err := Run("rust", code, tests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Passed {
+		t.Fatal("expected failure for wrong Rust solution")
 	}
 }
 

@@ -2,6 +2,32 @@
 created: "2026-07-08"
 id: rust-b-compound
 source: meari-course
+study:
+  answer: |
+    fn min_max(xs: &[i32]) -> (i32, i32) {
+        let mut lo = xs[0];
+        let mut hi = xs[0];
+        for &x in xs {
+            if x < lo {
+                lo = x;
+            }
+            if x > hi {
+                hi = x;
+            }
+        }
+        (lo, hi)
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `min_max(xs: &[i32]) -> (i32, i32)` returning the smallest and largest values as a tuple. Assume `xs` is non-empty.'
+  starter: |
+    fn min_max(xs: &[i32]) -> (i32, i32) {
+        (0, 0)
+    }
+  tests:
+    - assert_eq!(min_max(&[3, 1, 2]), (1, 3));
+    - assert_eq!(min_max(&[5]), (5, 5));
+    - assert_eq!(min_max(&[-2, 4, 0]), (-2, 4));
 subject: Rust (Beginner)
 title: Arrays, Tuples & Slices
 ---
@@ -110,6 +136,25 @@ Why doesn't a slice know its length at compile time? Because it can point into a
 region of *any* size — that flexibility is exactly why slices are the standard
 way to pass "some sequence of `T`" into a function without caring whether the
 caller had an array or a [[Vec & HashMap|Vec]].
+
+## Reading the type notation
+
+Read `[i32; 4]` as “four owned `i32` values” and `&[i32]` as “a borrowed view of
+some number of `i32` values.” The semicolon in an array type separates element
+type from length; a slice omits the length because it is stored at runtime.
+
+```rust
+fn sum(values: &[i32]) -> i32 {
+    values.iter().sum()
+}
+
+let array = [1, 2, 3];
+let vector = vec![4, 5, 6];
+println!("{} {}", sum(&array), sum(&vector));
+```
+
+One function accepts both collections without copying either. Slicing can panic
+at runtime if a range is out of bounds, so ensure `start <= end <= len`.
 
 ## Try it
 

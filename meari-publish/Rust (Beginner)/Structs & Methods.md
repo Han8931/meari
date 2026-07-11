@@ -2,6 +2,36 @@
 created: "2026-07-08"
 id: rust-b-structs
 source: meari-course
+study:
+  answer: |
+    struct Rectangle {
+        width: u32,
+        height: u32,
+    }
+
+    impl Rectangle {
+        fn area(&self) -> u32 {
+            self.width * self.height
+        }
+    }
+  kind: code
+  lang: rust
+  prompt: Define a `Rectangle` struct with `width` and `height` (both `u32`) and an `area(&self) -> u32` method.
+  starter: |
+    struct Rectangle {
+        width: u32,
+        height: u32,
+    }
+
+    impl Rectangle {
+        fn area(&self) -> u32 {
+            0
+        }
+    }
+  tests:
+    - 'assert_eq!(Rectangle { width: 3, height: 4 }.area(), 12);'
+    - 'assert_eq!(Rectangle { width: 5, height: 5 }.area(), 25);'
+    - 'assert_eq!(Rectangle { width: 0, height: 9 }.area(), 0);'
 subject: Rust (Beginner)
 title: Structs & Methods
 ---
@@ -158,6 +188,23 @@ print(r.area())                           # 12
 The distinction Rust adds is on `self`: `&self` / `&mut self` / `self` declare
 whether a method *reads*, *mutates*, or *consumes* the instance. Python's `self`
 makes no such promise — any method can mutate the object.
+
+## Trace construction field by field
+
+```rust
+let title = String::from("Rust Notes");
+let book = Book { title, pages: 120 };
+```
+
+The `title` shorthand means `title: title`. Because `String` is not `Copy`, its
+ownership moves into `book.title`; the old local `title` cannot be used. The
+number `120` is copied into `pages`. The struct now owns all its fields and drops
+them when the struct itself goes out of scope.
+
+Calling `book.is_long()` is roughly method-call syntax for
+`Book::is_long(&book)`. Rust automatically creates the `&book` borrow required
+by the receiver. This automatic borrowing is convenient, but the ordinary
+borrowing rules still apply.
 
 ## Try it
 

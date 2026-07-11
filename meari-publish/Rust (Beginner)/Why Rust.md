@@ -2,6 +2,20 @@
 created: "2026-07-08"
 id: rust-b-why
 source: meari-course
+study:
+  answer: |
+    fn rust_checks_memory_safety() -> &'static str {
+        "compile time"
+    }
+  kind: code
+  lang: rust
+  prompt: The function is already written. Replace the `"TODO"` placeholder with `"compile time"` to show when Rust checks many memory-safety rules. You only need to fill in one line.
+  starter: |
+    fn rust_checks_memory_safety() -> &'static str {
+        "TODO" // replace this string
+    }
+  tests:
+    - assert_eq!(rust_checks_memory_safety(), "compile time");
 subject: Rust (Beginner)
 title: Why Rust
 ---

@@ -2,6 +2,42 @@
 created: "2026-07-08"
 id: rust-b-enums
 source: meari-course
+study:
+  answer: |
+    enum Coin {
+        Penny,
+        Nickel,
+        Dime,
+        Quarter,
+    }
+
+    fn value_in_cents(coin: &Coin) -> u32 {
+        match coin {
+            Coin::Penny => 1,
+            Coin::Nickel => 5,
+            Coin::Dime => 10,
+            Coin::Quarter => 25,
+        }
+    }
+  kind: code
+  lang: rust
+  prompt: 'Define an enum `Coin` with variants `Penny`, `Nickel`, `Dime`, `Quarter`, and `value_in_cents(coin: &Coin) -> u32` using a `match`.'
+  starter: |
+    enum Coin {
+        Penny,
+        Nickel,
+        Dime,
+        Quarter,
+    }
+
+    fn value_in_cents(coin: &Coin) -> u32 {
+        0
+    }
+  tests:
+    - assert_eq!(value_in_cents(&Coin::Penny), 1);
+    - assert_eq!(value_in_cents(&Coin::Nickel), 5);
+    - assert_eq!(value_in_cents(&Coin::Dime), 10);
+    - assert_eq!(value_in_cents(&Coin::Quarter), 25);
 subject: Rust (Beginner)
 title: Enums & Pattern Matching
 ---
@@ -133,6 +169,26 @@ Enums-plus-match are how Rust encodes "this value is one of a fixed set of
 shapes" *in the type system*. Two of the most important types in the whole
 language — `Option` and `Result` — are just enums, which is exactly why a later
 lesson, [[Option & Result]], builds directly on everything here.
+
+## A pattern both tests and unpacks
+
+In `Message::Move { x, y } => ...`, the left side does two jobs: it checks that
+the value is the `Move` variant and binds its fields to new local variables `x`
+and `y`. Those names exist only in that match arm. The arrow `=>` separates the
+pattern from the expression to run.
+
+A `match` is itself an expression, so it can produce a value:
+
+```rust
+let instruction = match light {
+    Light::Red => "stop",
+    Light::Yellow => "slow down",
+    Light::Green => "go",
+};
+```
+
+All arms must return compatible types. This is the same rule you learned for an
+`if` expression, now applied to more than two possible shapes.
 
 ## Try it
 

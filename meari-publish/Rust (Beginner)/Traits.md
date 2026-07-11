@@ -2,6 +2,51 @@
 created: "2026-07-08"
 id: rust-b-traits
 source: meari-course
+study:
+  answer: |
+    trait Animal {
+        fn sound(&self) -> String;
+    }
+
+    struct Dog;
+    struct Cat;
+
+    impl Animal for Dog {
+        fn sound(&self) -> String {
+            "woof".to_string()
+        }
+    }
+
+    impl Animal for Cat {
+        fn sound(&self) -> String {
+            "meow".to_string()
+        }
+    }
+  kind: code
+  lang: rust
+  prompt: Define a trait `Animal` with `sound(&self) -> String`, plus unit structs `Dog` and `Cat` implementing it to return "woof" and "meow".
+  starter: |
+    trait Animal {
+        fn sound(&self) -> String;
+    }
+
+    struct Dog;
+    struct Cat;
+
+    impl Animal for Dog {
+        fn sound(&self) -> String {
+            String::new()
+        }
+    }
+
+    impl Animal for Cat {
+        fn sound(&self) -> String {
+            String::new()
+        }
+    }
+  tests:
+    - assert_eq!(Dog.sound(), "woof");
+    - assert_eq!(Cat.sound(), "meow");
 subject: Rust (Beginner)
 title: Traits
 ---
@@ -153,6 +198,21 @@ The difference is enforcement and timing. Python checks "does it have this
 method?" when the call runs; Rust checks that the type implements the trait when
 the program *compiles*. Rust's `dyn Trait` is the nearest thing to Python's
 "pass any object that quacks right."
+
+## Trait, implementation, and bound
+
+These three roles are easy to blur:
+
+1. `trait Named { ... }` defines a capability.
+2. `impl Named for User { ... }` teaches one concrete type that capability.
+3. `fn show(x: &impl Named)` accepts any value whose type has that capability.
+
+The trait does not store data and implementing it does not create a new object.
+It is a compile-time relationship between a behavior and a type.
+
+Start with `impl Trait` or `<T: Trait>`; both use static dispatch and are usually
+the simplest choice. Treat `dyn Trait` as a separate, later tool for cases where
+the concrete types genuinely must differ at runtime.
 
 ## Try it
 

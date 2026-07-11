@@ -205,6 +205,13 @@ Respond with ONLY a JSON object, no prose, no fences, matching:
   "answer": "a correct reference solution that passes every test"
 }
 The tests must be self-contained and deterministic.`, lang, lang, lang)
+		system += `
+This is a lesson check, not an algorithm puzzle. Test only concepts explicitly
+taught in the lesson; do not require syntax, APIs, or techniques from later
+topics. Make the starter nearly complete and mark one or a few missing lines
+with TODO comments so the learner fills in focused pieces instead of writing an
+entire solution from scratch. The prompt must explain what each missing piece
+should do without revealing the exact answer.`
 	} else {
 		system = `You are authoring ONE essay exercise for the lesson below.
 Respond with ONLY a JSON object, no prose, no fences, matching:

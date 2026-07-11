@@ -2,6 +2,26 @@
 created: "2026-07-08"
 id: rust-b-derive
 source: meari-course
+study:
+  answer: |
+    #[derive(Debug, Clone, PartialEq)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+  kind: code
+  lang: rust
+  prompt: Add the right `#[derive(...)]` so `Point { x, y }` can be compared with `==`, cloned, and printed with `{:?}`.
+  starter: |
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+  tests:
+    - 'assert_eq!(Point { x: 1, y: 2 }, Point { x: 1, y: 2 });'
+    - 'assert_ne!(Point { x: 1, y: 2 }, Point { x: 3, y: 4 });'
+    - 'assert_eq!(format!("{:?}", Point { x: 1, y: 2 }), "Point { x: 1, y: 2 }");'
+    - 'let p = Point { x: 5, y: 6 }; assert_eq!(p.clone(), p);'
 subject: Rust (Beginner)
 title: Common Derivable Traits
 ---
@@ -132,6 +152,21 @@ Point(1, 2) == Point(1, 2)      # True              ~ derive(PartialEq)
 The difference in flavor: Python's dataclass bundles a common set on by default,
 while Rust makes each capability an explicit opt-in — and, for `Copy`, ties it
 directly to the ownership model you learned earlier.
+
+## Derive generates ordinary implementations
+
+`#[derive(Debug)]` is an attribute attached to the next item. During compilation
+Rust generates an implementation much like one you could write by hand. There
+is no reflection or runtime switch involved.
+
+Be careful with the phrase “deep copy.” `Clone` asks every field to clone itself;
+what that means follows the field's implementation. For `String` it duplicates
+the buffer, while cloning `Rc<T>` creates another shared owner rather than
+duplicating `T`. `Copy` is more restrictive: it must be cheap and implicit, and
+a type implementing `Drop` cannot also implement `Copy`.
+
+Derive the capabilities your code needs. It is normal for a type to be `Debug`
+and `PartialEq` but intentionally not `Clone` or `Copy`.
 
 ## Try it
 
