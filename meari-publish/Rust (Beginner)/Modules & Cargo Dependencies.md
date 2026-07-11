@@ -2,6 +2,25 @@
 created: "2026-07-08"
 id: rust-b-modules
 source: meari-course
+study:
+  answer: |
+    mod math {
+        pub fn add(a: i32, b: i32) -> i32 {
+            a + b
+        }
+    }
+  kind: code
+  lang: rust
+  prompt: 'Create a module `math` containing a public `add(a: i32, b: i32) -> i32` function.'
+  starter: |
+    mod math {
+        pub fn add(a: i32, b: i32) -> i32 {
+            0
+        }
+    }
+  tests:
+    - assert_eq!(math::add(2, 3), 5);
+    - assert_eq!(math::add(-1, 1), 0);
 subject: Rust (Beginner)
 title: Modules & Cargo Dependencies
 ---
@@ -147,6 +166,25 @@ remains — [[Box, Rc & RefCell]] — for when you need heap allocation or share
 ownership. From here the natural next steps are **lifetimes** in depth, **writing
 tests** with `#[test]`, and **concurrency** — where the borrow rules you learned
 pay off as fearless parallelism.
+
+## Separate `mod`, `use`, and `pub`
+
+Beginners often treat these as three forms of import, but they solve different
+problems:
+
+- `mod garden;` tells Rust that a module exists and includes it in the crate.
+- `use crate::garden::Plant;` creates a shorter local name for an existing item.
+- `pub` permits code outside the current module to access an item.
+
+`use` does not load a dependency and does not make anything public. A useful
+debugging sequence is: first confirm the module is declared with `mod`, then
+confirm every boundary is public enough, then shorten the working full path with
+`use`.
+
+Cargo packages may contain a library crate (`src/lib.rs`), binary crates
+(`src/main.rs` or `src/bin/*.rs`), or both. A small project usually starts with
+one package and one binary crate; do not split files until names and responsibilities
+become clearer by doing so.
 
 ## Try it
 

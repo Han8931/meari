@@ -2,13 +2,35 @@
 created: "2026-07-08"
 id: rust-b-ownership
 source: meari-course
+study:
+  answer: |
+    fn longer(a: String, b: String) -> String {
+        if a.len() >= b.len() {
+            a
+        } else {
+            b
+        }
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `longer(a: String, b: String) -> String` that takes ownership of both strings and returns whichever is longer (return `a` on a tie).'
+  starter: |
+    fn longer(a: String, b: String) -> String {
+        a
+    }
+  tests:
+    - assert_eq!(longer(String::from("hi"), String::from("hello")), "hello");
+    - assert_eq!(longer(String::from("abc"), String::from("de")), "abc");
+    - assert_eq!(longer(String::from("ab"), String::from("cd")), "ab");
 subject: Rust (Beginner)
 title: Ownership & Moves
 ---
 
-This is *the* lesson. Ownership is the idea that makes Rust Rust — it's how the
-language guarantees memory safety with **no garbage collector and no manual
-`free`**. Everything else you've learned was warm-up for this.
+Ownership is one of Rust's most important ideas, and it may feel unfamiliar at
+first. There is no need to understand every consequence immediately. Begin with
+one question: **which variable is responsible for this value right now?** Rust
+uses the answer to clean up memory safely, without a garbage collector or a
+manual `free` call.
 
 ## The three rules
 
@@ -131,10 +153,52 @@ takes(name);
 // println!("{name}");   // ❌ name was moved into takes()
 ```
 
-Constantly moving values into functions and moving them back out would be
-miserable. That's exactly the problem **borrowing** solves — lending a value
-without giving up ownership — which is the very next lesson,
+Moving a value into every function would make many ordinary programs awkward.
+**Borrowing** provides another choice: a function can use a value temporarily
+without becoming its owner. That is the subject of the next lesson,
 [[References & Borrowing]].
+
+## A more precise mental model
+
+“Stack types copy, heap types move” is a useful first approximation, but the
+actual rule is: assignment copies only when the type implements `Copy`; otherwise
+it moves. A type can contain only stack data and still choose not to be `Copy`.
+The compiler follows the trait, not the storage location.
+
+A move also does not physically move the heap bytes. Rust copies the small
+`String` handle (pointer, length, and capacity) into the new variable and then
+forbids use of the old handle. The buffer stays where it was.
+
+## Trace ownership through a function
+
+```rust
+fn add_period(mut text: String) -> String {
+    text.push('.'); // the function owns text and may mutate it
+    text             // ownership moves back to the caller
+}
+
+let sentence = String::from("Hello");
+let sentence = add_period(sentence);
+println!("{sentence}");
+```
+
+The owner is first the outer `sentence`, then the parameter `text`, then the new
+outer `sentence`. There is one usable owner at every point. Returning ownership
+works, but borrowing is more convenient for temporary access.
+
+### Partial moves
+
+Moving a non-`Copy` field can make only part of a compound value unavailable:
+
+```rust
+let pair = (String::from("left"), 7);
+let word = pair.0;        // moves the String field
+println!("{}", pair.1);   // untouched i32 field is still usable
+// println!("{:?}", pair); // error: pair is partially moved
+```
+
+You need not use partial moves yet, but recognizing one makes the compiler's
+message much less mysterious.
 
 ## Try it
 

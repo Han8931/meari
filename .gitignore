@@ -4,6 +4,7 @@
 /data/
 /vault/
 /meari-course/
+/meari-course.ownership-backup*/
 /exports/
 
 # Personal config stays local; the repo ships config.example.toml as the template.

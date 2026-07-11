@@ -2,6 +2,26 @@
 created: "2026-07-08"
 id: rust-b-collections
 source: meari-course
+study:
+  answer: |
+    fn word_count(text: &str) -> HashMap<String, u32> {
+        let mut counts = HashMap::new();
+        for word in text.split_whitespace() {
+            *counts.entry(word.to_string()).or_insert(0) += 1;
+        }
+        counts
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `word_count(text: &str) -> HashMap<String, u32>` counting how many times each whitespace-separated word appears. (`HashMap` is already in scope.)'
+  starter: |
+    fn word_count(text: &str) -> HashMap<String, u32> {
+        HashMap::new()
+    }
+  tests:
+    - assert_eq!(word_count("a b a").get("a"), Some(&2));
+    - assert_eq!(word_count("a b a").get("b"), Some(&1));
+    - assert_eq!(word_count("a b a").get("c"), None);
 subject: Rust (Beginner)
 title: Vec & HashMap
 ---
@@ -128,6 +148,23 @@ raises a `KeyError` at runtime.
 
 Reach for `Vec` by default; use `HashMap` when you look things up by a key; pick
 the `BTree*` variants when you need sorted order.
+
+## Why collection access often borrows
+
+`v.get(0)` returns `Option<&T>`, not `Option<T>`. Returning an owned `T` would
+have to move the element out or clone it; a reference lets you inspect it cheaply
+while the vector remains its owner. Similarly, `map.get(key)` returns a borrowed
+value. The reference cannot outlive or conflict with mutation of its collection.
+
+```rust
+let mut names = vec![String::from("Ana")];
+let first = &names[0];
+println!("{first}"); // last use of the borrow
+names.push(String::from("Bo")); // now mutation is allowed
+```
+
+This matters because `push` may reallocate the vector and move its buffer. Rust
+will not allow a reference into the old buffer to remain usable afterward.
 
 ## Try it
 

@@ -1244,13 +1244,15 @@ func (m Model) cmdClear(args []string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// cmdFold toggles the left tree pane. When folding away the pane that currently
-// has focus, focus jumps to the editor so keys never vanish into a hidden pane;
-// the layout is re-flowed so the editor and chat reclaim the freed width.
+// cmdFold toggles the left tree pane. Folding a focused tree moves focus to the
+// editor; unfolding focuses the newly visible tree so navigation can begin
+// immediately. The layout is re-flowed as the pane appears or disappears.
 func (m Model) cmdFold() (tea.Model, tea.Cmd) {
 	m.sidebarCollapsed = !m.sidebarCollapsed
 	var cmd tea.Cmd
-	if m.sidebarCollapsed && m.focus == paneSidebar {
+	if !m.sidebarCollapsed {
+		cmd = m.setFocus(paneSidebar)
+	} else if m.focus == paneSidebar {
 		cmd = m.setFocus(paneEditor)
 	}
 	m.layout()

@@ -55,7 +55,8 @@ func TestVaultWindowChordFocus(t *testing.T) {
 	}
 }
 
-// In the editor's Vim Normal mode, the ",n" leader chord folds the sidebar.
+// In the editor's Vim Normal mode, the ",n" leader chord folds the sidebar;
+// toggling it open again focuses the tree for immediate cursor movement.
 func TestVaultLeaderFold(t *testing.T) {
 	v, err := vault.Open(t.TempDir())
 	if err != nil {
@@ -84,5 +85,12 @@ func TestVaultLeaderFold(t *testing.T) {
 	step(runeKey(','), runeKey('n'))
 	if m.sidebarCollapsed == before {
 		t.Fatal(",n should toggle the sidebar fold")
+	}
+	step(runeKey(','), runeKey('n'))
+	if m.sidebarCollapsed != before {
+		t.Fatal("second ,n should restore the sidebar")
+	}
+	if m.focus != paneSidebar {
+		t.Fatalf("unfolding with ,n should focus the sidebar, got %v", m.focus)
 	}
 }

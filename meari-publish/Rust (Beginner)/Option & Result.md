@@ -2,6 +2,27 @@
 created: "2026-07-08"
 id: rust-b-option-result
 source: meari-course
+study:
+  answer: |
+    fn first_even(xs: &[i32]) -> Option<i32> {
+        for &x in xs {
+            if x % 2 == 0 {
+                return Some(x);
+            }
+        }
+        None
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `first_even(xs: &[i32]) -> Option<i32>` returning the first even number, or `None` if there isn''t one.'
+  starter: |
+    fn first_even(xs: &[i32]) -> Option<i32> {
+        None
+    }
+  tests:
+    - assert_eq!(first_even(&[1, 3, 4, 6]), Some(4));
+    - assert_eq!(first_even(&[1, 3, 5]), None);
+    - assert_eq!(first_even(&[2]), Some(2));
 subject: Rust (Beginner)
 title: Option & Result
 ---
@@ -104,9 +125,10 @@ maybe.unwrap_or(0);       // 5, or 0 if it were None (a safe default)
 maybe.unwrap_or_else(|| compute_default()); // default computed lazily
 ```
 
-> ⚠️ `unwrap` and `expect` **crash** on `None`/`Err`. They're fine in quick
-> experiments, tests, and cases you can prove are impossible — but in real code
-> prefer handling the empty case or propagating it (next lesson).
+> `unwrap` and `expect` end the program with a panic on `None` or `Err`. They can
+> be convenient in a small experiment or a test. In application code, first ask
+> what the program should do when the value is absent or the operation fails;
+> handle that case or propagate it to the caller (next lesson).
 
 ## Combinators: transform without unwrapping
 
@@ -134,6 +156,24 @@ let n: Option<i32> = Some("42").and_then(|s| s.parse().ok()); // Some(42)
 Handling every `Option`/`Result` by hand gets verbose when errors need to travel
 up through many function calls. The `?` operator streamlines exactly that — see
 [[Error Propagation & Panics]].
+
+## Follow the type parameter
+
+In `Option<i32>`, `i32` is the type inside `Some`; `None` carries no number. In
+`Result<u32, ParseIntError>`, `u32` is inside `Ok` and the error type is inside
+`Err`. The wrapper is part of the type—you cannot use an `Option<i32>` directly
+where an `i32` is required because the value might be absent.
+
+```rust
+let maybe_number: Option<i32> = Some(4);
+let doubled = match maybe_number {
+    Some(number) => number * 2,
+    None => 0,
+};
+```
+
+Here matching converts both possibilities into one definite `i32`. Ask “what
+should happen in every variant?” before reaching for `unwrap`.
 
 ## Try it
 

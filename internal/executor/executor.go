@@ -31,14 +31,17 @@ type Result struct {
 	Output   string // combined stdout+stderr, useful for hints on failure
 }
 
-// Run executes code+tests for the given language ("python" or "go"). Unknown or
-// empty languages default to Python (the historical behavior). Non-programming
-// curricula use "physics", "essay", or "quiz" for prose exercises: a non-empty
-// response counts as submitted so the tutor can discuss/grade it.
+// Run executes code+tests for the given language ("python", "go", or "rust").
+// Unknown or empty languages default to Python (the historical behavior).
+// Non-programming curricula use "physics", "essay", or "quiz" for prose
+// exercises: a non-empty response counts as submitted so the tutor can
+// discuss/grade it.
 func Run(lang, code string, tests []string) (Result, error) {
 	switch strings.ToLower(lang) {
 	case "go", "golang":
 		return runGo(code, tests)
+	case "rust", "rs":
+		return runRust(code, tests)
 	case "physics", "essay", "quiz":
 		return runReflection(code)
 	default:
@@ -102,6 +105,46 @@ func goTestHarness(tests []string) string {
 		b.WriteString("\t{\n\t\t")
 		b.WriteString(t)
 		b.WriteString("\n\t}\n")
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+// runRust writes the solution and a generated test harness into one .rs file
+// and compiles + runs it with rustc (no cargo, so it stays fast and offline).
+// The learner's code defines functions/types; the harness supplies fn main(),
+// which runs each test as its own block. A failed assert! panics -> non-zero
+// exit, so exit code 0 means every test passed. Compile errors surface in the
+// combined output as hints, just like a failing test.
+func runRust(code string, tests []string) (Result, error) {
+	files := map[string]string{"solution.rs": rustHarness(code, tests)}
+	// rustc's compile step dominates; give it Go-sized headroom over Python.
+	return runFile("rust", files, 30*time.Second, func(ctx context.Context, dir string) *exec.Cmd {
+		// Compile then run in one shell step: rustc emits ./sol, which we execute.
+		cmd := exec.CommandContext(ctx, "sh", "-c",
+			"rustc --edition 2021 -A warnings solution.rs -o sol && ./sol")
+		cmd.Dir = dir
+		return cmd
+	})
+}
+
+func rustHarness(code string, tests []string) string {
+	var b strings.Builder
+	// Silence the lints a learner's in-progress solution trips, so a warning
+	// never reads as a failure.
+	b.WriteString("#![allow(dead_code, unused_variables, unused_imports, unused_mut, unused_assignments)]\n")
+	// Pre-import the collections and traits challenges commonly reach for, so a
+	// test can use HashMap/VecDeque/fmt without the learner wiring up imports.
+	b.WriteString("use std::collections::{HashMap, HashSet, BTreeMap, BTreeSet, VecDeque};\n")
+	b.WriteString("use std::fmt;\n\n")
+	b.WriteString(code)
+	b.WriteString("\n\nfn main() {\n")
+	// Each test gets its own block scope so `let` bindings in different tests
+	// can reuse names without colliding.
+	for _, t := range tests {
+		b.WriteString("    {\n        ")
+		b.WriteString(t)
+		b.WriteString("\n    }\n")
 	}
 	b.WriteString("}\n")
 	return b.String()
