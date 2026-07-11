@@ -121,7 +121,8 @@ Installed. Meari keeps its notes and data in whatever directory you run it
 from, so pick (or create) a home for it first:
 
     mkdir -p ~/meari && cd ~/meari
-    cp "$repo_dir/config.example.toml" config.toml   # optional; runs fine without
+    # optional (Meari runs fine without a config); never overwrites an existing one:
+    [ -f config.toml ] || cp "$repo_dir/config.example.toml" config.toml
 
     meari -vault    # the vault, in your terminal
     meari serve     # the same vault, in your browser
