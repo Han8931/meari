@@ -2,6 +2,28 @@
 created: "2026-07-08"
 id: rust-b-control
 source: meari-course
+study:
+  answer: |
+    fn describe(n: i32) -> i32 {
+        if n < 0 {
+            -1
+        } else if n == 0 {
+            0
+        } else {
+            1
+        }
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `describe(n: i32) -> i32` as an `if` expression: return -1 for a negative number, 0 for zero, and 1 for a positive number.'
+  starter: |
+    fn describe(n: i32) -> i32 {
+        0
+    }
+  tests:
+    - assert_eq!(describe(-8), -1);
+    - assert_eq!(describe(0), 0);
+    - assert_eq!(describe(12), 1);
 subject: Rust (Beginner)
 title: Control Flow
 ---
@@ -90,7 +112,11 @@ does.
 ## Iterating a collection: borrow vs consume
 
 How you write the `for` loop decides whether you can still use the collection
-afterward — this is your first brush with [[Ownership & Moves]]:
+afterward. The important detail is that a `for` loop must first obtain an
+**iterator** from the expression after `in`. It can obtain that iterator by
+borrowing the collection or by taking ownership of it.
+
+### Borrowing the collection
 
 ```rust
 let names = vec!["Ana", "Bo", "Cy"];
@@ -99,6 +125,28 @@ for n in &names {          // BORROW each item — names is still usable after
     println!("{n}");
 }
 println!("{}", names.len()); // ✅ still fine
+```
+
+Here the loop expression is `&names`, a shared reference to the vector. The
+iterator therefore borrows `names` and yields a reference to each element. It
+never owns the vector. When the loop ends, the borrow ends, so the original
+owner—`names`—is still valid.
+
+Trace the ownership:
+
+```text
+names owns the Vec
+        │
+        └── loop temporarily borrows &names
+                └── n borrows one element at a time
+
+loop ends → temporary borrows end → names still owns the Vec
+```
+
+### Consuming the collection
+
+```rust
+let names = vec!["Ana", "Bo", "Cy"];
 
 for n in names {           // CONSUME names — it's moved into the loop
     println!("{n}");
@@ -106,12 +154,40 @@ for n in names {           // CONSUME names — it's moved into the loop
 // println!("{}", names.len()); // ❌ names was moved away
 ```
 
-A quick mental picture of the difference:
+This time the expression after `in` is `names` itself, not `&names`. `Vec` does
+not implement `Copy`, so giving it to the loop **moves ownership** into the
+vector's iterator. The iterator then yields owned elements one at a time. After
+the loop, the iterator and remaining vector storage are dropped. The binding
+`names` still exists as a name, but it no longer owns a value, so Rust refuses
+to let you call `.len()` on it.
+
+Conceptually, the loop behaves roughly like this:
+
+```rust
+let mut iterator = names.into_iter(); // names is moved here
+while let Some(n) = iterator.next() {
+    println!("{n}");
+}
+// iterator is dropped; names cannot be used again
+```
+
+The compiler error often says **“borrow of moved value: `names`.”** The word
+“borrow” refers to what `.len()` tries to do: method calls borrow their receiver
+temporarily. That borrow is impossible because `names` lost ownership earlier
+at `for n in names`.
+
+The difference is therefore not caused by `println!` or by the loop body. It is
+caused by the expression given to the loop:
 
 ```
-  for n in &names   →   loop borrows a view;   names survives
-  for n in names    →   loop takes ownership;  names is gone
+  for n in &names   → iterator borrows the Vec → names survives
+  for n in names    → iterator owns the Vec    → names is moved
 ```
+
+Use `&names` when you only need to read and want to keep the collection. Use
+`names` when you are finished with the collection and want the loop to take its
+elements. A third form, `&mut names`, temporarily borrows the vector mutably and
+lets the loop edit each element in place.
 
 ## Labeled breaks for nested loops
 
@@ -126,6 +202,28 @@ When loops nest, a plain `break` only exits the innermost one. Label a loop with
     }
 }
 ```
+
+## Expressions, statements, and `()`
+
+An **expression** evaluates to a value; a **statement** performs an action and
+does not pass a useful value on.
+
+```rust
+let a = 2 + 3; // `2 + 3` is an expression with value 5
+let b = {
+    let x = 10;
+    x * 2      // no semicolon: the block's value is 20
+};
+```
+
+`let x = 10;` is a statement. Adding a semicolon to `x * 2` changes the block's
+result to the unit value `()`, roughly “no meaningful value.” Thus “expected
+`i32`, found `()`” often means a semicolon discarded a number you meant to
+return.
+
+For `for i in 1..=3`, Rust obtains `1`, `2`, and `3` one at a time, binds each to
+`i`, and runs the body. The loop creates `i`; you do not declare it beforehand.
+Tracing these values on paper quickly exposes most off-by-one errors.
 
 ## Try it
 

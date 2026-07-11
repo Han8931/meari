@@ -2,6 +2,23 @@
 created: "2026-07-08"
 id: rust-b-variables
 source: meari-course
+study:
+  answer: |
+    fn update_score() -> i32 {
+        let mut score = 10;
+        score = 15;
+        let score = score + 5;
+        score
+    }
+  kind: code
+  lang: rust
+  prompt: Complete `update_score()`: declare mutable `score` as 10, change it to 15, then shadow it with `score + 5` and return the result.
+  starter: |
+    fn update_score() -> i32 {
+        0
+    }
+  tests:
+    - assert_eq!(update_score(), 20);
 subject: Rust (Beginner)
 title: Variables & Mutability
 ---
@@ -100,6 +117,30 @@ fn main() {
 This scope-based lifetime is the seed of Rust's whole memory model — a value is
 cleaned up when its owner goes out of scope. You'll see that idea again, much
 more powerfully, in [[Ownership & Moves]].
+
+## Binding, value, and type are different ideas
+
+In `let mut score: i32 = 10`, `score` is the **binding** (the name), `10` is the
+**value**, and `i32` is the **type**. `mut` applies to the binding: it allows that
+name to receive another `i32` value. It does not make Rust dynamically typed.
+
+```rust
+let mut score: i32 = 10;
+score = 11;          // same binding, same type, new value
+// score = "high";  // error: expected i32, found &str
+```
+
+Type inference only means Rust can fill in an omitted annotation. The inferred
+type still cannot change. Shadowing can also happen inside a smaller scope:
+
+```rust
+let message = "outer";
+{
+    let message = "inner";
+    println!("{message}"); // inner: nearest declaration wins
+}
+println!("{message}");     // outer is visible again
+```
 
 ## Try it
 

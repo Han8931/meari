@@ -2,6 +2,21 @@
 created: "2026-07-08"
 id: rust-b-string
 source: meari-course
+study:
+  answer: |
+    fn shout(s: &str) -> String {
+        format!("{}!", s.to_uppercase())
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `shout(s: &str) -> String` returning the text upper-cased with a `!` appended (take `&str`, return an owned `String`).'
+  starter: |
+    fn shout(s: &str) -> String {
+        String::new()
+    }
+  tests:
+    - assert_eq!(shout("hi"), "HI!");
+    - assert_eq!(shout("rust"), "RUST!");
 subject: Rust (Beginner)
 title: String vs &str
 ---
@@ -119,6 +134,23 @@ for ch in s.chars() {      // iterate by Unicode character
 println!("{}", s.len());   // 6 — BYTES, not characters (é is 2 bytes)
 println!("{}", s.chars().count()); // 5 — actual character count
 ```
+
+## A string slice is pointer plus length
+
+`&str` is not the string data itself. Conceptually it contains a pointer to the
+first byte of valid UTF-8 and a byte length. It may refer to an entire `String`,
+a literal stored in the program, or part of another string:
+
+```rust
+let owned = String::from("hello world");
+let first = &owned[0..5]; // borrows "hello"; no characters are copied
+```
+
+The byte indexes must land on UTF-8 character boundaries or slicing panics.
+That makes arbitrary user-facing slicing safer with `.chars()` or specialized
+Unicode libraries. Also, `&String` means “borrow this particular owned container,”
+while `&str` means “borrow text from any source”; this is why parameters normally
+use `&str`.
 
 ## Try it
 

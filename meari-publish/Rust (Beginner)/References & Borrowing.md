@@ -2,6 +2,20 @@
 created: "2026-07-08"
 id: rust-b-borrowing
 source: meari-course
+study:
+  answer: |
+    fn add_exclamation(text: &mut String) {
+        text.push('!');
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `add_exclamation(text: &mut String)` so it mutably borrows the caller''s string and appends one `!` without taking ownership.'
+  starter: |
+    fn add_exclamation(text: &mut String) {
+    }
+  tests:
+    - 'let mut s = String::from("hello"); add_exclamation(&mut s); assert_eq!(s, "hello!");'
+    - 'let mut s = String::new(); add_exclamation(&mut s); assert_eq!(s, "!");'
 subject: Rust (Beginner)
 title: References & Borrowing
 ---
@@ -126,6 +140,42 @@ A practical rule of thumb for function parameters:
 | take/store/consume the value        | `T` (owned) |
 
 Prefer borrowing (`&T`) by default — it's the least restrictive on your caller.
+
+## A borrow has a usable region
+
+A borrow usually lasts until its **last use**, not necessarily until the closing
+brace. This is why the following is accepted:
+
+```rust
+let mut text = String::from("hi");
+let view = &text;
+println!("{view}"); // last use of the shared borrow
+text.push('!');     // mutable access is now safe
+```
+
+If you add another `println!("{view}")` after `push`, the program is rejected.
+When debugging a borrow error, look for the reference's last use, not only where
+it was created.
+
+## References do not own or clone
+
+`&value` creates temporary access to the same value. It neither transfers
+ownership nor duplicates data. Dereferencing with `*` means “access the value
+behind this reference”:
+
+```rust
+fn increment(n: &mut i32) {
+    *n += 1;
+}
+
+let mut count = 4;
+increment(&mut count);
+println!("{count}"); // 5
+```
+
+For method calls such as `s.len()`, Rust often inserts the needed borrowing or
+dereferencing automatically. That convenience is why `*` appears less often
+than you might expect.
 
 ## Try it
 

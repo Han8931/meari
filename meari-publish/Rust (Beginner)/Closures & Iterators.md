@@ -2,6 +2,22 @@
 created: "2026-07-08"
 id: rust-b-iterators
 source: meari-course
+study:
+  answer: |
+    fn sum_of_squares(xs: &[i32]) -> i32 {
+        xs.iter().map(|x| x * x).sum()
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `sum_of_squares(xs: &[i32]) -> i32` using iterator adapters (`.iter().map(...).sum()`).'
+  starter: |
+    fn sum_of_squares(xs: &[i32]) -> i32 {
+        0
+    }
+  tests:
+    - assert_eq!(sum_of_squares(&[1, 2, 3]), 14);
+    - assert_eq!(sum_of_squares(&[]), 0);
+    - assert_eq!(sum_of_squares(&[-2]), 4);
 subject: Rust (Beginner)
 title: Closures & Iterators
 ---
@@ -162,6 +178,25 @@ let sum: i32 = v.iter().filter(|&&x| x % 2 == 0).sum();
 Iterator chains express *what* you want, not the bookkeeping of *how*. Prefer
 them for transformations; reach for an explicit loop when the logic is genuinely
 imperative or the borrow interplay gets awkward.
+
+## `iter`, `iter_mut`, and `into_iter`
+
+These three starting points control ownership:
+
+| Call | Items yielded | Effect on collection |
+| --- | --- | --- |
+| `values.iter()` | `&T` | shared borrow; collection survives |
+| `values.iter_mut()` | `&mut T` | mutable borrow; edit in place |
+| `values.into_iter()` | `T` | consumes the collection |
+
+This is the ownership lesson in iterator form. If a closure receives extra `&`
+characters, first ask which iterator you created. For beginners, splitting a
+long chain into named intermediate values and adding a type annotation often
+makes the compiler message easier to understand.
+
+`collect()` also needs to know its destination. Either annotate the variable
+(`let result: Vec<_> = ...`) or use `collect::<Vec<_>>()`; `_` asks Rust to infer
+the element type while you specify the container.
 
 ## Try it
 

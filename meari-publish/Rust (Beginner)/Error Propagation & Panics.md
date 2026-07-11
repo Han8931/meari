@@ -2,6 +2,24 @@
 created: "2026-07-08"
 id: rust-b-question
 source: meari-course
+study:
+  answer: |
+    fn parse_sum(a: &str, b: &str) -> Result<i32, std::num::ParseIntError> {
+        let x: i32 = a.parse()?;
+        let y: i32 = b.parse()?;
+        Ok(x + y)
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `parse_sum(a: &str, b: &str) -> Result<i32, std::num::ParseIntError>` that parses both strings to `i32` with the `?` operator and returns their sum.'
+  starter: |
+    fn parse_sum(a: &str, b: &str) -> Result<i32, std::num::ParseIntError> {
+        Ok(0)
+    }
+  tests:
+    - assert_eq!(parse_sum("2", "3"), Ok(5));
+    - assert_eq!(parse_sum("10", "-4"), Ok(6));
+    - assert!(parse_sum("x", "3").is_err());
 subject: Rust (Beginner)
 title: Error Propagation & Panics
 ---
@@ -138,6 +156,26 @@ The guiding principle: **make the caller's life easy.** Return `Result` from
 library-ish code so callers choose how to react; reserve `panic!` for genuine
 bugs. Next we put `Option` and borrowing to work with growable collections in
 [[Vec & HashMap]].
+
+## Expand `?` in your head
+
+For a `Result`, `operation()?` means approximately:
+
+```rust
+let value = match operation() {
+    Ok(value) => value,
+    Err(error) => return Err(error.into()),
+};
+```
+
+On success, `?` unwraps the `Ok` value and execution continues. On failure, it
+returns early from the **whole enclosing function**, not merely the current
+block. Therefore that function must return a compatible `Result` (or `Option`
+when `?` is used on an `Option`). The `.into()` allows certain error types to be
+converted into the function's declared error type.
+
+Use `match` when this function can recover locally; use `?` when the caller is
+better placed to decide.
 
 ## Try it
 

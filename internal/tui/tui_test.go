@@ -960,7 +960,7 @@ func TestViewToggleWhileLessonFocused(t *testing.T) {
 func TestLessonPaneMouseWheelClickDrag(t *testing.T) {
 	m := readyModel(t)
 	m.lesson.setLesson(strings.Repeat("scrollable lecture line\n", 200))
-	lessonX := m.sidebarW + 2 + 3            // inside the lesson box
+	lessonX := m.sidebarW + 2 + 3               // inside the lesson box
 	chatX := m.sidebarW + 2 + m.lessonW + 2 + 3 // inside the chat box
 
 	m.setFocus(paneSidebar)
@@ -1361,8 +1361,12 @@ func TestLeaderFoldChordFromSidebarAndChat(t *testing.T) {
 	if m.sidebarCollapsed {
 		t.Fatal(",n from chat Normal mode should unfold the sidebar")
 	}
+	if m.focus != paneSidebar {
+		t.Fatalf("unfolding with ,n should focus the sidebar, got %v", m.focus)
+	}
 
 	// While typing in the chat, "," and "n" are just text.
+	m.setFocus(paneChat)
 	m.chat.exitNormal()
 	m = step(t, m, keyRunes(","))
 	m = step(t, m, keyRunes("n"))

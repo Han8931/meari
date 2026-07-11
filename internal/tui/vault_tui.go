@@ -1273,7 +1273,11 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 func (m VaultModel) cmdFold() (tea.Model, tea.Cmd) {
 	m.sidebarCollapsed = !m.sidebarCollapsed
 	var cmd tea.Cmd
-	if m.sidebarCollapsed && m.focus == paneSidebar {
+	if !m.sidebarCollapsed {
+		// Unfolding is normally followed by tree navigation, so make the newly
+		// visible pane ready for j/k immediately.
+		cmd = m.setFocus(paneSidebar)
+	} else if m.focus == paneSidebar {
 		cmd = m.setFocus(paneEditor)
 	}
 	m.layout()
@@ -2273,8 +2277,8 @@ type (
 	vSavedMsg     struct{ meta core.NoteMeta }
 	vPublishedMsg struct{ res core.PublishResult }
 	vEssayMsg     struct{ res core.EssayResult }
-	vAnswerMsg struct{ text string }
-	vErrMsg    struct {
+	vAnswerMsg    struct{ text string }
+	vErrMsg       struct {
 		kind string
 		err  error
 	}

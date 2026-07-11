@@ -2,6 +2,21 @@
 created: "2026-07-08"
 id: rust-b-smart-pointers
 source: meari-course
+study:
+  answer: |
+    fn boxed_value(value: i32) -> Box<i32> {
+        Box::new(value)
+    }
+  kind: code
+  lang: rust
+  prompt: 'Write `boxed_value(value: i32) -> Box<i32>` that stores the given value in a `Box` and returns it.'
+  starter: |
+    fn boxed_value(value: i32) -> Box<i32> {
+        Box::new(0)
+    }
+  tests:
+    - assert_eq!(*boxed_value(7), 7);
+    - assert_eq!(*boxed_value(-3), -3);
 subject: Rust (Beginner)
 title: Box, Rc & RefCell
 ---
@@ -118,7 +133,7 @@ let a = cell.borrow_mut();
 let b = cell.borrow_mut();        // 💥 panic: already mutably borrowed
 ```
 
-## The famous combo: `Rc<RefCell<T>>`
+## Combining shared ownership and mutation: `Rc<RefCell<T>>`
 
 Put them together and you get data with **multiple owners that can also be
 mutated** — the standard beginner pattern for shared, editable structures like
@@ -147,6 +162,25 @@ println!("{:?}", shared.borrow()); // …visible through the other: [1, 2, 3, 4]
 One caveat: `Rc` cycles (A owns B owns A) leak memory, because the count never
 reaches zero. The fix is `Weak<T>`, a non-owning reference — worth knowing exists,
 though the details are beyond the beginner track.
+
+## Why this lesson is optional
+
+These wrappers are not upgrades that should replace ordinary ownership. Most
+Rust programs should begin with owned values and normal `&`/`&mut` borrows:
+
+```
+one clear owner?                 use T
+temporary shared access?        use &T / &mut T
+must allocate behind a pointer? use Box<T>
+truly needs several owners?     use Rc<T>
+shared owners must mutate?      consider Rc<RefCell<T>> carefully
+```
+
+Each step adds flexibility and cost. `Rc::clone` is cheap because it increments
+a count, but shared ownership can make cleanup harder to reason about. `RefCell`
+moves an error from compile time to a possible runtime panic. If the compiler
+rejects an ordinary borrow, first reconsider the data design; do not automatically
+wrap everything in `Rc<RefCell<_>>`.
 
 ## Try it
 

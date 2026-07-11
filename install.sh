@@ -2,16 +2,19 @@
 #
 # Meari install script: builds the binary and puts it on your PATH.
 #
-#   ./install.sh                 # install to ~/.local/bin
-#   ./install.sh --clean         # also remove old binaries and regenerable
-#                                # app state (learning progress is kept)
+#   ./install.sh                 # install to ~/.local/bin; also removes any
+#                                # stale meari binaries on your PATH so nothing
+#                                # old can shadow the one just installed
+#   ./install.sh --keep-old      # install but leave other meari binaries alone
+#   ./install.sh --clean         # also clear regenerable app state
+#                                # (learning progress is kept)
 #   BIN_DIR=/usr/local/bin ./install.sh
 #
 # Meari roots its files (config.toml, vault/, data/, workspace/, ...) at the
 # directory you run it from, so after installing, launch it from the folder
 # you want as your Meari home.
 #
-# --clean never touches: config.toml, vault/ (your notes), data/ (progress),
+# Cleanup never touches: config.toml, vault/ (your notes), data/ (progress),
 # workspace/drafts/ (in-progress challenge solutions), meari-course/
 # (progress references these), meari-publish/ (your sharing repo).
 
@@ -22,16 +25,57 @@ GO_MIN_MINOR=26 # requires go 1.26+
 
 repo_dir="$(cd "$(dirname "$0")" && pwd)"
 
-clean=false
-case "${1:-}" in
-    --clean) clean=true ;;
-    '') ;;
-    *) printf 'usage: %s [--clean]\n' "$0" >&2; exit 2 ;;
-esac
+clean=false      # --clean: also clear regenerable app state
+keep_old=false   # --keep-old: skip removing stale meari binaries
+for arg in "$@"; do
+    case "$arg" in
+        --clean)    clean=true ;;
+        --keep-old) keep_old=true ;;
+        *) printf 'usage: %s [--clean] [--keep-old]\n' "$0" >&2; exit 2 ;;
+    esac
+done
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mnote:\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# --- ensure user-owned course storage ---------------------------------------
+
+# Course files are ordinary user data and must never require sudo to edit.
+# A directory copied from a container or sandbox can occasionally be readable
+# but owned by a different UID (commonly `nobody`). Because the project parent
+# is user-owned, repair that state without chown: atomically preserve the old
+# tree, create a new user-owned directory, and copy the readable content back.
+course_dir="$repo_dir/meari-course"
+course_needs_repair=false
+if [ -d "$course_dir" ]; then
+    while IFS= read -r -d '' course_path; do
+        if [ ! -w "$course_path" ]; then
+            course_needs_repair=true
+            break
+        fi
+    done < <(find "$course_dir" -print0)
+fi
+if [ ! -e "$course_dir" ]; then
+    mkdir -p "$course_dir"
+elif [ ! -d "$course_dir" ]; then
+    fail "$course_dir exists but is not a directory"
+elif $course_needs_repair; then
+    backup="$repo_dir/meari-course.ownership-backup-$(date +%Y%m%d%H%M%S)"
+    [ ! -e "$backup" ] || fail "ownership backup already exists: $backup"
+
+    warn "$course_dir is not writable; preserving it at $backup"
+    if ! mv "$course_dir" "$backup"; then
+        fail "could not preserve the unwritable course directory"
+    fi
+    if ! mkdir -p "$course_dir" || ! cp -R "$backup"/. "$course_dir"/; then
+        rm -rf "$course_dir"
+        mv "$backup" "$course_dir" 2>/dev/null || true
+        fail "could not create a writable course directory; original restored"
+    fi
+    info "Repaired course directory ownership without sudo"
+    warn "original course files remain at $backup"
+fi
 
 # --- check Go toolchain ------------------------------------------------------
 
@@ -70,9 +114,9 @@ case ":$PATH:" in
         ;;
 esac
 
-# --- clean: previous binaries + regenerable app state ------------------------
+# --- remove stale binaries so nothing old can shadow the new install ---------
 
-if $clean; then
+if ! $keep_old; then
     # Remove every other meari binary on PATH so nothing stale can shadow
     # the one just installed.
     removed_old=false
@@ -99,7 +143,11 @@ if $clean; then
         rm -f "$repo_dir/meari"
         info "Removed build artifact: $repo_dir/meari"
     fi
+fi
 
+# --- clean: regenerable app state (opt-in) -----------------------------------
+
+if $clean; then
     # Regenerable app state. Progress is kept: data/ (progress.json) and
     # workspace/drafts/ (in-progress challenge solutions survive).
     if [ -d "$repo_dir/workspace" ]; then
