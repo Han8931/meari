@@ -257,6 +257,7 @@ type Outcome struct {
 
 func Run(d Deps) (Outcome, error) {
 	enableTUIColor()
+	loadTheme(d.Cfg.DataDir)
 	m := newModel(d)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	final, err := p.Run()
@@ -1017,7 +1018,7 @@ func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 var tutorExCmds = []string{
 	"answer", "clear", "compact", "config", "copy", "course", "export", "fold",
 	"help", "notes", "paste", "progress", "q", "quit", "run", "sidebar",
-	"subject", "submit", "topic", "vault", "view", "wide", "yank",
+	"subject", "submit", "theme", "topic", "vault", "view", "wide", "yank",
 }
 
 // exCandidates returns the command line's Tab-completion candidates: command
@@ -1037,6 +1038,9 @@ func (m Model) exCandidates() []string {
 func topicArgCandidates(svc *core.Service, input string) []string {
 	if strings.HasPrefix(input, "view ") {
 		return []string{"view auto", "view chat", "view code"}
+	}
+	if c := themeArgCandidates(input); c != nil {
+		return c
 	}
 	for _, verb := range []string{"topic ", "course ", "subject "} {
 		if !strings.HasPrefix(input, verb) {
@@ -1073,6 +1077,9 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdClear(fields[1:])
 	case "fold", "sidebar":
 		return m.cmdFold()
+	case "theme":
+		m.flash(themeCommand(m.deps.Cfg.DataDir, strings.Join(fields[1:], " ")))
+		return m, nil
 	case "view":
 		return m.cmdView(fields[1:])
 	case "compact":
@@ -1437,6 +1444,7 @@ func helpView() string {
 		"  :fold              fold/unfold the left tree pane (also ,n)",
 		"  :view auto|chat|code  lesson|chat split · single full-width chat · editor",
 		"  :compact / :wide   shrink/grow the editor (frees chat space)",
+		"  :theme [<name>]    switch color theme (no name lists them)",
 		"  :answer            reveal a model solution for the open challenge",
 		"  :vault             switch to the notes vault (Obsidian-style)",
 		"  :progress          progress summary",

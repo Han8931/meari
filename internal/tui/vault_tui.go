@@ -147,6 +147,8 @@ type VaultModel struct {
 
 	// sidebarCollapsed hides the notes pane (":fold"); starts from config.
 	sidebarCollapsed bool
+	// chatCollapsed hides the chat pane (":chat"), giving the editor its width.
+	chatCollapsed bool
 
 	// cfg supplies the configured pane ratios and editor keybindings.
 	cfg config.Config
@@ -173,6 +175,7 @@ type finderResult struct {
 // the shell loop (main.runShell) whether to quit or hand off to the coding TUI.
 func RunVault(svc *core.Service, cfg config.Config) (Outcome, error) {
 	enableTUIColor()
+	loadTheme(cfg.DataDir)
 	m := newVaultModel(svc, cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	final, err := p.Run()
@@ -666,12 +669,16 @@ func (m *VaultModel) focusDir(d int) tea.Cmd {
 	if m.sidebarCollapsed {
 		lo = int(paneEditor)
 	}
+	hi := int(paneChat)
+	if m.chatCollapsed {
+		hi = int(paneEditor)
+	}
 	n := int(m.focus) + d
 	if n < lo {
 		n = lo
 	}
-	if n > int(paneChat) {
-		n = int(paneChat)
+	if n > hi {
+		n = hi
 	}
 	return m.setFocus(pane(n))
 }
@@ -827,7 +834,7 @@ func (m VaultModel) paneAt(x, y int) (pane, bool) {
 	switch {
 	case x < sidebarSpan:
 		return paneSidebar, true
-	case x < sidebarSpan+m.editorW+2:
+	case x < sidebarSpan+m.editorW+2 || m.chatCollapsed:
 		return paneEditor, true
 	default:
 		return paneChat, true
@@ -847,7 +854,11 @@ func (m VaultModel) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyShiftTab {
 			dir = -1
 		}
-		if s, ok := m.cmdComp.Next(m.cmdLine.Value(), vaultExCmds, dir); ok {
+		cands := vaultExCmds
+		if c := themeArgCandidates(m.cmdLine.Value()); c != nil {
+			cands = c
+		}
+		if s, ok := m.cmdComp.Next(m.cmdLine.Value(), cands, dir); ok {
 			m.cmdLine.SetValue(s)
 			m.cmdLine.CursorEnd()
 		}
@@ -1141,10 +1152,10 @@ func (m VaultModel) confirmDelete(it sidebarItem) (tea.Model, tea.Cmd) {
 // vaultExCmds lists every command runEx accepts (aliases included), sorted,
 // for Tab completion in the command prompt.
 var vaultExCmds = []string{
-	"answer", "apply", "ask", "backlinks", "code", "compact", "copy", "course",
+	"answer", "apply", "ask", "backlinks", "chat", "code", "compact", "copy", "course",
 	"discard", "discuss", "done", "edit", "essay", "export", "fold", "gen", "grade",
 	"learn", "lesson", "links", "new", "paste", "polish", "publish", "q", "quit",
-	"revise", "sidebar", "submit", "tutor", "w", "wide", "wq", "write", "yank",
+	"revise", "sidebar", "submit", "theme", "tutor", "w", "wide", "wq", "write", "yank",
 }
 
 // runEx dispatches a vault ex-command (without the leading colon).
@@ -1173,6 +1184,11 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, vSaveOpenCmd(m.svc, path, "# "+args+"\n\n")
 	case "fold", "sidebar":
 		return m.cmdFold()
+	case "chat":
+		return m.cmdChat()
+	case "theme":
+		m.flash(themeCommand(m.cfg.DataDir, args))
+		return m, nil
 	case "compact":
 		return m.cmdResizeEditor(-editorBiasStep)
 	case "wide":
@@ -1247,7 +1263,7 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	default:
 		m.flash("unknown command: :" + raw +
-			"  (try :learn · :new · :essay · :grade · :answer · :done · :backlinks · :tutor · :fold · :compact · :wide · :q)")
+			"  (try :learn · :new · :essay · :grade · :answer · :done · :backlinks · :tutor · :fold · :chat · :compact · :wide · :q)")
 		return m, nil
 	}
 }
@@ -1263,6 +1279,23 @@ func (m VaultModel) cmdFold() (tea.Model, tea.Cmd) {
 	m.layout()
 	if m.sidebarCollapsed {
 		m.flash("Notes pane folded — :fold to bring it back")
+	}
+	return m, cmd
+}
+
+// cmdChat toggles the chat pane; the editor takes the freed width. Hiding the
+// focused chat moves focus to the editor so keys never vanish into a hidden
+// pane; anything that focuses the chat later (":paste", ":ask", a click on
+// it) unfolds it again via setFocus.
+func (m VaultModel) cmdChat() (tea.Model, tea.Cmd) {
+	m.chatCollapsed = !m.chatCollapsed
+	var cmd tea.Cmd
+	if m.chatCollapsed && m.focus == paneChat {
+		cmd = m.setFocus(paneEditor)
+	}
+	m.layout()
+	if m.chatCollapsed {
+		m.flash("Chat pane hidden — :chat to bring it back")
 	}
 	return m, cmd
 }
@@ -1824,6 +1857,12 @@ func (m VaultModel) forwardToFocus(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *VaultModel) setFocus(p pane) tea.Cmd {
+	// Focusing the hidden chat (":paste", ":ask", a tutor reply…) unfolds it —
+	// keys must never land in a pane that isn't on screen.
+	if p == paneChat && m.chatCollapsed {
+		m.chatCollapsed = false
+		m.layout()
+	}
 	m.editor.Blur()
 	m.chat.blur()
 	m.sidebar.focused = false
@@ -1927,7 +1966,10 @@ func (m *VaultModel) layout() {
 	}
 	borders := 6 // three bordered boxes, 2 columns each
 	if m.sidebarCollapsed {
-		borders = 4
+		borders -= 2
+	}
+	if m.chatCollapsed {
+		borders -= 2
 	}
 	contentW := m.width - borders
 	if contentW < 3 {
@@ -1935,21 +1977,23 @@ func (m *VaultModel) layout() {
 	}
 	// The configured split is the base; :compact / :wide shift it live.
 	chatPct := clampRange(m.cfg.ChatPct(32)-m.editorBias, 15, 75)
-	if m.sidebarCollapsed {
-		m.sidebarW = 0
-		m.chatW = clampMin(contentW*chatPct/100, 16)
-		m.editorW = clampMin(contentW-m.chatW, 10)
-	} else {
+	m.sidebarW = 0
+	if !m.sidebarCollapsed {
 		m.sidebarW = clampMin(contentW*m.cfg.SidebarPct(22)/100, 12)
-		m.chatW = clampMin(contentW*chatPct/100, 16)
-		m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
 	}
+	m.chatW = 0
+	if !m.chatCollapsed {
+		m.chatW = clampMin(contentW*chatPct/100, 16)
+	}
+	m.editorW = clampMin(contentW-m.sidebarW-m.chatW, 10)
 
 	m.sidebar.setSize(m.sidebarW, m.contentH)
 	m.finderInput.Width = max(20, m.width-18)
 	reserved := 1 + len(m.essayHeaderLines(m.editorW)) + len(m.backlinkFooterLines(m.editorW))
 	m.editor.SetSize(m.editorW, max(1, m.contentH-reserved))
-	m.chat.setSize(m.chatW, m.contentH)
+	if !m.chatCollapsed {
+		m.chat.setSize(m.chatW, m.contentH)
+	}
 }
 
 func (m VaultModel) View() string {
@@ -1959,14 +2003,12 @@ func (m VaultModel) View() string {
 	if m.width < 60 || m.height < 16 {
 		return "Terminal too small — please enlarge to at least 60×16."
 	}
-	ed := m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW))
-	ch := m.box(paneChat, m.chatW, m.contentH, m.chat.view())
-	var row string
-	if m.sidebarCollapsed {
-		row = lipgloss.JoinHorizontal(lipgloss.Top, ed, ch)
-	} else {
-		sb := m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())
-		row = lipgloss.JoinHorizontal(lipgloss.Top, sb, ed, ch)
+	row := m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW))
+	if !m.chatCollapsed {
+		row = lipgloss.JoinHorizontal(lipgloss.Top, row, m.box(paneChat, m.chatW, m.contentH, m.chat.view()))
+	}
+	if !m.sidebarCollapsed {
+		row = lipgloss.JoinHorizontal(lipgloss.Top, m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view()), row)
 	}
 	frame := lipgloss.JoinVertical(lipgloss.Left, m.titleView(), row, m.statusView())
 	frame = lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(frame)

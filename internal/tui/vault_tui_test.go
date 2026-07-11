@@ -741,3 +741,46 @@ func TestVaultRootIsProtected(t *testing.T) {
 		t.Fatal("the vault root must not be markable")
 	}
 }
+
+// :chat hides the chat pane (editor takes its width) and brings it back; a
+// command that lands focus in the chat unfolds it on its own.
+func TestVaultChatToggle(t *testing.T) {
+	m := newTestVaultModel(t)
+
+	tm, _ := m.runEx("chat")
+	m = tm.(VaultModel)
+	if !m.chatCollapsed {
+		t.Fatal(":chat should hide the chat pane")
+	}
+	if m.chatW != 0 {
+		t.Fatalf("hidden chat still has width %d", m.chatW)
+	}
+	// Two boxes remain on screen, so 4 border columns: editor gets the rest.
+	if got := m.editorW; got != 100-4-m.sidebarW {
+		t.Fatalf("editor should absorb the chat width, got %d (sidebar %d)", got, m.sidebarW)
+	}
+	if p, ok := m.paneAt(97, 5); !ok || p != paneEditor {
+		t.Fatalf("far-right click should hit the editor while chat is hidden, got %v", p)
+	}
+
+	// Focus can't move into the hidden pane…
+	m.focusDir(1)
+	m.focusDir(1)
+	if m.focus == paneChat {
+		t.Fatal("focusDir stepped into the hidden chat pane")
+	}
+	// …but a command that puts the user in the chat unfolds it.
+	m.setFocus(paneChat)
+	if m.chatCollapsed {
+		t.Fatal("focusing the chat should unfold it")
+	}
+	if m.chatW == 0 {
+		t.Fatal("unfolded chat pane has no width")
+	}
+
+	tm, _ = m.runEx("chat")
+	m = tm.(VaultModel)
+	if !m.chatCollapsed {
+		t.Fatal("second :chat should hide the pane again")
+	}
+}
