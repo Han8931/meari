@@ -816,3 +816,34 @@ func TestChatRendersMarkdownProse(t *testing.T) {
 		}
 	}
 }
+
+// { and } (Vim paragraph motions) jump the read-only lecture view between
+// blank-line breaks; } past the last paragraph lands at the bottom.
+func TestLessonParagraphJump(t *testing.T) {
+	c := newLessonPane()
+	c.setSize(40, 4)
+	c.setLesson("first paragraph line one\nline two\n\nsecond paragraph\n\nthird paragraph\nmore\nlines\nhere\nto\nscroll")
+
+	if c.vp.YOffset != 0 {
+		t.Fatalf("lesson should open at the top, got offset %d", c.vp.YOffset)
+	}
+	c.paragraphJump(1)
+	first := c.vp.YOffset
+	if first == 0 {
+		t.Fatal("} should scroll to the next paragraph break")
+	}
+	c.paragraphJump(1)
+	second := c.vp.YOffset
+	if second <= first {
+		t.Fatalf("second } should move further down (%d -> %d)", first, second)
+	}
+	c.paragraphJump(-1)
+	if got := c.vp.YOffset; got != first {
+		t.Fatalf("{ should return to the previous break: want %d, got %d", first, got)
+	}
+	c.paragraphJump(-1)
+	c.paragraphJump(-1)
+	if c.vp.YOffset != 0 {
+		t.Fatalf("{ at the top should clamp to 0, got %d", c.vp.YOffset)
+	}
+}
