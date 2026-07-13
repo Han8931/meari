@@ -1429,3 +1429,62 @@ func TestEditorForwardsGlobalCommand(t *testing.T) {
 		t.Fatalf("editor-forwarded command did not switch course: %q", m.lang)
 	}
 }
+
+// :chat hides the chat pane in the tutor TUI (the editor absorbs the width),
+// focusing the chat unfolds it, and the toggle is refused where the chat is
+// the only content surface.
+func TestTutorChatToggle(t *testing.T) {
+	d := testDepsSeeded(t)
+	course, err := d.Svc.LoadCourse("go-beginner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := course.Curriculum().Topics()[0]
+	d.Progress.SetLast("go-beginner", "beginner", first.ID, first.Title)
+	m := newModel(d)
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = step(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // Continue into the course
+	if m.phase != phaseReady {
+		t.Fatalf("phase = %v, want phaseReady", m.phase)
+	}
+
+	m.view = "code" // force the three-pane editor screen
+	m.layout()
+	if m.chatW == 0 {
+		t.Fatal("precondition: the chat should be visible in code view")
+	}
+	wasEditor := m.editorW
+
+	tm, _ := m.runEx("chat")
+	m = tm.(Model)
+	if !m.chatCollapsed || m.chatW != 0 {
+		t.Fatalf(":chat should hide the chat pane (collapsed=%v, w=%d)", m.chatCollapsed, m.chatW)
+	}
+	if m.editorW <= wasEditor {
+		t.Fatalf("editor should absorb the chat width (%d -> %d)", wasEditor, m.editorW)
+	}
+	for _, p := range m.visiblePanes() {
+		if p == paneChat {
+			t.Fatal("hidden chat listed as a focus target")
+		}
+	}
+	if p, ok := m.paneAt(118, 5); !ok || p == paneChat {
+		t.Fatalf("far-right click should not hit the hidden chat, got %v", p)
+	}
+
+	// Focusing the chat (a reply landing, :copy…) unfolds it.
+	m.setFocus(paneChat)
+	if m.chatHidden() || m.chatW == 0 {
+		t.Fatal("focusing the chat should unfold it")
+	}
+
+	// Where the chat is the whole screen, the toggle is refused.
+	m.chatCollapsed = false
+	m.view = "chat"
+	m.layout()
+	tm, _ = m.runEx("chat")
+	m = tm.(Model)
+	if m.chatCollapsed {
+		t.Fatal(":chat must be refused in the chat-only view")
+	}
+}
