@@ -181,6 +181,11 @@ type Model struct {
 	// in the chat pane; "chat"/"code" force it either way.
 	view string
 
+	// chatCollapsed hides the chat pane (":chat"); the freed width goes to the
+	// editor (or the lesson pane on lecture rows). Ignored wherever the chat
+	// is the only content surface — see chatHidden.
+	chatCollapsed bool
+
 	// pendingWindow is set after Ctrl-W; the next key (h/j/k/l) picks a pane,
 	// Vim window-command style.
 	pendingWindow bool
@@ -920,9 +925,13 @@ func (m Model) paneAt(x, y int) (pane, bool) {
 	}
 	if m.horizontal {
 		// sidebar on the left; chat stacked over the editor on the right (the
-		// editor row is absent in the chat-centric view).
+		// editor row is absent in the chat-centric view, the chat row under
+		// ":chat").
 		if x < sidebarSpan {
 			return paneSidebar, true
+		}
+		if m.chatH == 0 {
+			return paneEditor, true
 		}
 		if m.editorH == 0 || y < 1+m.chatH+2 {
 			return paneChat, true
@@ -945,7 +954,12 @@ func (m Model) paneAt(x, y int) (pane, bool) {
 		return paneSidebar, true
 	case x < sidebarSpan+lessonSpan:
 		return paneLesson, true
-	case x < sidebarSpan+lessonSpan+editorSpan:
+	case x < sidebarSpan+lessonSpan+editorSpan || m.chatW == 0:
+		// A ":chat"-hidden pane occupies no columns; the middle surface owns
+		// the rest of the row.
+		if m.editorW == 0 && m.lessonW > 0 {
+			return paneLesson, true
+		}
 		return paneEditor, true
 	default:
 		return paneChat, true
@@ -1016,7 +1030,7 @@ func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // tutorExCmds lists every command runEx accepts (aliases included), sorted,
 // for Tab completion in the command prompt.
 var tutorExCmds = []string{
-	"answer", "clear", "compact", "config", "copy", "course", "export", "fold",
+	"answer", "chat", "clear", "compact", "config", "copy", "course", "export", "fold",
 	"help", "notes", "paste", "progress", "q", "quit", "run", "sidebar",
 	"subject", "submit", "theme", "topic", "vault", "view", "wide", "yank",
 }
@@ -1077,6 +1091,8 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdClear(fields[1:])
 	case "fold", "sidebar":
 		return m.cmdFold()
+	case "chat":
+		return m.cmdChat()
 	case "theme":
 		m.flash(themeCommand(m.deps.Cfg.DataDir, strings.Join(fields[1:], " ")))
 		return m, nil
@@ -1213,6 +1229,28 @@ func (m Model) cmdView(args []string) (tea.Model, tea.Cmd) {
 	// Re-issue focus through setFocus: its retarget rules land focus on a
 	// visible pane whichever surface (editor, lesson pane) just vanished.
 	return m, m.setFocus(m.focus)
+}
+
+// cmdChat toggles the chat pane (":chat"); the editor — or the lesson pane on
+// lecture rows — absorbs the freed width. Refused where the chat is the only
+// content surface, since hiding it would blank the screen. Hiding the focused
+// chat moves focus left so keys never vanish into a hidden pane; anything
+// that lands focus in the chat later unfolds it again via setFocus.
+func (m Model) cmdChat() (tea.Model, tea.Cmd) {
+	if m.chatCentric() && !m.lessonSplit() {
+		m.flash("the chat is the whole screen here — :view code first")
+		return m, nil
+	}
+	m.chatCollapsed = !m.chatCollapsed
+	var cmd tea.Cmd
+	if m.chatCollapsed && m.focus == paneChat {
+		cmd = m.setFocus(paneEditor) // retargets to the lesson pane on lecture rows
+	}
+	m.layout()
+	if m.chatCollapsed {
+		m.flash("Chat pane hidden — :chat to bring it back")
+	}
+	return m, cmd
 }
 
 // cmdAnswer reveals a model solution for the current challenge. The learner
@@ -1445,6 +1483,7 @@ func helpView() string {
 		"  :subject <course>  alias for :topic",
 		"  :fold              fold/unfold the left tree pane (also ,n)",
 		"  :view auto|chat|code  lesson|chat split · single full-width chat · editor",
+		"  :chat              hide/show the chat pane (editor takes the width)",
 		"  :compact / :wide   shrink/grow the editor (frees chat space)",
 		"  :theme [<name>]    switch color theme (no name lists them)",
 		"  :answer            reveal a model solution for the open challenge",
@@ -2326,7 +2365,10 @@ func (m Model) visiblePanes() []pane {
 	} else if !m.chatCentric() {
 		ps = append(ps, paneEditor)
 	}
-	return append(ps, paneChat)
+	if !m.chatHidden() {
+		ps = append(ps, paneChat)
+	}
+	return ps
 }
 
 // focusDir moves focus left (d<0) or right (d>0) through the visible panes,
@@ -2365,6 +2407,12 @@ func (m *Model) setFocus(p pane) tea.Cmd {
 	}
 	if p == paneLesson && !m.lessonSplit() {
 		p = paneChat
+	}
+	// Focusing the ":chat"-hidden pane (a reply landing, :copy…) unfolds it —
+	// keys must never land in a pane that isn't on screen.
+	if p == paneChat && m.chatHidden() {
+		m.chatCollapsed = false
+		m.layout()
 	}
 	m.editor.Blur()
 	m.chat.blur()
@@ -2477,6 +2525,14 @@ func (m Model) chatCentric() bool {
 	return m.curriculum && m.currentTopicView == "lesson"
 }
 
+// chatHidden reports whether the chat pane is actually dropped this frame:
+// the ":chat" toggle holds, except where the chat is the only content
+// surface (":view chat", lecture rows without the lesson split) — hiding it
+// there would blank the screen, so the pane stays until the view changes.
+func (m Model) chatHidden() bool {
+	return m.chatCollapsed && !(m.chatCentric() && !m.lessonSplit())
+}
+
 // lessonSplit reports whether lesson rows render as sidebar | lesson | chat:
 // the lecture as its own read-only pane, the chat holding just the
 // conversation. Auto mode only — ":view chat"/":view code" are the legacy
@@ -2502,6 +2558,7 @@ func (m *Model) layout() {
 	}
 
 	chatOnly := m.chatCentric() // the editor pane is hidden entirely
+	chatOff := m.chatHidden()   // the chat pane is dropped (":chat")
 
 	if m.horizontal {
 		m.lessonW = 0 // the lesson split is vertical-only (see lessonSplit)
@@ -2526,6 +2583,10 @@ func (m *Model) layout() {
 			// One right box instead of two: the chat takes the whole column.
 			m.chatH = m.contentH
 			m.editorH = 0
+		} else if chatOff {
+			// ":chat" dropped the top box: the editor takes the whole column.
+			m.chatH = 0
+			m.editorH = m.contentH
 		} else {
 			// The two stacked boxes cost 4 border rows vs the sidebar's 2, so
 			// their combined content height is contentH-2.
@@ -2541,7 +2602,9 @@ func (m *Model) layout() {
 		}
 
 		m.sidebar.setSize(m.sidebarW, m.contentH)
-		m.chat.setSize(m.rightW, m.chatH)
+		if m.chatH > 0 {
+			m.chat.setSize(m.rightW, m.chatH)
+		}
 		if m.editorH > 0 {
 			m.editor.SetSize(m.rightW, max(1, m.editorH-1-len(m.promptHeaderLines(m.rightW))))
 		}
@@ -2559,6 +2622,9 @@ func (m *Model) layout() {
 	if chatOnly && !m.lessonSplit() {
 		borders -= 2
 	}
+	if chatOff {
+		borders -= 2
+	}
 	contentW := m.width - borders
 	if contentW < 3 {
 		contentW = 3
@@ -2569,6 +2635,10 @@ func (m *Model) layout() {
 		m.sidebarW = clampMin(contentW*m.deps.Cfg.SidebarPct(22)/100, 12)
 	}
 	switch {
+	case chatOnly && m.lessonSplit() && chatOff:
+		// ":chat" on a lecture row: the lesson pane reads full width.
+		m.chatW, m.editorW = 0, 0
+		m.lessonW = clampMin(contentW-m.sidebarW, 10)
 	case chatOnly && m.lessonSplit():
 		// Lesson rows: the lecture pane takes the editor's slot, so the same
 		// :compact / :wide bias trades width between the lesson and the chat.
@@ -2579,6 +2649,10 @@ func (m *Model) layout() {
 	case chatOnly:
 		m.editorW, m.lessonW = 0, 0
 		m.chatW = clampMin(contentW-m.sidebarW, 16)
+	case chatOff:
+		// ":chat" on an editor row: the editor absorbs the chat's width.
+		m.chatW, m.lessonW = 0, 0
+		m.editorW = clampMin(contentW-m.sidebarW, 10)
 	default:
 		// The configured split is the base; :compact / :wide shift it live.
 		m.lessonW = 0
@@ -2594,7 +2668,9 @@ func (m *Model) layout() {
 	if m.lessonW > 0 {
 		m.lesson.setSize(m.lessonW, m.contentH)
 	}
-	m.chat.setSize(m.chatW, m.contentH)
+	if m.chatW > 0 {
+		m.chat.setSize(m.chatW, m.contentH)
+	}
 }
 
 func (m Model) View() string {
@@ -2619,11 +2695,19 @@ func (m Model) View() string {
 	var row string
 	if m.horizontal {
 		// sidebar on the left; content (chat) above the input (editor) on the
-		// right — the editor box disappears in the chat-centric view.
-		right := m.box(paneChat, m.rightW, m.chatH, m.chat.view())
+		// right — the editor box disappears in the chat-centric view, the chat
+		// box under ":chat".
+		var right string
+		if m.chatH > 0 {
+			right = m.box(paneChat, m.rightW, m.chatH, m.chat.view())
+		}
 		if m.editorH > 0 {
 			ed := m.box(paneEditor, m.rightW, m.editorH, m.editorPaneView(m.rightW))
-			right = lipgloss.JoinVertical(lipgloss.Left, right, ed)
+			if right == "" {
+				right = ed
+			} else {
+				right = lipgloss.JoinVertical(lipgloss.Left, right, ed)
+			}
 		}
 		if m.sidebarCollapsed {
 			row = right
@@ -2632,16 +2716,18 @@ func (m Model) View() string {
 			row = lipgloss.JoinHorizontal(lipgloss.Top, sb, right)
 		}
 	} else {
-		ch := m.box(paneChat, m.chatW, m.contentH, m.chat.view())
-		panes := []string{ch}
-		if m.editorW > 0 {
-			panes = []string{m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW)), ch}
+		var panes []string
+		if !m.sidebarCollapsed {
+			panes = append(panes, m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view()))
 		}
 		if m.lessonW > 0 { // lesson rows: the lecture pane fills the editor's slot
-			panes = append([]string{m.box(paneLesson, m.lessonW, m.contentH, m.lesson.view())}, panes...)
+			panes = append(panes, m.box(paneLesson, m.lessonW, m.contentH, m.lesson.view()))
 		}
-		if !m.sidebarCollapsed {
-			panes = append([]string{m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view())}, panes...)
+		if m.editorW > 0 {
+			panes = append(panes, m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW)))
+		}
+		if m.chatW > 0 {
+			panes = append(panes, m.box(paneChat, m.chatW, m.contentH, m.chat.view()))
 		}
 		row = lipgloss.JoinHorizontal(lipgloss.Top, panes...)
 	}
