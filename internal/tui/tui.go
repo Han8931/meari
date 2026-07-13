@@ -1465,6 +1465,7 @@ func helpView() string {
 		"  ⌃r / ⌃n            run tests / next challenge (in the editor, ⌃r is Vim redo;",
 		"                     run with ⌃s or :submit there)",
 		"  chat ⌃f ⌃b ⌃d ⌃u   page / half-page scroll",
+		"  lesson { / }       previous / next paragraph (Vim; also chat Normal mode)",
 		"  mouse wheel        scroll the pane under the cursor",
 		"  ⌃c                 quit",
 	}, "\n")

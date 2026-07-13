@@ -681,6 +681,10 @@ func (c *chatModel) readOnlyKey(msg tea.KeyMsg) {
 		c.vp.GotoTop()
 	case "G", "end":
 		c.vp.GotoBottom()
+	case "{":
+		c.paragraphJump(-1)
+	case "}":
+		c.paragraphJump(1)
 	default:
 		c.scrollKey(msg) // ⌃d/⌃u/⌃f/⌃b, PgUp/PgDn, Shift-arrows
 	}
@@ -779,8 +783,39 @@ func (c *chatModel) normalKey(msg tea.KeyMsg) {
 		c.vp.GotoTop()
 	case "G":
 		c.vp.GotoBottom()
+	case "{":
+		c.paragraphJump(-1)
+	case "}":
+		c.paragraphJump(1)
 	}
 	c.pendingOp = 0 // any other key cancels a half-typed dd/cc
+}
+
+// paragraphJump scrolls the document by paragraph — Vim's { and } over a view
+// with no cursor: the viewport's top line jumps to the previous/next blank
+// rendered line, runs of blanks counting as one break.
+func (c *chatModel) paragraphJump(dir int) {
+	blank := func(i int) bool { return strings.TrimSpace(ansi.Strip(c.contentLines[i])) == "" }
+	i := c.vp.YOffset
+	if dir > 0 {
+		for i++; i < len(c.contentLines) && blank(i); i++ {
+		}
+		for ; i < len(c.contentLines) && !blank(i); i++ {
+		}
+		if i >= len(c.contentLines) {
+			c.vp.GotoBottom()
+			return
+		}
+	} else {
+		for i--; i >= 0 && blank(i); i-- {
+		}
+		for ; i >= 0 && !blank(i); i-- {
+		}
+		if i < 0 {
+			i = 0
+		}
+	}
+	c.vp.SetYOffset(i)
 }
 
 // scrollKey handles transcript scrolling and reports whether it consumed the key.
