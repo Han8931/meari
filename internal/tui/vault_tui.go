@@ -181,6 +181,7 @@ func RunVault(svc *core.Service, cfg config.Config) (Outcome, error) {
 	final, err := p.Run()
 	out := Outcome{}
 	if fm, ok := final.(VaultModel); ok {
+		fm.persistChats() // transcripts survive :q, Ctrl-C, and :tutor alike
 		out = Outcome{Target: fm.exit}
 	}
 	return out, err
@@ -197,12 +198,14 @@ func newVaultModel(svc *core.Service, cfg config.Config) VaultModel {
 		sidebarCollapsed: cfg.UI.SidebarFolded,
 		sidebar:          newSidebar(),
 		chat:             newChat(),
-		chatByNote:       map[string][]chatBlock{},
-		histByNote:       map[string][]tutor.ChatTurn{},
+		chatByNote:       nil, // filled from the chat store below
+		histByNote:       nil,
 		expanded:         map[string]bool{vaultRootID: true}, // vault root starts open
 		marked:           map[string]bool{},
 		spin:             spinner.New(spinner.WithSpinner(spinner.Dot)),
 	}
+	// Per-note chat transcripts survive restarts (data/chats.json).
+	m.chatByNote, m.histByNote = loadChats(cfg.DataDir)
 	// The editor's save closure persists the open note — but never while the
 	// learner is writing an essay answer (curPath is blanked during study).
 	save := func(code string) error {
@@ -1421,6 +1424,7 @@ func (m *VaultModel) switchNoteChat(n core.Note) {
 		m.chatByNote[m.current] = m.chat.snapshot()
 		m.histByNote[m.current] = m.chatHist
 	}
+	_ = saveChats(m.cfg.DataDir, m.chatByNote, m.histByNote) // best-effort checkpoint
 	saved, visited := m.chatByNote[n.Path]
 	m.chat.restore(saved)
 	m.chatHist = m.histByNote[n.Path]

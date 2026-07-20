@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -845,5 +846,65 @@ func TestLessonParagraphJump(t *testing.T) {
 	c.paragraphJump(-1)
 	if c.vp.YOffset != 0 {
 		t.Fatalf("{ at the top should clamp to 0, got %d", c.vp.YOffset)
+	}
+}
+
+// Per-note transcripts round-trip through the chat store, newest blocks win
+// the size cap, and a missing file is just an empty history.
+func TestChatStoreRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+
+	blocks := map[string][]chatBlock{
+		"math/limits.md": {
+			{role: roleSystem, text: "— Limits —"},
+			{role: roleUser, text: "why?"},
+			{role: roleTutor, text: "because"},
+		},
+		"empty.md": {},
+	}
+	turns := map[string][]tutor.ChatTurn{
+		"math/limits.md": {{Role: "user", Content: "why?"}, {Role: "assistant", Content: "because"}},
+	}
+	if err := saveChats(dir, blocks, turns); err != nil {
+		t.Fatal(err)
+	}
+
+	gotBlocks, gotTurns := loadChats(dir)
+	got := gotBlocks["math/limits.md"]
+	if len(got) != 3 || got[1].role != roleUser || got[2].text != "because" {
+		t.Fatalf("blocks did not round-trip: %+v", got)
+	}
+	if _, ok := gotBlocks["empty.md"]; ok {
+		t.Fatal("empty transcripts should not be persisted")
+	}
+	if len(gotTurns["math/limits.md"]) != 2 {
+		t.Fatalf("turns did not round-trip: %+v", gotTurns)
+	}
+
+	// The cap keeps the newest blocks.
+	var many []chatBlock
+	for i := 0; i < chatStoreMaxBlocks+50; i++ {
+		many = append(many, chatBlock{role: roleUser, text: fmt.Sprintf("m%d", i)})
+	}
+	if err := saveChats(dir, map[string][]chatBlock{"big.md": many}, nil); err != nil {
+		t.Fatal(err)
+	}
+	gotBlocks, _ = loadChats(dir)
+	big := gotBlocks["big.md"]
+	if len(big) != chatStoreMaxBlocks {
+		t.Fatalf("cap not applied: %d blocks", len(big))
+	}
+	if big[len(big)-1].text != fmt.Sprintf("m%d", chatStoreMaxBlocks+49) {
+		t.Fatalf("cap should keep the newest blocks, last = %q", big[len(big)-1].text)
+	}
+
+	// No file, no dataDir: empty maps, no error.
+	b, tr := loadChats(t.TempDir())
+	if len(b) != 0 || len(tr) != 0 {
+		t.Fatal("missing store should load empty")
+	}
+	b, tr = loadChats("")
+	if len(b) != 0 || len(tr) != 0 {
+		t.Fatal("empty dataDir should load empty")
 	}
 }

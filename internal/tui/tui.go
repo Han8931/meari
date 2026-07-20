@@ -1882,6 +1882,11 @@ func (m *Model) loadVaultCourse(key string) (curriculum.Curriculum, error) {
 	if err != nil {
 		return curriculum.Curriculum{}, err
 	}
+	// Author-facing loading notes (e.g. a quiz step served as an essay) go to
+	// the transcript once, at load — the one moment the author is looking.
+	for _, w := range c.Warnings {
+		m.chat.append(roleSystem, "⚠ "+w)
+	}
 	return c.Curriculum(), nil
 }
 

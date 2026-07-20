@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"meari/internal/fsutil"
 )
 
 // Note is a single markdown note: its frontmatter metadata plus the markdown
@@ -157,7 +159,10 @@ func (n Note) Marshal() []byte {
 
 // Read loads and parses the note at relPath.
 func (v *Vault) Read(relPath string) (Note, error) {
-	abs := filepath.Join(v.root, relPath)
+	abs, err := v.safeAbs(relPath)
+	if err != nil {
+		return Note{}, err
+	}
 	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return Note{}, err
@@ -184,11 +189,14 @@ func (v *Vault) Write(n Note) (Note, error) {
 	if n.RelPath == "" {
 		n.RelPath = DeriveRelPath(n.Subject, n.Title)
 	}
-	abs := filepath.Join(v.root, n.RelPath)
+	abs, err := v.safeAbs(n.RelPath)
+	if err != nil {
+		return Note{}, err
+	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return Note{}, err
 	}
-	if err := os.WriteFile(abs, n.Marshal(), 0o644); err != nil {
+	if err := fsutil.WriteFileAtomic(abs, n.Marshal(), 0o644); err != nil {
 		return Note{}, err
 	}
 	n.Path = abs

@@ -199,3 +199,62 @@ func TestCourseToCurriculum(t *testing.T) {
 		t.Fatalf("code challenge incomplete: %+v", topics[1].Challenge)
 	}
 }
+
+// A kind:quiz topic whose questions are missing or all malformed is served as
+// an essay AND reported in Course.Warnings — never silently.
+func TestQuizWithoutQuestionsDegradesWithWarning(t *testing.T) {
+	v, err := vault.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(v, tutor.New(config.AIConfig{Provider: "openai"}))
+
+	if _, err := v.Write(vault.Note{
+		RelPath: "meari-course/Q/Broken Quiz.md",
+		Title:   "Broken Quiz",
+		Body:    "# Broken Quiz\n\nbody\n",
+		Extra: map[string]any{"study": map[string]any{
+			"kind": "quiz",
+			// one malformed question: a single choice is not a quiz
+			"questions": []any{map[string]any{"q": "?", "choices": []any{"a"}, "answer": 0}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Write(vault.Note{
+		RelPath: "meari-course/Q/Good Quiz.md",
+		Title:   "Good Quiz",
+		Body:    "# Good Quiz\n\nbody\n",
+		Extra: map[string]any{"study": map[string]any{
+			"kind": "quiz",
+			"questions": []any{map[string]any{
+				"q": "1+1?", "choices": []any{"1", "2"}, "answer": 1,
+			}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Write(vault.Note{
+		RelPath: "meari-course/Q/course.md",
+		Title:   "Q",
+		Body:    "## M\n\n- [[Broken Quiz]]\n- [[Good Quiz]]\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := svc.LoadCourse("Q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	topics := c.Modules[0].Topics
+	if topics[0].Kind != "essay" || !topics[0].DegradedQuiz {
+		t.Fatalf("broken quiz should degrade to a flagged essay, got kind=%q degraded=%v",
+			topics[0].Kind, topics[0].DegradedQuiz)
+	}
+	if topics[1].Kind != "quiz" || topics[1].DegradedQuiz {
+		t.Fatalf("good quiz mishandled: kind=%q degraded=%v", topics[1].Kind, topics[1].DegradedQuiz)
+	}
+	if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "Broken Quiz") {
+		t.Fatalf("warnings = %v, want one naming the broken quiz", c.Warnings)
+	}
+}

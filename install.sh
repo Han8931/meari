@@ -97,8 +97,14 @@ fi
 build_dir="$(mktemp -d)"
 trap 'rm -rf "$build_dir"' EXIT
 
-info "Building meari ($go_version)"
-(cd "$repo_dir" && go build -trimpath -ldflags="-s -w" -o "$build_dir/meari" .)
+# Stamp the binary so `meari version` can settle any "is this stale?" doubt.
+git_desc="$(cd "$repo_dir" && git describe --always --dirty 2>/dev/null || echo unknown)"
+build_date="$(date +%Y-%m-%d)"
+
+info "Building meari ($go_version, $git_desc)"
+(cd "$repo_dir" && go build -trimpath \
+    -ldflags="-s -w -X main.version=$git_desc -X main.buildDate=$build_date" \
+    -o "$build_dir/meari" .)
 
 # --- install -----------------------------------------------------------------
 

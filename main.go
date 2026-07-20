@@ -29,6 +29,23 @@ import (
 	"meari/internal/web"
 )
 
+// Build metadata, stamped by install.sh via
+// -ldflags "-X main.version=… -X main.buildDate=…". "dev" means a plain
+// `go build` / `go run .` — useful in itself: it tells a stale-binary hunt
+// that the binary didn't come from the install script.
+var (
+	version   = "dev"
+	buildDate = ""
+)
+
+func versionString() string {
+	s := version
+	if buildDate != "" {
+		s += " (built " + buildDate + ")"
+	}
+	return s
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -47,6 +64,9 @@ func run() error {
 			return runServe(os.Args[2:])
 		case "check":
 			return runCheck(os.Args[2:])
+		case "version", "-version", "--version":
+			fmt.Println("meari " + versionString())
+			return nil
 		}
 	}
 	return runTUI()
@@ -78,7 +98,7 @@ func runTUI() error {
 		return fmt.Errorf("--tutor and --vault are mutually exclusive")
 	}
 	if flag.NArg() > 0 {
-		return fmt.Errorf("unknown argument %q (subcommands: serve, check; -vault/-tutor pick the TUI mode)", flag.Arg(0))
+		return fmt.Errorf("unknown argument %q (subcommands: serve, check, version; -vault/-tutor pick the TUI mode)", flag.Arg(0))
 	}
 
 	cfg, wd, err := loadConfig(*cfgPath)
@@ -221,7 +241,7 @@ func runCheck(args []string) error {
 	tut := tutor.New(cfg.AI)
 	info := tut.Info()
 
-	fmt.Println("Meari AI connection check")
+	fmt.Println("Meari AI connection check (meari " + versionString() + ")")
 	fmt.Printf("  provider:  %s\n", cfg.AI.Provider)
 	fmt.Printf("  base url:  %s\n", info.BaseURL)
 	fmt.Printf("  model:     %s\n", info.Model)

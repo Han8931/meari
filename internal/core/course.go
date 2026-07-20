@@ -65,6 +65,11 @@ type CourseTopic struct {
 	Tests     []string                  `json:"tests"`
 	Answer    string                    `json:"answer"`
 	Questions []curriculum.QuizQuestion `json:"questions"` // quiz steps
+
+	// DegradedQuiz marks a topic authored as kind:quiz whose questions were
+	// missing or all malformed, so it is served as an essay instead. Surfaced
+	// as a course warning — silently changing a step's kind confuses authors.
+	DegradedQuiz bool `json:"degradedQuiz,omitempty"`
 }
 
 // CourseModule groups ordered topics under a heading.
@@ -80,6 +85,10 @@ type Course struct {
 	Level   string         `json:"level"`
 	Path    string         `json:"path"` // the manifest's vault-relative path
 	Modules []CourseModule `json:"modules"`
+
+	// Warnings are author-facing loading notes (e.g. a degraded quiz step);
+	// the course still works, but not exactly as written.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // CourseMeta is the list-view of a course.
@@ -171,6 +180,14 @@ func (s *Service) LoadCourse(key string) (Course, error) {
 	}
 	if len(c.Modules) == 0 {
 		return Course{}, fmt.Errorf("course %q has no resolvable topics", c.Title)
+	}
+	for _, mod := range c.Modules {
+		for _, t := range mod.Topics {
+			if t.DegradedQuiz {
+				c.Warnings = append(c.Warnings,
+					"quiz \""+t.Title+"\" has no valid questions (needs text, 2+ choices, a valid answer index) — served as an essay")
+			}
+		}
 	}
 	return c, nil
 }
@@ -282,7 +299,10 @@ func courseTopic(courseID string, n vault.Note) CourseTopic {
 		t.Questions = parseQuizQuestions(qs)
 	}
 	if t.Kind == "quiz" && len(t.Questions) == 0 {
-		t.Kind = "essay" // a quiz step without questions degrades to an essay
+		// A quiz step without valid questions degrades to an essay; flagged so
+		// the course reports it instead of silently changing the step's kind.
+		t.Kind = "essay"
+		t.DegradedQuiz = true
 	}
 	if t.Prompt == "" {
 		t.Prompt = "Explain the key ideas of \"" + n.Title +

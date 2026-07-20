@@ -53,11 +53,10 @@ The browser front-end exposes a fraction of the TUI — bring the AI/vault featu
 
 ## Correctness & safety
 
-- [ ] **Path traversal** — `vault.Read`/`Write` use bare `filepath.Join` and skip `safeAbs()`
-      (unlike `Delete`/`Rename`/`MakeDir`); the web server passes `?path=` straight through, so
-      `GET /api/note?path=../../etc/passwd` escapes the vault. Route both through `safeAbs()`.
-- [ ] Atomic writes (temp-file + rename) for notes, `progress.json`, and drafts — a crash
-      mid-`os.WriteFile` can truncate progress/drafts today
+- [x] **Path traversal** — `vault.Read`/`Write` now route through `safeAbs()`; covered by
+      `internal/vault/traversal_test.go` and verified against the live `/api/note` endpoint
+- [x] Atomic writes (temp-file + rename) for notes, `progress.json`, drafts, and the chat
+      store — `internal/fsutil.WriteFileAtomic`
 - [ ] Web server hardening — request body size limit, `Read`/`Write`/`Idle` timeouts, graceful
       shutdown on SIGINT, sanitize rendered markdown (XSS), and refuse to bind a routable address
 

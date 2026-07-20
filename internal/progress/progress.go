@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"meari/internal/fsutil"
 )
 
 // State is the on-disk record. Challenges is keyed by challenge ID; Topics is
@@ -132,5 +134,5 @@ func (s *State) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, b, 0o644)
+	return fsutil.WriteFileAtomic(s.path, b, 0o644)
 }
