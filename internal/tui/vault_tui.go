@@ -1156,7 +1156,7 @@ func (m VaultModel) confirmDelete(it sidebarItem) (tea.Model, tea.Cmd) {
 // for Tab completion in the command prompt.
 var vaultExCmds = []string{
 	"answer", "apply", "ask", "backlinks", "chat", "code", "compact", "copy", "course",
-	"discard", "discuss", "done", "edit", "essay", "export", "fold", "gen", "grade",
+	"discard", "discuss", "done", "edit", "essay", "explain", "export", "fold", "gen", "grade",
 	"learn", "lesson", "links", "new", "paste", "polish", "publish", "q", "quit",
 	"revise", "sidebar", "submit", "theme", "tutor", "w", "wide", "wq", "write", "yank",
 }
@@ -1220,6 +1220,8 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdDiscardEdit()
 	case "ask", "discuss":
 		return m.cmdAsk(args)
+	case "explain":
+		return m.cmdExplain()
 	case "answer":
 		return m.revealAnswer()
 	case "copy", "yank":
@@ -1266,7 +1268,7 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	default:
 		m.flash("unknown command: :" + raw +
-			"  (try :learn · :new · :essay · :grade · :answer · :done · :backlinks · :tutor · :fold · :chat · :compact · :wide · :q)")
+			"  (try :learn · :new · :essay · :grade · :answer · :done · :explain · :backlinks · :tutor · :fold · :chat · :compact · :wide · :q)")
 		return m, nil
 	}
 }
@@ -1514,6 +1516,31 @@ func (m VaultModel) cmdAsk(question string) (tea.Model, tea.Cmd) {
 	tm, cmd := m.streamReply()
 	mm := tm.(VaultModel)
 	return mm, tea.Batch(mm.setFocus(paneChat), cmd)
+}
+
+// explainPrompt is the canned question :explain sends about the selection.
+const explainPrompt = "Explain the selected text in simple words, as if to someone new to the " +
+	"subject. Keep it short, avoid jargon, and give one concrete example if it helps."
+
+// cmdExplain asks the tutor for a plain-words explanation of the selected
+// text: the editor's Visual selection (":explain" typed from Visual mode) or,
+// failing that, the transcript's mouse-drag selection.
+func (m VaultModel) cmdExplain() (tea.Model, tea.Cmd) {
+	sel := ""
+	if m.cmdSel != nil {
+		sel = strings.TrimSpace(m.cmdSel.Text)
+	}
+	if sel == "" {
+		if t, ok := m.chat.selectionText(); ok {
+			sel = strings.TrimSpace(t)
+		}
+	}
+	if sel == "" {
+		m.flash("select text first — Visual in the editor, or drag over the chat, then :explain")
+		return m, nil
+	}
+	m.cmdSel = &editor.Selection{Text: sel} // cmdAsk pins it as the excerpt
+	return m.cmdAsk(explainPrompt)
 }
 
 // groundHistory returns a copy of the chat history with a :ask/:discuss

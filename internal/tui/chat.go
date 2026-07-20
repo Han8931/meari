@@ -53,6 +53,12 @@ type chatModel struct {
 	// return to typing. pendingOp holds the first key of dd/cc.
 	normal    bool
 	pendingOp rune
+	// visual is the input's character-wise Visual mode (v from Normal);
+	// vAnchor is the selection anchor as a flat rune index into the value.
+	// pendingG arms the two-key gg jump (Normal and Visual alike).
+	visual   bool
+	vAnchor  int
+	pendingG bool
 
 	// busy is the label of the in-flight async op ("" = idle); busyTick drives
 	// the spinner animation, advanced by the parent's spinner tick.
@@ -644,6 +650,12 @@ func (c chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			c.readOnlyKey(msg)
 			return c, nil
 		}
+		if c.normal && c.visual {
+			if notice := c.visualKey(msg); notice != "" {
+				c.append(roleSystem, notice)
+			}
+			return c, nil
+		}
 		if c.scrollKey(msg) {
 			return c, nil
 		}
@@ -718,6 +730,14 @@ func (c *chatModel) exitNormal() {
 // page it, the mouse wheel and drag scroll it.
 func (c *chatModel) normalKey(msg tea.KeyMsg) {
 	send := func(t tea.KeyType) { c.input, _ = c.input.Update(tea.KeyMsg{Type: t}) }
+	if c.pendingG {
+		c.pendingG = false
+		c.pendingOp = 0
+		if msg.String() == "g" {
+			c.inputFirstLine() // gg: first line of the input, Vim-style
+		}
+		return
+	}
 	alt := func(r rune) {
 		c.input, _ = c.input.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: true})
 	}
@@ -778,11 +798,15 @@ func (c *chatModel) normalKey(msg tea.KeyMsg) {
 	case "C":
 		send(tea.KeyCtrlK)
 		c.exitNormal()
-	// --- transcript jumps ---
+	// --- input-buffer jumps and Visual mode ---
+	case "v":
+		c.enterVisual()
 	case "g":
-		c.vp.GotoTop()
+		c.pendingG = true
+		return // keep pendingOp; gg completes on the next key
 	case "G":
-		c.vp.GotoBottom()
+		c.inputLastLine()
+	// --- transcript jumps ---
 	case "{":
 		c.paragraphJump(-1)
 	case "}":
@@ -1026,6 +1050,9 @@ func (c chatModel) inputView() string {
 		w = 1
 	}
 	lines := strings.Split(c.input.View(), "\n")
+	if c.visual {
+		c.paintInputSelection(lines) // Visual mode: show the selected span
+	}
 	for i, line := range lines {
 		styled := chatInputBGSeq + strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+chatInputBGSeq)
 		if pad := w - ansi.StringWidth(line); pad > 0 {
