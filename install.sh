@@ -10,13 +10,16 @@
 #                                # (learning progress is kept)
 #   BIN_DIR=/usr/local/bin ./install.sh
 #
-# Meari roots its files (config.toml, vault/, data/, workspace/, ...) at the
-# directory you run it from, so after installing, launch it from the folder
-# you want as your Meari home.
+# Meari keeps its files (config.toml, vault/, data/, workspace/, ...) in a
+# global home — ~/.config/meari by default ($MEARI_HOME or $XDG_CONFIG_HOME
+# override it) — so `meari` behaves the same from any directory. A directory
+# that already holds a config.toml or vault/ (the repo, a portable folder)
+# stays self-contained instead.
 #
-# Cleanup never touches: config.toml, vault/ (your notes), data/ (progress),
-# workspace/drafts/ (in-progress challenge solutions), meari-course/
-# (progress references these), meari-publish/ (your sharing repo).
+# Cleanup below applies to a repo/portable checkout and never touches:
+# config.toml, vault/ (your notes), data/ (progress), workspace/drafts/
+# (in-progress challenge solutions), meari-course/ (progress references these),
+# meari-publish/ (your sharing repo).
 
 set -euo pipefail
 
@@ -171,15 +174,18 @@ fi
 
 cat <<EOF
 
-Installed. Meari keeps its notes and data in whatever directory you run it
-from, so pick (or create) a home for it first:
-
-    mkdir -p ~/meari && cd ~/meari
-    # optional (Meari runs fine without a config); never overwrites an existing one:
-    [ -f config.toml ] || cp "$repo_dir/config.example.toml" config.toml
+Installed. Meari keeps its notes and data in a global home (~/.config/meari by
+default; set \$MEARI_HOME to relocate), so it works the same from any directory.
+Run it anywhere:
 
     meari -vault    # the vault, in your terminal
     meari           # the tutor (launch dashboard)
     meari check     # verify config / AI provider setup
+    #  then :config inside the app to edit ~/.config/meari/config.toml
+
+Optional starter config (Meari runs fine without one):
+
+    mkdir -p ~/.config/meari
+    cp -n "$repo_dir/config.example.toml" ~/.config/meari/config.toml
 
 EOF

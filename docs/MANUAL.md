@@ -40,9 +40,19 @@ stays up and your session resumes.
 
 ## Configuration
 
-All configuration lives in `config.toml` next to meari (or `-config <path>`). The
-`:config` command opens it in your `$EDITOR` from inside the app; on save, the layout
-re-applies live.
+Meari keeps all its state — `config.toml`, `data/` (progress), `workspace/` (drafts),
+`exports/`, and generated courses — in one **global home**, so it behaves the same no
+matter which directory you launch it from. The home is resolved in this order:
+
+1. `$MEARI_HOME`, if set (an explicit override; `~/` expands).
+2. The current directory, **if** it already holds a `config.toml` or a `vault/` — so
+   running from the repo or a portable folder keeps everything local (the historical
+   behavior).
+3. `$XDG_CONFIG_HOME/meari` (default `~/.config/meari`), created on first run.
+
+The `:config` command opens `<home>/config.toml` in your `$EDITOR` from inside the app,
+creating it from a template if it doesn't exist; on save, the layout re-applies live.
+`-config <path>` overrides the file location for one run.
 
 ### Vault location
 

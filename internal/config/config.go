@@ -212,11 +212,7 @@ func resolveVaultDir(dir, baseDir string) (string, error) {
 		return filepath.Join(baseDir, "vault"), nil
 	}
 	if dir == "~" || strings.HasPrefix(dir, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(home, strings.TrimPrefix(dir[1:], "/")), nil
+		return ExpandHome(dir)
 	}
 	if !filepath.IsAbs(dir) {
 		return filepath.Join(baseDir, dir), nil

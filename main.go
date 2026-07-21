@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -68,19 +69,26 @@ func run() error {
 	return runTUI()
 }
 
-// loadConfig loads config rooted at the working directory.
-func loadConfig(cfgPath string) (config.Config, string, error) {
-	wd, err := os.Getwd()
+// loadConfig loads config rooted at the app home (see config.BaseDir), so an
+// installed meari keeps one config, vault, progress, and drafts no matter which
+// directory it is launched from. An empty cfgPath defaults to
+// <home>/config.toml; an explicit -config path is honored as given (relative to
+// the cwd). Returns the config, the home dir, and the resolved config path.
+func loadConfig(cfgPath string) (config.Config, string, string, error) {
+	base, err := config.BaseDir()
 	if err != nil {
-		return config.Config{}, "", err
+		return config.Config{}, "", "", err
 	}
-	cfg, err := config.Load(cfgPath, wd)
-	return cfg, wd, err
+	if strings.TrimSpace(cfgPath) == "" {
+		cfgPath = filepath.Join(base, "config.toml")
+	}
+	cfg, err := config.Load(cfgPath, base)
+	return cfg, base, cfgPath, err
 }
 
 func runTUI() error {
 	var (
-		cfgPath   = flag.String("config", "config.toml", "path to config file")
+		cfgPath   = flag.String("config", "", "path to config file (default: <home>/config.toml)")
 		topicFlag = flag.String("topic", "", "topic to learn (skips the startup prompt)")
 		vimFlag   = flag.Bool("vim", false, "force Vim keybindings in the editor")
 		defFlag   = flag.Bool("default", false, "force default (non-Vim) keybindings")
@@ -97,7 +105,7 @@ func runTUI() error {
 		return fmt.Errorf("unknown argument %q (subcommands: check, version; -vault/-tutor pick the TUI mode)", flag.Arg(0))
 	}
 
-	cfg, wd, err := loadConfig(*cfgPath)
+	cfg, base, resolvedCfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}
@@ -109,7 +117,7 @@ func runTUI() error {
 		cfg.Editor.Keybindings = "default"
 	}
 
-	deps, svc, err := buildDeps(cfg, wd, *cfgPath)
+	deps, svc, err := buildDeps(cfg, base, resolvedCfg)
 	if err != nil {
 		return err
 	}
@@ -128,7 +136,7 @@ func runTUI() error {
 // buildDeps constructs the shared engine both TUIs use — the tutor, draft store,
 // progress, and the vault-backed core.Service — so the coding TUI and the vault
 // TUI can hand off to each other (:vault / :tutor) in one process.
-func buildDeps(cfg config.Config, wd, cfgPath string) (tui.Deps, *core.Service, error) {
+func buildDeps(cfg config.Config, base, cfgPath string) (tui.Deps, *core.Service, error) {
 	store, err := drafts.New(cfg.WorkspaceDir)
 	if err != nil {
 		return tui.Deps{}, nil, err
@@ -156,7 +164,7 @@ func buildDeps(cfg config.Config, wd, cfgPath string) (tui.Deps, *core.Service, 
 		Svc:        svc,
 		Cfg:        cfg,
 		ConfigPath: cfgPath,
-		BaseDir:    wd,
+		BaseDir:    base,
 	}
 	return deps, svc, nil
 }
@@ -198,10 +206,10 @@ func runShell(start tui.SwitchTarget, deps tui.Deps, svc *core.Service, cfg conf
 // configured model exists upstream, and a real round-trip request.
 func runCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
-	cfgPath := fs.String("config", "config.toml", "path to config file")
+	cfgPath := fs.String("config", "", "path to config file (default: <home>/config.toml)")
 	_ = fs.Parse(args)
 
-	cfg, _, err := loadConfig(*cfgPath)
+	cfg, _, _, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}

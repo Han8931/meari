@@ -9,6 +9,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -27,15 +28,16 @@ var version = "dev"
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// buildService mirrors main.buildDeps: config rooted at the working directory,
-// a vault-backed core.Service with the courses mount and built-in courses
-// seeded. Returned separately so tests can construct their own service.
+// buildService mirrors main.buildDeps: config rooted at the app home (see
+// config.BaseDir), so the desktop app shares one config, vault, and progress
+// with the terminal app no matter where it is launched from. Returned
+// separately so tests can construct their own service.
 func buildService() (*core.Service, config.Config, error) {
-	wd, err := os.Getwd()
+	base, err := config.BaseDir()
 	if err != nil {
 		return nil, config.Config{}, err
 	}
-	cfg, err := config.Load("config.toml", wd)
+	cfg, err := config.Load(filepath.Join(base, "config.toml"), base)
 	if err != nil {
 		return nil, config.Config{}, err
 	}
