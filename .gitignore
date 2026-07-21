@@ -9,3 +9,10 @@
 
 # Personal config stays local; the repo ships config.example.toml as the template.
 /config.toml
+
+# GUI (Wails) build artifacts. The embedded dist keeps a placeholder index.html
+# so the Go package always compiles; the real bundle is built on demand.
+/gui/build/bin/
+/gui/frontend/node_modules/
+/gui/frontend/dist/*
+!/gui/frontend/dist/index.html

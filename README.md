@@ -5,7 +5,7 @@
 **Your notes, echoed back as learning.**
 
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
-![Terminal + Web](https://img.shields.io/badge/runs%20in-terminal%20%26%20browser-blueviolet)
+![Terminal + Desktop](https://img.shields.io/badge/runs%20in-terminal%20%26%20desktop-blueviolet)
 ![Local-first](https://img.shields.io/badge/local--first-your%20files-success)
 ![Offline OK](https://img.shields.io/badge/AI-optional%2C%20any%20provider-lightgrey)
 
@@ -38,8 +38,8 @@ languages, math, history, science, code.
 └─────────────┘└─────────────────────────┘└──────────────────────┘
 ```
 
-It runs as a fast **terminal app** and a **local web app** — two thin front-ends over
-one shared Go core, working on the same plain-markdown vault.
+It runs as a fast **terminal app** and a native **desktop app** — two thin front-ends
+over one shared Go core, working on the same plain-markdown vault.
 
 ## 💡 Why Meari?
 
@@ -75,8 +75,10 @@ one shared Go core, working on the same plain-markdown vault.
 go build -o meari .
 
 ./meari -vault        # the vault, in your terminal
-./meari serve         # the same vault, in your browser
 ./meari               # the tutor (launch dashboard: pick a course)
+
+# the native desktop app (Wails):
+cd gui && wails build  # -> gui/build/bin/Meari.app  (see gui/README.md)
 ```
 
 Point it at notes you already have, and optionally wire up an AI. Copy the
@@ -140,17 +142,17 @@ stays untouched.
 - 💬 **A context-aware tutor chat** in every screen: replies stream live, render
   markdown in color, and always see the open note, lesson, or code you're working on.
 - 🔗 **Obsidian-style backlinks**, `[[wikilink]]` navigation, and per-note chat history.
-- 🧩 **One core, two faces** — the TUI and web UI stay in feature parity because neither
-  contains business logic; both drive the same headless engine.
+- 🧩 **One core, two faces** — the terminal and desktop apps stay in feature parity because
+  neither contains business logic; both drive the same headless engine.
 
 📘 **[Read the full manual →](docs/MANUAL.md)** — every key, command, and config option.
 
 ## 🗺️ Roadmap
 
+- [x] 🖥️ Desktop app — the core in a native window (Wails), with a Vim-capable editor
 - [ ] 🃏 Quiz study kind and spaced-repetition flashcards (SM-2)
 - [ ] ⚡ SQLite index: fast search, link graph, SRS store
 - [ ] 🕸️ Visual knowledge graph
-- [ ] 🖥️ Desktop app (the core + web UI in a native window)
 
 ## 🌱 Status
 

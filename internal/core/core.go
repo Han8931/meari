@@ -1,7 +1,7 @@
 // Package core is Meari's headless engine: the shared brain that both the
-// terminal UI and the web GUI drive. It owns the vault-and-tutor orchestration
+// terminal UI and the desktop app drive. It owns the vault-and-tutor orchestration
 // (list/open/save notes, generate a lesson as a note, compute backlinks, search,
-// chat, grade an essay) and returns plain data — no Bubble Tea, no net/http, no
+// chat, grade an essay) and returns plain data — no Bubble Tea, no Wails, no
 // presentation. Front-ends are thin layers that call these methods and render
 // the result.
 //

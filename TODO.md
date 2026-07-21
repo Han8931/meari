@@ -32,13 +32,15 @@ this file tracks concrete, actionable items. Check things off as they land.
 - [ ] Link graph view (start with an ASCII/adjacency summary)
 - [ ] Note templates / daily notes — `:today` and `:template` (trivial over `vSaveOpenCmd`)
 
-## Web app
+## Desktop app (`gui/`)
 
-The browser front-end exposes a fraction of the TUI — bring the AI/vault features across:
+The Wails desktop app exposes a subset of the TUI — bring the AI/vault features across:
 
-- [ ] AI note editing in the web app — `:polish`/`:edit`/`:ask` on a selection
-- [ ] `:course` / `:revise` / `:publish` from the browser
-- [ ] Fuzzy find (`,ff` files, `,fg` grep) and a backlinks panel UI (`handleBacklinks` already exists)
+- [ ] Wire `Explain selection` into the chat pane (the Go stream exists; the UI logs the id)
+- [ ] AI note editing — `:polish`/`:edit`/`:ask` on a selection
+- [ ] `:course` / `:revise` / `:publish` from the app
+- [ ] Fuzzy find and a backlinks panel UI (`Backlinks` binding already exists)
+- [ ] Stamp the build with `main.version` from a build script, like the CLI's `meari version`
 
 ## AI tutor
 
@@ -48,7 +50,7 @@ The browser front-end exposes a fraction of the TUI — bring the AI/vault featu
 ## Platform
 
 - [ ] Index — SQLite-backed search, backlinks, SRS/progress store
-- [ ] Desktop packaging (Wails, cgo-free)
+- [x] Desktop app (Wails) — `gui/`, native window over the shared core with a Vim editor
 - [ ] Vault git auto-commit (`vault.autocommit`) for free history/sync
 
 ## Correctness & safety
@@ -57,8 +59,6 @@ The browser front-end exposes a fraction of the TUI — bring the AI/vault featu
       `internal/vault/traversal_test.go` and verified against the live `/api/note` endpoint
 - [x] Atomic writes (temp-file + rename) for notes, `progress.json`, drafts, and the chat
       store — `internal/fsutil.WriteFileAtomic`
-- [ ] Web server hardening — request body size limit, `Read`/`Write`/`Idle` timeouts, graceful
-      shutdown on SIGINT, sanitize rendered markdown (XSS), and refuse to bind a routable address
 
 ## Recently done
 

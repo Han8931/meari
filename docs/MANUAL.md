@@ -17,7 +17,7 @@ quick start, see the [README](../README.md).
 - [The chat pane (both TUIs)](#the-chat-pane-both-tuis)
 - [The editor (center pane)](#the-editor-center-pane)
 - [The command line (`:`)](#the-command-line-)
-- [The web UI (`meari serve`)](#the-web-ui-meari-serve)
+- [The desktop app (`gui/`)](#the-desktop-app-gui)
 - [Project layout](#project-layout)
 - [Notes & current limits](#notes--current-limits)
 
@@ -26,7 +26,6 @@ quick start, see the [README](../README.md).
 ```bash
 go build -o meari .
 ./meari -vault   (or -v)       # the learning vault, in the terminal
-./meari serve                  # the learning vault, in your browser
 ./meari                        # coding tutor — guided setup wizard
 ./meari -tutor   (or -t)       # coding tutor — skip the wizard into the curriculum
 ./meari -topic "spanish subjunctive"  # coding tutor — jump to a topic
@@ -34,8 +33,8 @@ go build -o meari .
 ./meari check                  # diagnose the AI provider connection
 ```
 
-The two vault front-ends — terminal (`-vault`) and browser (`serve`) — are driven by
-the same core over the same vault directory, so a note created in one shows up in the
+The two vault front-ends — terminal (`-vault`) and the desktop app (`gui/`) — are driven
+by the same core over the same vault directory, so a note created in one shows up in the
 other. `:vault` / `:tutor` switch between the two TUIs without quitting; the process
 stays up and your session resumes.
 
@@ -406,18 +405,22 @@ list in the status bar: `:co⇥` → `[compact]  config  copy  course`.
 > `:w` (save & resume) is intentionally separate from `:submit` (check), so you can stop
 > mid-answer and come back to it.
 
-## The web UI (`meari serve`)
+## The desktop app (`gui/`)
 
 ```bash
-./meari serve                  # http://localhost:8765
-./meari serve --addr :9000     # custom port
+cd gui
+wails dev          # live-reloading dev build
+wails build        # -> gui/build/bin/Meari.app (macOS) / Meari (Linux)
 ```
 
-A 3-pane browser app over your vault: **notes** (left) with a "Generate lesson" box, a
-**markdown editor + live preview** (center) with `[[wikilink]]` navigation and backlinks,
-and a **chat / study** panel (right) with tutor chat and an Essay study mode — write an
-answer and **Check answer** grades it; **Show answer** reveals a model answer. Runs offline
-with built-in content; configure an AI provider for generated lessons and grading.
+A native window (Wails v2; WebKit) over the same vault and core as the TUI. A 3-pane
+layout: **notes** (left, folding tree), a **markdown editor + live preview** (center),
+and a **tutor chat** (right). The editor is CodeMirror 6 with **Vim keybindings** —
+Normal/Visual/Insert, counts, registers, text objects — and **mouse selection integrates
+with Vim** (drag to select into Visual mode, then `y`/`d`/`c`); `:w`/`:wq` save. Toggle
+Vim off in the title bar for a plain editor. Runs offline with built-in content; configure
+an AI provider for generated lessons and grading. See [`gui/README.md`](../gui/README.md)
+for prerequisites and the full dev workflow.
 
 ## Project layout
 
@@ -427,7 +430,6 @@ internal/
   core/                 headless engine: vault+tutor orchestration both front-ends
                         drive (list/open/save/generate/backlinks/chat/essay)
   vault/                markdown vault: notes + frontmatter + [[wikilinks]] + file ops
-  web/                  local web GUI (net/http) + `meari serve`, over core
   tutor/                OpenAI-compatible client; lesson/challenge/feedback/chat,
                         plus subject-agnostic GenerateNote + GradeEssay, + offline
   tui/                  the 3-pane Bubble Tea program (panes, async cmds, layout)
@@ -437,6 +439,8 @@ internal/
   executor/             runs code against tests (timeout-guarded)
   drafts/               save/load/clear in-progress work by id
   progress/             progress.json — attempts + topic status
+gui/                    native desktop app (Wails v2 + React); thin bindings over core,
+                        CodeMirror + Vim editor — see gui/README.md
 
 planned (see the README roadmap):
   index/                derived SQLite index: search, link graph, SRS, progress

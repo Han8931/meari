@@ -1,6 +1,6 @@
 // Command meari is an interactive, AI-powered self-learning vault. It runs as a
-// terminal app (the default) or a local web app (the "serve" subcommand); both
-// drive the same vault and tutor.
+// terminal app; a native desktop app lives in ./gui (Wails). Both drive the
+// same vault and tutor through one shared core.
 //
 // The terminal UI splits the screen into three panes:
 //
@@ -26,7 +26,6 @@ import (
 	"meari/internal/tui"
 	"meari/internal/tutor"
 	"meari/internal/vault"
-	"meari/internal/web"
 )
 
 // Build metadata, stamped by install.sh via
@@ -54,14 +53,11 @@ func main() {
 }
 
 func run() error {
-	// Subcommand dispatch: "serve" launches the web UI, "check" the provider
-	// diagnostic; anything else is the TUI (-vault / -tutor pick the mode). We
-	// peel the subcommand off os.Args before flag parsing so each mode owns
-	// its own flag set.
+	// Subcommand dispatch: "check" is the provider diagnostic; anything else is
+	// the TUI (-vault / -tutor pick the mode). We peel the subcommand off
+	// os.Args before flag parsing so each mode owns its own flag set.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "serve":
-			return runServe(os.Args[2:])
 		case "check":
 			return runCheck(os.Args[2:])
 		case "version", "-version", "--version":
@@ -98,7 +94,7 @@ func runTUI() error {
 		return fmt.Errorf("--tutor and --vault are mutually exclusive")
 	}
 	if flag.NArg() > 0 {
-		return fmt.Errorf("unknown argument %q (subcommands: serve, check, version; -vault/-tutor pick the TUI mode)", flag.Arg(0))
+		return fmt.Errorf("unknown argument %q (subcommands: check, version; -vault/-tutor pick the TUI mode)", flag.Arg(0))
 	}
 
 	cfg, wd, err := loadConfig(*cfgPath)
@@ -196,35 +192,6 @@ func runShell(start tui.SwitchTarget, deps tui.Deps, svc *core.Service, cfg conf
 			return nil
 		}
 	}
-}
-
-// runServe starts the local web UI over the same vault and tutor as the TUI.
-func runServe(args []string) error {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	cfgPath := fs.String("config", "config.toml", "path to config file")
-	addr := fs.String("addr", ":8765", "address to listen on")
-	_ = fs.Parse(args)
-
-	cfg, _, err := loadConfig(*cfgPath)
-	if err != nil {
-		return err
-	}
-
-	v, err := vault.Open(cfg.VaultDir)
-	if err != nil {
-		return err
-	}
-	svc := core.New(v, tutor.New(cfg.AI))
-	svc.SetCourseDir(cfg.CourseDir)
-	if err := svc.SeedBuiltinCourses(); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: could not seed built-in courses:", err)
-	}
-
-	fmt.Printf("Meari web UI on http://localhost%s  (vault: %s)\n", *addr, cfg.VaultDir)
-	if svc.Offline() {
-		fmt.Println("(offline — no AI provider configured; set OPENAI_API_KEY or use Ollama for generated lessons)")
-	}
-	return web.Serve(*addr, svc)
 }
 
 // runCheck diagnoses the AI provider connection: resolved settings, whether the

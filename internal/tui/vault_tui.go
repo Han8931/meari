@@ -1,7 +1,7 @@
 package tui
 
 // vault_tui.go is the terminal front-end for the general learning vault. Like the
-// web GUI, it is a thin presentation layer over core.Service: a three-pane
+// desktop app, it is a thin presentation layer over core.Service: a three-pane
 // program (notes | editor | chat/study) where all real work — listing notes,
 // opening/saving them, generating a lesson, grading an essay, chatting — is done
 // by core and this model only renders the result. It reuses the existing

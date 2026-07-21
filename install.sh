@@ -179,7 +179,6 @@ from, so pick (or create) a home for it first:
     [ -f config.toml ] || cp "$repo_dir/config.example.toml" config.toml
 
     meari -vault    # the vault, in your terminal
-    meari serve     # the same vault, in your browser
     meari           # the tutor (launch dashboard)
     meari check     # verify config / AI provider setup
 
