@@ -282,12 +282,17 @@ func (t *Tutor) ChatStream(ctx context.Context, studyContext string, history []C
 		return s, nil
 	}
 
-	msgs := make([]chatMessage, 0, len(history)+2)
-	msgs = append(msgs, chatMessage{Role: "system", Content: chatSystemPrompt})
+	// One system message only, at the front: many OpenAI-compatible servers
+	// (Mistral, DeepSeek, various gateways) reject a second system message with
+	// "system message must be at the beginning". Fold the study context into
+	// the single system prompt rather than emitting it as its own message.
+	system := chatSystemPrompt
 	if studyContext != "" {
-		msgs = append(msgs, chatMessage{Role: "system", Content: "Context — what the learner is " +
-			"currently studying. Ground your answers in this material and the conversation:\n\n" + studyContext})
+		system += "\n\nContext — what the learner is currently studying. " +
+			"Ground your answers in this material and the conversation:\n\n" + studyContext
 	}
+	msgs := make([]chatMessage, 0, len(history)+1)
+	msgs = append(msgs, chatMessage{Role: "system", Content: system})
 	for _, h := range history {
 		msgs = append(msgs, chatMessage{Role: h.Role, Content: h.Content})
 	}

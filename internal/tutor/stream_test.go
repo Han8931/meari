@@ -85,3 +85,54 @@ func TestChatWithoutContextOmitsContextMessage(t *testing.T) {
 		t.Fatalf("empty context must not inject a context message:\n%s", body)
 	}
 }
+
+// Regression: ChatStream must send exactly ONE system message, at position 0,
+// even with study context — a second system message trips stricter
+// OpenAI-compatible servers ("system message must be at the beginning").
+func TestChatStreamSingleSystemMessage(t *testing.T) {
+	var body string
+	srv := sseServer(t, []string{"ok"}, &body)
+	defer srv.Close()
+
+	tut := New(config.AIConfig{Provider: "compatible", BaseURL: srv.URL, Model: "m"})
+	_, err := tut.ChatStream(context.Background(),
+		"STUDY-CONTEXT-MARKER",
+		[]ChatTurn{{Role: "user", Content: "help"}, {Role: "assistant", Content: "hi"}, {Role: "user", Content: "more"}},
+		func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var req struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("decode request: %v\n%s", err, body)
+	}
+	if len(req.Messages) == 0 {
+		t.Fatal("no messages sent")
+	}
+	systems := 0
+	for i, m := range req.Messages {
+		if m.Role == "system" {
+			systems++
+			if i != 0 {
+				t.Fatalf("system message at index %d, must be first", i)
+			}
+		}
+	}
+	if systems != 1 {
+		t.Fatalf("sent %d system messages, want exactly 1", systems)
+	}
+	// The study context must be folded INTO that single system message.
+	if !strings.Contains(req.Messages[0].Content, "STUDY-CONTEXT-MARKER") {
+		t.Fatalf("study context not folded into the system message:\n%s", req.Messages[0].Content)
+	}
+	// The last message stays the learner's turn (some servers require this too).
+	if last := req.Messages[len(req.Messages)-1]; last.Role != "user" || last.Content != "more" {
+		t.Fatalf("last message = %+v, want the final user turn", last)
+	}
+}
