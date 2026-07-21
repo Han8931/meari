@@ -5,6 +5,7 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## Quick wins
 
+- [ ] Lecture update feature. Based on the user's questions, users can customize the lectures they are learning. 
 - [ ] `:rename <title>` and `:delete` note commands (vault lifecycle, next to `:new`/`:learn`)
 - [ ] Word/line count + reading time in the editor status bar
 - [ ] `meari check` — suggest the exact fix when key/model/base-url is wrong
@@ -17,6 +18,10 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## Study & learning
 
+- [x] Resume fixing the Rust Intermediate course: review the current files under
+      `meari-course/Rust (Intermediate)`, finish the remaining revisions, compile every
+      reference solution against its tests, and verify the final lesson order. Do not
+      modify unrelated changes.
 - [ ] Spaced repetition / flashcards with SM-2 scheduling + `:review` due-queue
 - [ ] Quiz mode — multiple-choice generated from a note, AI-graded
 - [ ] Cloze deletions — auto fill-in-the-blank cards from a note's key sentences
