@@ -188,6 +188,22 @@ directory path, so nothing personal leaks on screen.)
   question (`:ask is this rigorous?`) to send it right away, or omit it to jump to the
   chat and type. (To rewrite the selection instead of discussing it, use `:polish` /
   `:edit` on it.)
+- `:capture` / `:capture all` — **keep the Q&A you asked about this lecture.** `:capture`
+  saves the last question and the tutor's answer into your own companion note at
+  `My Notes/<Lecture Title>.md`; `:capture all` saves the whole conversation. Captures
+  append under a `## Notes & Questions` heading (capturing again reuses it, never
+  duplicating the heading), and work offline. The **lecture itself is never modified** —
+  the companion note `[[wikilinks]]` back to it, so it appears in the lecture's
+  `:backlinks` panel and survives a course `:revise`. Over time these notes become your
+  own version of the material.
+- `:weave [instruction]` — **turn the pile of captured Q&A into real notes.**
+  Rewrites the companion note into one coherent document: material grouped under
+  descriptive headings by subject, each question's insight folded into the prose where it
+  belongs (no trailing list of raw `**Q:**` items), duplicate answers merged. The rewrite
+  streams into the chat as a *proposal* — `:apply` writes it, `:discard` drops it, the
+  same review flow as `:polish`. You stay on the lecture while reviewing; the proposal
+  targets the companion note directly. Add an instruction to steer it
+  (`:weave keep it terse`). Needs an AI provider — plain `:capture` works offline.
 - `:essay` — study the open note: write an answer in the editor, then `:grade` to check
   it; `:answer` reveals a model answer; `:done` ends the study
 - `:backlinks` — toggle the "↩ Linked mentions" panel under the editor, listing the

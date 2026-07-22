@@ -5,7 +5,10 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## Quick wins
 
-- [ ] Lecture update feature. Based on the user's questions, users can customize the lectures they are learning. 
+- [x] Lecture update feature — `:capture` / `:capture all` save chat Q&A to a linked
+      companion note (`My Notes/<Lecture>.md`), leaving the lecture untouched;
+      `:weave [instruction]` reorganizes that note into coherent subject-grouped
+      prose as a reviewable proposal (`:apply` / `:discard`).
 - [ ] `:rename <title>` and `:delete` note commands (vault lifecycle, next to `:new`/`:learn`)
 - [ ] Word/line count + reading time in the editor status bar
 - [ ] `meari check` — suggest the exact fix when key/model/base-url is wrong

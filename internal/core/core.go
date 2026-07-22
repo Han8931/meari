@@ -309,6 +309,37 @@ func (s *Service) PolishNote(ctx context.Context, body, instruction string, onDe
 	return stripNoteFence(full), nil
 }
 
+// DefaultWeaveInstruction is what :weave uses when given no
+// instruction: turn a chronological pile of captured Q&A into notes organized
+// by subject.
+const DefaultWeaveInstruction = "Reorganize these captured notes into a coherent set of study notes."
+
+const weaveSystemPrompt = `You are helping a learner turn the questions they asked a tutor into their own study notes.
+The note you receive holds captured question-and-answer pairs, appended in the order they were asked, plus any prose the learner already wrote.
+Rewrite it into ONE coherent, well-organized note and return ONLY that note as Markdown.
+Rules:
+- Group related material together under descriptive "##" headings by SUBJECT, not by the order the questions were asked.
+- Fold each question's insight into the prose where it belongs. Do not leave a trailing list of raw "**Q:**" items.
+- Merge duplicated or overlapping answers; keep every distinct fact the answers established.
+- Keep the learner's own wording where it is already clear, and keep any [[wikilinks]] and fenced code blocks verbatim.
+- Preserve the first line if it links back to the lecture (e.g. "Notes captured while studying [[…]].").
+- Output the note text and nothing else: no preamble, no explanation, no code fence wrapping the whole note.`
+
+// WeaveNotes rewrites a capture note (chronological Q&A) into organized study
+// notes, streaming through onDelta. The caller reviews the result before it
+// replaces the note — see the TUI's :weave -> :apply/:discard flow.
+func (s *Service) WeaveNotes(ctx context.Context, body, instruction string, onDelta func(string)) (string, error) {
+	if strings.TrimSpace(instruction) == "" {
+		instruction = DefaultWeaveInstruction
+	}
+	hist := []tutor.ChatTurn{{Role: "user", Content: "Instruction: " + instruction + "\n\nNote:\n" + body}}
+	full, err := s.tutor.StreamConversation(ctx, weaveSystemPrompt, hist, onDelta)
+	if err != nil {
+		return "", err
+	}
+	return stripNoteFence(full), nil
+}
+
 // stripNoteFence unwraps a whole-output ```…``` fence, which models sometimes
 // add around a markdown document despite being told not to. A note that merely
 // contains fenced code (fences in the middle) is left untouched.

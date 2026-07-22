@@ -98,6 +98,10 @@ type VaultModel struct {
 	polishing       bool
 	pendingEdit     string
 	pendingEditPath string
+	// pendingDetached marks a proposal that targets pendingEditPath DIRECTLY
+	// rather than the open editor (:weave rewrites the companion note
+	// while the learner stays on the lecture). :apply writes it with SaveNote.
+	pendingDetached bool
 	pendingSel      *editor.Selection
 
 	// cmdSel carries the selection from a ":"-in-Visual command into runEx for
@@ -267,7 +271,7 @@ func (m VaultModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case vOpenedMsg:
 		m.studyMode = false
-		if msg.note.Path != m.pendingEditPath {
+		if msg.note.Path != m.pendingEditPath && !m.pendingDetached {
 			m.pendingEdit, m.pendingSel = "", nil // a proposal doesn't carry to a different note
 		}
 		if msg.note.Path != m.current {
@@ -1155,10 +1159,10 @@ func (m VaultModel) confirmDelete(it sidebarItem) (tea.Model, tea.Cmd) {
 // vaultExCmds lists every command runEx accepts (aliases included), sorted,
 // for Tab completion in the command prompt.
 var vaultExCmds = []string{
-	"answer", "apply", "ask", "backlinks", "chat", "code", "compact", "copy", "course",
+	"answer", "apply", "ask", "backlinks", "capture", "chat", "code", "compact", "copy", "course",
 	"discard", "discuss", "done", "edit", "essay", "explain", "export", "fold", "gen", "grade",
 	"learn", "lesson", "links", "new", "paste", "polish", "publish", "q", "quit",
-	"revise", "sidebar", "submit", "theme", "tutor", "w", "wide", "wq", "write", "yank",
+	"revise", "sidebar", "submit", "theme", "tutor", "w", "weave", "wide", "wq", "write", "yank",
 }
 
 // runEx dispatches a vault ex-command (without the leading colon).
@@ -1222,6 +1226,10 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdAsk(args)
 	case "explain":
 		return m.cmdExplain()
+	case "capture":
+		return m.cmdCapture(args)
+	case "weave":
+		return m.cmdWeave(args)
 	case "answer":
 		return m.revealAnswer()
 	case "copy", "yank":
@@ -1268,7 +1276,7 @@ func (m VaultModel) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	default:
 		m.flash("unknown command: :" + raw +
-			"  (try :learn · :new · :essay · :grade · :answer · :done · :explain · :backlinks · :tutor · :fold · :chat · :compact · :wide · :q)")
+			"  (try :learn · :new · :essay · :grade · :answer · :done · :explain · :capture · :weave · :backlinks · :tutor · :fold · :chat · :compact · :wide · :q)")
 		return m, nil
 	}
 }
@@ -1518,6 +1526,131 @@ func (m VaultModel) cmdAsk(question string) (tea.Model, tea.Cmd) {
 	return mm, tea.Batch(mm.setFocus(paneChat), cmd)
 }
 
+// cmdCapture saves the tutor Q&A about this lecture into the learner's own
+// companion note ("My Notes/<Lecture Title>.md"). ":capture" takes the last
+// question and answer; ":capture all" takes the whole conversation. The lecture
+// itself is never modified — the companion note [[wikilink]]s back to it, so it
+// shows up in the lecture's backlinks panel and survives :revise.
+func (m VaultModel) cmdCapture(args string) (tea.Model, tea.Cmd) {
+	if m.current == "" {
+		m.flash("open a lecture first — :capture saves its Q&A to your notes")
+		return m, nil
+	}
+	arg := strings.ToLower(strings.TrimSpace(args))
+	if arg != "" && arg != "all" {
+		m.flash("usage: :capture (last Q&A) · :capture all — to reorganize them, :weave")
+		return m, nil
+	}
+
+	var exs []qaExchange
+	if arg == "all" {
+		exs = allExchanges(m.chatHist)
+	} else if ex, ok := lastExchange(m.chatHist); ok {
+		exs = []qaExchange{ex}
+	}
+	if len(exs) == 0 {
+		m.flash("nothing to capture yet — ask the tutor a question first")
+		return m, nil
+	}
+
+	title := m.currentTitle
+	if strings.TrimSpace(title) == "" {
+		title = m.current
+	}
+	path := companionPath(title)
+
+	// Start from the existing companion note, or a fresh one linking back to
+	// the lecture. A missing note is not an error: this is its first capture.
+	body := newCompanionBody(title)
+	if n, err := m.svc.OpenNote(path); err == nil {
+		body = n.Body
+	}
+	body = appendCapture(body, formatExchanges(exs))
+
+	if _, err := m.svc.SaveNote(path, body); err != nil {
+		m.flash("could not save notes: " + err.Error())
+		return m, nil
+	}
+	// Keep the editor in sync when the companion note is the one on screen.
+	if path == m.current {
+		m.editor.SetValue(body)
+	}
+
+	what := "last Q&A"
+	if arg == "all" {
+		what = itoa(len(exs)) + " exchanges"
+	}
+	m.chat.append(roleSystem, "✓ captured the "+what+" to "+path)
+	m.flash("✓ captured to " + path)
+	return m, vListCmd(m.svc) // refresh the tree so a first capture shows up
+}
+
+// cmdWeave rewrites the companion note for this lecture — a chronological pile
+// of captured Q&A — into organized study notes. The result streams into the
+// chat as a PROPOSAL: :apply writes it, :discard drops it, reusing the same
+// review flow as :polish.
+func (m VaultModel) cmdWeave(instruction string) (tea.Model, tea.Cmd) {
+	instruction = strings.TrimSpace(instruction)
+	switch {
+	case m.svc.Offline():
+		m.flash("weaving needs an AI provider — :capture still works offline")
+		return m, nil
+	case m.studyMode:
+		m.flash("not while studying — :done first, then :weave")
+		return m, nil
+	case m.streaming || m.courseCh != nil:
+		m.flash("busy — try :weave again in a moment")
+		return m, nil
+	case m.pendingEdit != "":
+		m.flash("you already have a proposed edit — :apply or :discard it first")
+		return m, nil
+	}
+
+	// Weave the companion note for the open lecture — or the open note itself
+	// when the learner is already looking at their capture note.
+	title := m.currentTitle
+	if strings.TrimSpace(title) == "" {
+		title = m.current
+	}
+	path := companionPath(title)
+	if strings.HasPrefix(m.current, companionDir+"/") {
+		path = m.current
+	}
+	n, err := m.svc.OpenNote(path)
+	if err != nil {
+		m.flash("no captured notes yet — :capture something first")
+		return m, nil
+	}
+	if strings.TrimSpace(n.Body) == "" {
+		m.flash("your notes for this lecture are empty — :capture something first")
+		return m, nil
+	}
+
+	m.pending++
+	m.loadKind = "weaving notes"
+	m.streaming = true
+	m.streamStopping = false
+	m.polishing = true // the stream's result becomes pendingEdit
+	m.pendingEditPath = path
+	m.pendingSel = nil
+	m.pendingDetached = true // applies to `path`, not the open editor
+
+	m.chat.append(roleSystem, "▶ weaving "+path+" into organized notes — :apply to use it · :discard to drop it")
+	m.chat.beginStream()
+
+	svc, body, instr := m.svc, n.Body, instruction
+	ctx, cancel := context.WithCancel(context.Background())
+	m.streamCancel = cancel
+	ch, cmd := startChatStream(ctx, func(ctx context.Context, onDelta func(string)) (string, error) {
+		return svc.WeaveNotes(ctx, body, instr, onDelta)
+	})
+	m.streamCh = ch
+	// Deliberately NOT opening the companion note: switching notes would swap
+	// the chat transcript and wipe this stream mid-flight. The learner reviews
+	// the proposal right where they were studying.
+	return m, tea.Batch(cmd, m.setFocus(paneChat))
+}
+
 // explainPrompt is the canned question :explain sends about the selection.
 const explainPrompt = "Explain the selected text in simple words, as if to someone new to the " +
 	"subject. Keep it short, avoid jargon, and give one concrete example if it helps."
@@ -1634,8 +1767,12 @@ func (m VaultModel) handleStreamChunk(msg streamChunkMsg) (tea.Model, tea.Cmd) {
 		if m.polishing {
 			m.polishing = false
 			m.pendingEdit = msg.full
-			m.chat.append(roleSystem, "— proposed edit ready · :apply to replace the note · :discard to drop —")
-			m.flash("proposed edit ready — :apply or :discard")
+			target := "the note"
+			if m.pendingDetached {
+				target = m.pendingEditPath
+			}
+			m.chat.append(roleSystem, "— proposal ready · :apply to write "+target+" · :discard to drop —")
+			m.flash("proposal ready — :apply or :discard")
 			return m, nil
 		}
 		if m.courseIntake {
@@ -1824,6 +1961,20 @@ func (m VaultModel) cmdApplyEdit() (tea.Model, tea.Cmd) {
 		m.flash("nothing to apply — :polish or :edit first")
 		return m, nil
 	}
+	if m.pendingDetached {
+		path, body := m.pendingEditPath, m.pendingEdit
+		m.pendingEdit, m.pendingSel, m.pendingDetached = "", nil, false
+		if _, err := m.svc.SaveNote(path, body); err != nil {
+			m.flash("could not save " + path + ": " + err.Error())
+			return m, nil
+		}
+		if path == m.current { // keep the editor in sync if it happens to be open
+			m.editor.SetValue(body)
+		}
+		m.chat.append(roleSystem, "— woven notes written to "+path+" —")
+		m.flash("notes updated — " + path)
+		return m, vListCmd(m.svc)
+	}
 	if m.current != m.pendingEditPath {
 		m.pendingEdit, m.pendingSel = "", nil
 		m.flash("the proposed edit was for another note — discarded")
@@ -1840,7 +1991,7 @@ func (m VaultModel) cmdApplyEdit() (tea.Model, tea.Cmd) {
 		m.editor.ReplaceAll(m.pendingEdit)
 	}
 	body := m.editor.Value()
-	m.pendingEdit, m.pendingSel = "", nil
+	m.pendingEdit, m.pendingSel, m.pendingDetached = "", nil, false
 	m.chat.append(roleSystem, "— edit applied · press u in the editor to undo —")
 	m.flash("note updated — u to undo")
 	return m, tea.Batch(m.setFocus(paneEditor), vSaveCmd(m.svc, m.current, body))
@@ -1852,7 +2003,7 @@ func (m VaultModel) cmdDiscardEdit() (tea.Model, tea.Cmd) {
 		m.flash("no proposed edit to discard")
 		return m, nil
 	}
-	m.pendingEdit, m.pendingSel = "", nil
+	m.pendingEdit, m.pendingSel, m.pendingDetached = "", nil, false
 	m.chat.append(roleSystem, "— proposed edit discarded —")
 	m.flash("edit discarded")
 	return m, nil

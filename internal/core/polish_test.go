@@ -102,3 +102,42 @@ func TestStripNoteFenceLeavesInnerFences(t *testing.T) {
 		t.Fatalf("inner fence wrongly stripped:\n%q", got)
 	}
 }
+
+// WeaveNotes streams like PolishNote but carries the reorganizing system
+// prompt, and falls back to the default instruction.
+func TestWeaveNotesStreamsAndInstructs(t *testing.T) {
+	var body string
+	srv := polishServer(t, []string{"## Topic\n", "\norganized prose"}, &body)
+	defer srv.Close()
+	svc := polishService(t, srv.URL)
+
+	full, err := svc.WeaveNotes(context.Background(),
+		"**Q:** what is dyn?\n\nDynamic dispatch.", "group by subject", func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full != "## Topic\n\norganized prose" {
+		t.Fatalf("full = %q", full)
+	}
+	if !strings.Contains(body, "group by subject") || !strings.Contains(body, "what is dyn?") {
+		t.Fatalf("request missing instruction or note:\n%s", body)
+	}
+	// The system prompt must tell the model to reorganize, not to copy-edit.
+	if !strings.Contains(body, "study notes") {
+		t.Fatalf("weave system prompt not sent:\n%s", body)
+	}
+}
+
+func TestWeaveNotesDefaultInstruction(t *testing.T) {
+	var body string
+	srv := polishServer(t, []string{"ok"}, &body)
+	defer srv.Close()
+	svc := polishService(t, srv.URL)
+
+	if _, err := svc.WeaveNotes(context.Background(), "some captures", "", func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, DefaultWeaveInstruction) {
+		t.Fatalf("default instruction not used:\n%s", body)
+	}
+}
