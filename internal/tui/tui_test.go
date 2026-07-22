@@ -1488,3 +1488,61 @@ func TestTutorChatToggle(t *testing.T) {
 		t.Fatal(":chat must be refused in the chat-only view")
 	}
 }
+
+// :capture works in the TUTOR TUI (where courses are actually taken), not just
+// the vault — the bug that shipped was it being vault-only. It saves the
+// lesson's Q&A to a companion note without touching the lecture.
+func TestTutorCaptureWritesCompanionNote(t *testing.T) {
+	m := readyModel(t) // seeded go-beginner curriculum, offline tutor
+	tpc, ok := m.topicByID[m.currentTopicID]
+	if !ok || tpc.Title == "" {
+		t.Fatal("readyModel should have a current lesson")
+	}
+
+	// Nothing asked yet.
+	tm, _ := m.runEx("capture")
+	m = tm.(Model)
+	if !strings.Contains(m.notice, "nothing to capture") {
+		t.Fatalf("notice = %q", m.notice)
+	}
+
+	m.chatHist = []tutor.ChatTurn{
+		{Role: "user", Content: "why a pointer receiver?"},
+		{Role: "assistant", Content: "To mutate the receiver."},
+	}
+	tm, _ = m.runEx("capture")
+	m = tm.(Model)
+	if !strings.Contains(m.notice, "captured") {
+		t.Fatalf("capture notice = %q", m.notice)
+	}
+
+	companion, err := m.deps.Svc.OpenNote(companionPath(tpc.Title))
+	if err != nil {
+		t.Fatalf("companion note not created: %v", err)
+	}
+	for _, want := range []string{"[[" + tpc.Title + "]]", "why a pointer receiver?", "To mutate the receiver."} {
+		if !strings.Contains(companion.Body, want) {
+			t.Fatalf("companion missing %q:\n%s", want, companion.Body)
+		}
+	}
+}
+
+// :capture is registered in the tutor command table; :weave points at the vault.
+func TestTutorCaptureCommandRegistered(t *testing.T) {
+	found := false
+	for _, c := range tutorExCmds {
+		if c == "capture" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("capture missing from tutorExCmds")
+	}
+
+	m := readyModel(t)
+	tm, _ := m.runEx("weave")
+	m = tm.(Model)
+	if !strings.Contains(m.notice, ":vault") {
+		t.Fatalf(":weave in the tutor TUI should point at the vault, got %q", m.notice)
+	}
+}

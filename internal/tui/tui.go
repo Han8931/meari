@@ -1030,7 +1030,7 @@ func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // tutorExCmds lists every command runEx accepts (aliases included), sorted,
 // for Tab completion in the command prompt.
 var tutorExCmds = []string{
-	"answer", "chat", "clear", "compact", "config", "copy", "course", "export", "fold",
+	"answer", "capture", "chat", "clear", "compact", "config", "copy", "course", "export", "fold",
 	"help", "notes", "paste", "progress", "q", "quit", "run", "sidebar",
 	"subject", "submit", "theme", "topic", "vault", "view", "wide", "yank",
 }
@@ -1134,6 +1134,11 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 	case "vault", "notes":
 		m.exit = SwitchToVault
 		return m, m.quit() // saves the draft, then the shell loop opens the vault
+	case "capture":
+		return m.cmdCapture(strings.Join(fields[1:], " "))
+	case "weave":
+		m.flash(":weave reorganizes your captured notes — type :vault, open the note, then :weave")
+		return m, nil
 	case "learn", "essay", "grade":
 		m.flash(":" + fields[0] + " lives in the vault — type :vault to switch to it")
 		return m, nil
@@ -1251,6 +1256,62 @@ func (m Model) cmdChat() (tea.Model, tea.Cmd) {
 		m.flash("Chat pane hidden — :chat to bring it back")
 	}
 	return m, cmd
+}
+
+// cmdCapture saves the tutor Q&A about the current course lecture into the
+// learner's own companion note ("My Notes/<Lecture>.md"), the same as the vault
+// TUI's :capture — but reachable while actually taking a course here. ":capture"
+// takes the last Q&A, ":capture all" the whole conversation. The lecture is
+// never modified; the companion note [[wikilink]]s back to it. To reorganize
+// the captures (:weave), switch to the vault and open the note.
+func (m Model) cmdCapture(args string) (tea.Model, tea.Cmd) {
+	if m.deps.Svc == nil {
+		m.flash("no vault available to save notes into")
+		return m, nil
+	}
+	title := ""
+	if t, ok := m.topicByID[m.currentTopicID]; ok {
+		title = t.Title
+	}
+	if strings.TrimSpace(title) == "" {
+		m.flash("open a course lesson first — :capture saves its Q&A to your notes")
+		return m, nil
+	}
+	arg := strings.ToLower(strings.TrimSpace(args))
+	if arg != "" && arg != "all" {
+		m.flash("usage: :capture (last Q&A) · :capture all — to reorganize them, :vault then :weave")
+		return m, nil
+	}
+
+	var exs []qaExchange
+	if arg == "all" {
+		exs = allExchanges(m.chatHist)
+	} else if ex, ok := lastExchange(m.chatHist); ok {
+		exs = []qaExchange{ex}
+	}
+	if len(exs) == 0 {
+		m.flash("nothing to capture yet — ask the tutor a question first")
+		return m, nil
+	}
+
+	path := companionPath(title)
+	body := newCompanionBody(title)
+	if n, err := m.deps.Svc.OpenNote(path); err == nil {
+		body = n.Body
+	}
+	body = appendCapture(body, formatExchanges(exs))
+	if _, err := m.deps.Svc.SaveNote(path, body); err != nil {
+		m.flash("could not save notes: " + err.Error())
+		return m, nil
+	}
+
+	what := "last Q&A"
+	if arg == "all" {
+		what = itoa(len(exs)) + " exchanges"
+	}
+	m.chat.append(roleSystem, "✓ captured the "+what+" to "+path+" (open it in :vault)")
+	m.flash("✓ captured to " + path)
+	return m, nil
 }
 
 // cmdAnswer reveals a model solution for the current challenge. The learner
@@ -1487,6 +1548,7 @@ func helpView() string {
 		"  :compact / :wide   shrink/grow the editor (frees chat space)",
 		"  :theme [<name>]    switch color theme (no name lists them)",
 		"  :answer            reveal a model solution for the open challenge",
+		"  :capture [all]     save the lesson's Q&A to your own note (My Notes/<Lesson>.md)",
 		"  :vault             switch to the notes vault (Obsidian-style)",
 		"  :progress          progress summary",
 		"  :copy [code|all]   copy the tutor's last reply / its code / everything",
