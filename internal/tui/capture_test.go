@@ -346,3 +346,38 @@ func TestWeaveIsTopLevelCommand(t *testing.T) {
 		t.Fatalf("`:capture weave` should now be a usage error, got %q", m.notice)
 	}
 }
+
+// Alt+Enter must insert a newline through the FULL model path (parent + chat),
+// not submit — the parent's Enter=submit check has to exclude the Alt modifier.
+// (A unit test on chatModel alone misses this; the parent intercepts first.)
+func TestAltEnterInsertsNewlineNotSubmit(t *testing.T) {
+	m := newTestVaultModel(t)
+	m = openNote(t, m, "N.md", "# n\n")
+	m.setFocus(paneChat)
+
+	send := func(msg tea.Msg) {
+		tm, _ := m.Update(msg)
+		m = tm.(VaultModel)
+	}
+	for _, r := range "one" {
+		send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	send(tea.KeyMsg{Type: tea.KeyEnter, Alt: true}) // alt+enter
+	for _, r := range "two" {
+		send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	if m.streaming {
+		t.Fatal("alt+enter submitted the message instead of inserting a newline")
+	}
+	if got := m.chat.input.Value(); got != "one\ntwo" {
+		t.Fatalf("alt+enter did not insert a newline through the parent: %q", got)
+	}
+
+	// Plain Enter still submits (offline reply streams), proving we only
+	// excluded the Alt modifier, not Enter itself.
+	send(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.streaming {
+		t.Fatal("plain Enter should still submit the message")
+	}
+}

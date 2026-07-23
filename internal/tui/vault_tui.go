@@ -659,7 +659,9 @@ func (m VaultModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cmdHist.Open()
 			return m, m.cmdLine.Focus()
 		}
-		if msg.Type == tea.KeyEnter && !m.chat.inNormal() {
+		// Alt+Enter is a newline request (handled in chat.go), NOT a submit —
+		// the modifier is what distinguishes it from a plain Enter.
+		if msg.Type == tea.KeyEnter && !msg.Alt && !m.chat.inNormal() {
 			return m.submitChat()
 		}
 		var cmd tea.Cmd

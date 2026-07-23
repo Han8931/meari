@@ -718,7 +718,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.chat.inNormal() && msg.String() == ":" {
 			return m.openCmdLine()
 		}
-		if msg.Type == tea.KeyEnter && !m.chat.inNormal() {
+		// Alt+Enter is a newline request (handled in chat.go), NOT a submit —
+		// the modifier is what distinguishes it from a plain Enter.
+		if msg.Type == tea.KeyEnter && !msg.Alt && !m.chat.inNormal() {
 			return m.submitChat()
 		}
 		var cmd tea.Cmd
