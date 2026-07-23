@@ -346,6 +346,10 @@ type a question and press `Enter` to ask the tutor.
 - An animated **progress line** ("⠹ tutor thinking…") shows inside the pane while the
   AI works. The input area sits in a **shaded grey field** under a `>` prompt and is
   **three rows tall** so longer questions wrap visibly.
+- **`Enter` sends** your message; **`Ctrl-J` (or `Alt-Enter`) inserts a line break** for a
+  multi-line question. (Terminals send the same byte for `Enter` and `Ctrl-Enter`, so a
+  true Ctrl-Enter binding can't work — `Ctrl-J` is the reliable "newline" key, and on many
+  terminals it's exactly what Ctrl-Enter emits anyway.)
 - The transcript is **per-topic**: switching topics/notes gives you a clean pane for the
   new one, and returning to a previous topic restores its chat and study history.
 - Replies **stream in live**, and every question carries the **current context** — the

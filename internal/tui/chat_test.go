@@ -908,3 +908,40 @@ func TestChatStoreRoundtrip(t *testing.T) {
 		t.Fatal("empty dataDir should load empty")
 	}
 }
+
+// Ctrl-J / Alt-Enter insert a newline into the draft (multi-line input), while
+// plain Enter stays the submit key (the parent handles that, not the chat).
+func TestChatInputNewlineKeys(t *testing.T) {
+	c := newChat()
+	c.setSize(40, 12)
+	c.focus()
+
+	type_ := func(s string) {
+		for _, r := range s {
+			c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+	}
+	type_("line one")
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyCtrlJ}) // ctrl+j -> newline
+	type_("line two")
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x"), Alt: true}) // sanity: a normal alt-key isn't a newline
+
+	if got := c.input.Value(); got != "line one\nline twox" {
+		t.Fatalf("ctrl+j did not insert a newline: %q", got)
+	}
+
+	// Alt+Enter also inserts a newline.
+	c.input.Reset()
+	type_("a")
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true}) // alt+enter
+	type_("b")
+	if got := c.input.Value(); got != "a\nb" {
+		t.Fatalf("alt+enter did not insert a newline: %q", got)
+	}
+
+	// submit() returns the full multi-line draft intact.
+	text, ok := c.submit()
+	if !ok || text != "a\nb" {
+		t.Fatalf("submit() = %q, %v; want the multi-line draft", text, ok)
+	}
+}

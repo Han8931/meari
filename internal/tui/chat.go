@@ -674,6 +674,19 @@ func (c chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 			c.enterNormal()
 			return c, nil
 		}
+		// Enter SUBMITS the message (the parent intercepts it), so a multi-line
+		// question inserts a line break with Ctrl-J or Alt-Enter instead — we
+		// feed the textarea a plain Enter, which it turns into a newline. True
+		// Ctrl-Enter/Shift-Enter are indistinguishable from Enter in most
+		// terminals (same byte, CR), but a few send them distinctly, so accept
+		// those spellings too; on many terminals Ctrl-Enter physically sends
+		// what Ctrl-J does anyway.
+		switch msg.String() {
+		case "ctrl+j", "alt+enter", "ctrl+enter", "shift+enter":
+			var cmd tea.Cmd
+			c.input, cmd = c.input.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			return c, cmd
+		}
 	}
 
 	var cmd tea.Cmd
