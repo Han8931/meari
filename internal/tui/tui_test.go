@@ -166,7 +166,7 @@ func TestRunResultRecordsProgressAndChainsFeedback(t *testing.T) {
 		t.Fatalf("chained cmd produced %T, want feedbackMsg", msg)
 	}
 	m = step(t, m, fb)
-	if !strings.Contains(m.chat.view(), "tutor") {
+	if !strings.Contains(m.chat.view(), "meari") {
 		t.Errorf("feedback not shown in chat transcript:\n%s", m.chat.view())
 	}
 }

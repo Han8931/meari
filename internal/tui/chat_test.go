@@ -44,9 +44,9 @@ func TestNormalizeRuneWidthNarrowsAmbiguous(t *testing.T) {
 func TestChatBusyLineShowsProgress(t *testing.T) {
 	c := newChat()
 	c.setSize(40, 12)
-	c.setBusy("tutor thinking")
+	c.setBusy("meari thinking")
 	c.tickBusy()
-	if !strings.Contains(c.view(), "tutor thinking…") {
+	if !strings.Contains(c.view(), "meari thinking…") {
 		t.Fatalf("busy line missing from view:\n%s", c.view())
 	}
 	// The pane must not grow: busy steals a transcript row instead.
@@ -83,7 +83,7 @@ func TestChatSpeakerBadges(t *testing.T) {
 	c.append(roleUser, "question")
 	c.append(roleTutor, "reply")
 	content := c.renderBlock(chatBlock{role: roleTutor, text: "reply"})
-	if !strings.Contains(content, chatTutorBadge.Render(" tutor ")) {
+	if !strings.Contains(content, chatTutorBadge.Render(" meari ")) {
 		t.Fatalf("tutor badge missing:\n%q", content)
 	}
 	content = c.renderBlock(chatBlock{role: roleUser, text: "question"})
@@ -124,7 +124,7 @@ func TestEnableTUIColorForcesANSIProfile(t *testing.T) {
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 
 	enableTUIColor()
-	if got := chatTutorBadge.Render(" tutor "); !strings.Contains(got, "\x1b[") {
+	if got := chatTutorBadge.Render(" meari "); !strings.Contains(got, "\x1b[") {
 		t.Fatalf("TUI color profile should emit ANSI, got %q", got)
 	}
 }
@@ -190,7 +190,7 @@ func TestChatDragSelectExtractsText(t *testing.T) {
 	c := newChat()
 	c.setSize(40, 12)
 	c.append(roleTutor, "alpha beta gamma\nsecond line here")
-	// contentLines: 0 = " tutor " badge, 1-2 = the body lines.
+	// contentLines: 0 = " meari " badge, 1-2 = the body lines.
 
 	// Sweep from the start of body line 1 to column 4 of line 2 (inclusive).
 	c.startSelect(0, 1)
@@ -295,7 +295,7 @@ func TestLessonPaneReadOnlyView(t *testing.T) {
 		t.Fatalf("read-only viewport height = %d, want the full 12", c.vp.Height)
 	}
 	view := c.view()
-	if strings.Contains(view, "> ") || strings.Contains(view, "ask the tutor") {
+	if strings.Contains(view, "> ") || strings.Contains(view, "ask meari") {
 		t.Fatalf("read-only pane rendered an input prompt:\n%q", view)
 	}
 	if rows := strings.Count(view, "\n") + 1; rows > 12 {

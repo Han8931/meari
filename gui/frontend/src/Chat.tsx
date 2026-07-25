@@ -55,11 +55,11 @@ export default function Chat({ notePath }: ChatProps) {
     <div className="chat">
       <div className="chat-log">
         {turns.length === 0 && (
-          <div className="chat-empty">Ask the tutor about this note.</div>
+          <div className="chat-empty">Ask meari about this note.</div>
         )}
         {turns.map((t, i) => (
           <div key={i} className={"turn turn-" + t.role}>
-            <span className="badge">{t.role === "user" ? "you" : "tutor"}</span>
+            <span className="badge">{t.role === "user" ? "you" : "meari"}</span>
             <div className="turn-body">{t.content || (streaming ? "…" : "")}</div>
           </div>
         ))}
@@ -67,7 +67,7 @@ export default function Chat({ notePath }: ChatProps) {
       <div className="chat-input">
         <textarea
           value={draft}
-          placeholder="ask the tutor…"
+          placeholder="ask meari…"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {

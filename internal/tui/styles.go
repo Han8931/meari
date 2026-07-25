@@ -73,7 +73,7 @@ var (
 	markedItem = lipgloss.NewStyle().Foreground(wipColor)
 
 	// Chat transcript styles. Each speaker turn opens with a colored BADGE on
-	// its own line (" you " / " tutor " / " lesson " on a filled background) so
+	// its own line (" you " / " meari " / " lesson " on a filled background) so
 	// who is talking is unmistakable even when skimming; the message body stays
 	// a calm, high-contrast neutral so long passages read comfortably.
 	chatBodyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
@@ -83,7 +83,7 @@ var (
 	chatLessonBadge = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("222")) // lesson — warm gold
 	chatQuizBadge   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("215")) // quiz — peach
 
-	// chatBusyStyle renders the in-pane "⠹ tutor thinking…" progress line.
+	// chatBusyStyle renders the in-pane "⠹ meari thinking…" progress line.
 	chatBusyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("79")).Italic(true)
 
 	// Input-area styles. A dim rule (chatInputRule) separates the transcript

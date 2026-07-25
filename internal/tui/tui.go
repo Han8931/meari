@@ -1292,7 +1292,7 @@ func (m Model) cmdCapture(args string) (tea.Model, tea.Cmd) {
 		exs = []qaExchange{ex}
 	}
 	if len(exs) == 0 {
-		m.flash("nothing to capture yet — ask the tutor a question first")
+		m.flash("nothing to capture yet — ask meari a question first")
 		return m, nil
 	}
 
@@ -1553,7 +1553,7 @@ func helpView() string {
 		"  :capture [all]     save the lesson's Q&A to your own note (My Notes/<Lesson>.md)",
 		"  :vault             switch to the notes vault (Obsidian-style)",
 		"  :progress          progress summary",
-		"  :copy [code|all]   copy the tutor's last reply / its code / everything",
+		"  :copy [code|all]   copy meari's last reply / its code / everything",
 		"  :paste             paste the clipboard into the chat input",
 		"  :clear             clear the chat transcript",
 		"  :clear progress    erase saved progress (asks first)",
@@ -1829,7 +1829,7 @@ func (m Model) chatContext() string {
 // as context so answers relate to what's on screen.
 func (m Model) submitChat() (tea.Model, tea.Cmd) {
 	if m.streaming {
-		m.flash("the tutor is still replying — one question at a time")
+		m.flash("meari is still replying — one question at a time")
 		return m, nil
 	}
 	text, ok := m.chat.submit()
@@ -1839,7 +1839,7 @@ func (m Model) submitChat() (tea.Model, tea.Cmd) {
 	m.chat.append(roleUser, text)
 	m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "user", Content: text})
 	m.pending++
-	m.loadKind = "tutor thinking"
+	m.loadKind = "meari thinking"
 	m.streaming = true
 	m.chat.beginStream()
 
@@ -2268,7 +2268,7 @@ func (m *Model) handleRunResult(msg runResultMsg) tea.Cmd {
 	m.rebuildSidebar()
 
 	m.pending++
-	m.loadKind = "tutor feedback"
+	m.loadKind = "meari feedback"
 	return feedbackCmd(m.deps.Tutor, msg.ch, msg.code, msg.res.Output, msg.res.Passed)
 }
 

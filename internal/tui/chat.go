@@ -106,7 +106,7 @@ func (c *chatModel) setCodeLang(lang string) {
 
 func newChat() chatModel {
 	in := textarea.New()
-	in.Placeholder = "ask the tutor…"
+	in.Placeholder = "ask meari…"
 	// Show the "> " prompt only on the first line; blank the wrapped/extra rows
 	// so the typing area reads as one prompt, not a column of them.
 	in.SetPromptFunc(2, func(line int) string {
@@ -179,7 +179,7 @@ func (c *chatModel) relayout() {
 }
 
 // setBusy shows (or, with "", hides) the animated progress line. The label
-// names the operation, e.g. "tutor thinking".
+// names the operation, e.g. "meari thinking".
 func (c *chatModel) setBusy(label string) {
 	if c.busy == label {
 		return
@@ -398,7 +398,7 @@ func (c chatModel) renderBlock(blk chatBlock) string {
 	case roleUser:
 		return chatUserBadge.Render(" you ") + "\n" + c.renderRichBody(blk.text)
 	case roleTutor:
-		return chatTutorBadge.Render(" tutor ") + "\n" + c.renderRichBody(blk.text)
+		return chatTutorBadge.Render(" meari ") + "\n" + c.renderRichBody(blk.text)
 	case roleLesson:
 		return chatLessonBadge.Render(" lesson ") + "\n" + c.renderRichBody(blk.text)
 	case roleQuiz:
@@ -1009,9 +1009,9 @@ func copyChat(c *chatModel, what string) string {
 	}
 	if !ok {
 		if what == "code" {
-			return "no code block found in the tutor's replies"
+			return "no code block found in meari's replies"
 		}
-		return "nothing to copy yet — ask the tutor something first"
+		return "nothing to copy yet — ask meari something first"
 	}
 	if err := copyToClipboard(text); err != nil {
 		// The native clipboard failed (e.g. headless/SSH) but the OSC 52 escape

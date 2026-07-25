@@ -1478,7 +1478,7 @@ func (m VaultModel) chatContext() string {
 // a :course intake it continues the requirements interview instead.
 func (m VaultModel) submitChat() (tea.Model, tea.Cmd) {
 	if m.streaming {
-		m.flash("the tutor is still replying — one question at a time")
+		m.flash("meari is still replying — one question at a time")
 		return m, nil
 	}
 	text, ok := m.chat.submit()
@@ -1503,7 +1503,7 @@ func (m VaultModel) submitChat() (tea.Model, tea.Cmd) {
 // same selection.
 func (m VaultModel) cmdAsk(question string) (tea.Model, tea.Cmd) {
 	if m.streaming {
-		m.flash("the tutor is still replying — try again in a moment")
+		m.flash("meari is still replying — try again in a moment")
 		return m, nil
 	}
 	question = strings.TrimSpace(question)
@@ -1551,7 +1551,7 @@ func (m VaultModel) cmdCapture(args string) (tea.Model, tea.Cmd) {
 		exs = []qaExchange{ex}
 	}
 	if len(exs) == 0 {
-		m.flash("nothing to capture yet — ask the tutor a question first")
+		m.flash("nothing to capture yet — ask meari a question first")
 		return m, nil
 	}
 
@@ -1699,7 +1699,7 @@ func groundHistory(hist []tutor.ChatTurn, excerpt string) []tutor.ChatTurn {
 // via CourseIntakeStream), the note-grounded tutor chat otherwise.
 func (m VaultModel) streamReply() (tea.Model, tea.Cmd) {
 	m.pending++
-	m.loadKind = "tutor thinking"
+	m.loadKind = "meari thinking"
 	m.streaming = true
 	m.streamStopping = false
 	m.chat.beginStream()
@@ -1809,7 +1809,7 @@ func (m VaultModel) cmdCourse(args string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.streaming {
-		m.flash("the tutor is still replying — try :course again in a moment")
+		m.flash("meari is still replying — try :course again in a moment")
 		return m, nil
 	}
 	m.courseSeed = m.current
