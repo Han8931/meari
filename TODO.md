@@ -74,6 +74,15 @@ The Wails desktop app exposes a subset of the TUI — bring the AI/vault feature
 
 ## Recently done
 
+- [x] More Vim in the editor — text objects (`iw`/`aw`, quotes, brackets) with `d`/`c`/`y`
+      (`ciw`, `di"`, `da{`…), `y` with motions (`yw`/`y$`/`yiw`), `X`/`s`/`S`, backward
+      search `?`, word search `*`/`#`, direction-aware `n`/`N`; lecture reader gained
+      counts (`5j`) and `f`/`F`/`t`/`T` + `;`/`,`. (Still missing: `.` repeat, marks,
+      macros, blockwise Visual, `:s` — see the audit.)
+- [x] Launch screen — daily learning-quote epigraph (page-sage style, `internal/quotes`)
+      + a "Just chat with meari" blank-tutor option (`dashScratch`)
+- [x] Lecture UX — Check-answer button hidden while reading a lecture (quiz rows only);
+      mouse-wheel scrolling carries the reader cursor so keys don't snap the view back
 - [x] Tutor lecture pane is a Vim reader/editor — keyboard cursor + Visual selection
       (`hjkl`/`w`/`b`/`gg`/`G`, `v`+`y`/`⌥c` copy), `/` search with `n`/`N`, `gd` follows the
       `[[wikilink]]` under the cursor to that lecture, `⌃o`/`⌃i` jump back/forward across

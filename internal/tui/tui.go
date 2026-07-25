@@ -28,6 +28,7 @@ import (
 	"meari/internal/editor"
 	"meari/internal/executor"
 	"meari/internal/progress"
+	"meari/internal/quotes"
 	"meari/internal/tutor"
 )
 
@@ -78,6 +79,7 @@ type dashKind int
 const (
 	dashContinue dashKind = iota // resume the saved session
 	dashCourse                   // study a course (seeded or learner-built)
+	dashScratch                  // a blank tutor: no lesson, just chat with meari
 	dashTopic                    // ask the AI for a custom topic
 	dashVault                    // switch to the notes vault
 )
@@ -129,11 +131,12 @@ type Model struct {
 	// Startup flow state (phaseSetup).
 	setupStep    setupStep
 	setupCursor  int
-	setupHistory []setupStep // for Esc = back
-	dash         []dashEntry // the launch dashboard's rows
-	dashCursor   int         // dashboard position, restored when Esc returns to it
-	lang         string      // the running course's id (curriculum.Lang)
-	level        string      // chosen experience level
+	setupHistory []setupStep  // for Esc = back
+	dash         []dashEntry  // the launch dashboard's rows
+	dashCursor   int          // dashboard position, restored when Esc returns to it
+	quote        quotes.Quote // the launch screen's daily epigraph
+	lang         string       // the running course's id (curriculum.Lang)
+	level        string       // chosen experience level
 
 	topic      string
 	current    tutor.Challenge
@@ -349,6 +352,7 @@ func newModel(d Deps) Model {
 		chatByKey:   map[string][]chatBlock{},
 		histByKey:   map[string][]tutor.ChatTurn{},
 		spin:        sp,
+		quote:       quotes.Daily(time.Now()),
 	}
 	m.editor.SetShowLineNumbers(d.Cfg.LineNumbers())
 	m.seedOrder()
@@ -413,6 +417,8 @@ func (m Model) dashboardEntries() []dashEntry {
 		})
 	}
 	return append(out,
+		dashEntry{kind: dashScratch, section: "Or", title: "Just chat with meari",
+			meta: "a blank tutor — ask anything, no lesson"},
 		dashEntry{kind: dashTopic, section: "Or", title: "A topic of my own",
 			meta: "the AI writes a lesson + challenge"},
 		dashEntry{kind: dashVault, section: "Or", title: "Open the vault",
@@ -832,6 +838,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case paneLesson:
 			var cmd tea.Cmd
 			m.lesson, cmd = m.lesson.Update(msg)
+			// Carry the reader cursor along with the wheel so a following keypress
+			// doesn't snap the view back to where the cursor was.
+			m.lesson.clampCursorToView()
 			return m, cmd
 		case paneSidebar:
 			// The sidebar has no viewport; move the selection instead (ranger-style).
@@ -1635,7 +1644,8 @@ func helpView() string {
 		"  ⌃c                 quit",
 		"",
 		bold("Lecture pane (Vim reader)"),
-		"  h j k l · w b · gg G   move the cursor",
+		"  h j k l · w b · gg G   move the cursor (counts too: 5j, 3w)",
+		"  f/F/t/T x · ; ,    jump to a character on the line, repeat",
 		"  v then motion, y   select text and copy it (⌥c too)",
 		"  / then n / N       search the lecture, next / previous match",
 		"  gd                 follow the [[wikilink]] under the cursor",
@@ -1797,6 +1807,9 @@ func (m Model) setupSelect() (tea.Model, tea.Cmd) {
 			m.phase = phaseReady
 			m.topicInput.Blur()
 			return m.switchCourse(e.id)
+		case dashScratch:
+			m.topicInput.Blur()
+			return m.startScratch()
 		case dashTopic:
 			m.curriculum = false
 			m.advance(stepTopic)
@@ -1844,6 +1857,20 @@ func (m Model) finishResume() (tea.Model, tea.Cmd) {
 	m.phase = phaseReady
 	m.topicInput.Blur()
 	return m, m.loadCurriculum(last.Lang, last.Level, last.TopicID)
+}
+
+// startScratch drops into a blank tutor: no course, no lesson, no challenge —
+// just an open conversation with meari. Material can be loaded later with
+// :topic or :vault.
+func (m Model) startScratch() (tea.Model, tea.Cmd) {
+	m.phase = phaseReady
+	m.curriculum = false
+	m.topic = ""
+	m.current = tutor.Challenge{}
+	*m.curID = ""
+	m.layout()
+	m.chat.append(roleSystem, "Blank tutor — ask meari anything. :topic <course> loads a lesson · :vault opens your notes.")
+	return m, m.setFocus(paneChat)
 }
 
 // forwardToFocus routes non-key messages (e.g. cursor blinks) to whatever
@@ -3220,12 +3247,49 @@ func (m Model) dashboardView() string {
 
 	greeting := lipgloss.NewStyle().Bold(true).Render("What will you learn today?")
 	body := greeting + "\n\n" + strings.Join(rows, "\n")
+	if q := m.quoteView(colW); q != "" {
+		body += "\n\n\n" + q
+	}
 
 	head := titleBar.Width(m.width).Render("Meari — 메아리")
 	hints := "↑/↓ or j/k move · enter choose · q / esc quit"
 	foot := statusBar.Width(m.width).Render(hintStyle.Render(hints))
 	mid := lipgloss.Place(m.width, m.height-2, lipgloss.Center, lipgloss.Center, body)
 	return head + "\n" + mid + "\n" + foot
+}
+
+// quoteView renders the daily epigraph beneath the launch options: an italic,
+// gutter-barred line with a dim attribution (the page-sage style).
+func (m Model) quoteView(width int) string {
+	q := m.quote
+	if strings.TrimSpace(q.Text) == "" {
+		return ""
+	}
+	italic := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("245"))
+	bar := backlinkHeaderStyle.Render("▌ ") // teal accent, matches the app
+	var lines []string
+	for _, ln := range wrapWords("❝ "+q.Text+" ❞", clampMin(width-3, 20)) {
+		lines = append(lines, bar+italic.Render(ln))
+	}
+	attribution := "— " + q.Author
+	if q.Work != "" {
+		attribution += ", " + q.Work
+	}
+	lines = append(lines, "  "+hintStyle.Render(truncate(attribution, width-2)))
+	// Pad every line to a common width so the gutter bar stays left-aligned as a
+	// block — the launch screen centers each line individually.
+	maxw := 0
+	for _, ln := range lines {
+		if w := lipgloss.Width(ln); w > maxw {
+			maxw = w
+		}
+	}
+	for i, ln := range lines {
+		if pad := maxw - lipgloss.Width(ln); pad > 0 {
+			lines[i] = ln + strings.Repeat(" ", pad)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // setupMenu renders the current selection step's options with the cursor row
@@ -3338,6 +3402,11 @@ func (m Model) checkButtonBounds() (x0, x1 int, ok bool) {
 	if m.current.ID == "" {
 		return 0, 0, false
 	}
+	// The button runs the challenge's tests, so it belongs on quiz/challenge
+	// rows — never while reading a lecture (where the editor isn't even shown).
+	if m.curriculum && m.currentTopicView == "lesson" {
+		return 0, 0, false
+	}
 	w := lipgloss.Width(checkButtonText)
 	x0 = m.width - 1 - w // titleBar pads 1 on the right, so the button ends at width-2
 	x1 = m.width - 1
@@ -3398,7 +3467,7 @@ func (m Model) statusView() string {
 	case m.focus == paneLesson && m.lessonEditing:
 		hints = "editing lecture · ⌃s/:w save · esc/:q back · full Vim"
 	case m.focus == paneLesson:
-		hints = "hjkl move · v select · y/⌥c copy · / search · gd link · ⌃o/⌃i back/fwd · ,ff jump · i/a/o edit"
+		hints = "hjkl move · f find · v select · y copy · / search · gd link · ⌃o/⌃i back/fwd · ,ff jump · i edit"
 	case m.focus == paneChat && m.chatCentric():
 		hints = "enter chat · :submit grade your answer · ⌥o/:copy copy · ⌃f/⌃b page · :view code"
 	case m.focus == paneChat:

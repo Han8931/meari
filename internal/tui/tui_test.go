@@ -1164,6 +1164,61 @@ func TestBareTopicOpensPicker(t *testing.T) {
 	}
 }
 
+// The blank-tutor launch option drops into a usable chat session with no course
+// or challenge loaded.
+func TestStartScratch(t *testing.T) {
+	m := newModel(testDepsSeeded(t))
+	m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	tm, _ := m.startScratch()
+	m = tm.(Model)
+	if m.phase != phaseReady {
+		t.Fatalf("startScratch should enter phaseReady, got %v", m.phase)
+	}
+	if m.curriculum {
+		t.Fatal("a blank tutor is not a curriculum session")
+	}
+	if m.current.ID != "" {
+		t.Fatalf("a blank tutor has no challenge, got %q", m.current.ID)
+	}
+	if m.focus != paneChat {
+		t.Fatalf("a blank tutor lands in the chat, focus=%v", m.focus)
+	}
+	if len(m.chat.blocks) == 0 {
+		t.Fatal("startScratch should greet in the chat")
+	}
+}
+
+// The launch dashboard offers the blank-tutor option.
+func TestDashboardHasScratch(t *testing.T) {
+	m := newModel(testDepsSeeded(t))
+	found := false
+	for _, e := range m.dashboardEntries() {
+		if e.kind == dashScratch {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the dashboard should offer a blank-tutor entry")
+	}
+}
+
+// The title-bar Check-answer button is hidden while reading a lecture and shown
+// on the quiz/challenge view.
+func TestCheckButtonHiddenOnLecture(t *testing.T) {
+	m := readyModel(t)
+	if m.currentTopicView != "lesson" {
+		t.Fatalf("setup: expected the lecture view, got %q", m.currentTopicView)
+	}
+	if _, _, ok := m.checkButtonBounds(); ok {
+		t.Fatal("Check-answer button must not show while reading a lecture")
+	}
+	// The same topic's quiz/challenge view shows it.
+	m.startTopicView(m.topicByID[m.currentTopicID], "quiz")
+	if _, _, ok := m.checkButtonBounds(); !ok {
+		t.Fatal("Check-answer button should show on the quiz/challenge view")
+	}
+}
+
 func TestClearChatTranscript(t *testing.T) {
 	m := readyModel(t)
 	// On a lesson row the lecture lives in the lesson pane; the chat holds
