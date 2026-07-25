@@ -158,8 +158,16 @@ type Model struct {
 	jumpIdx int
 
 	// searchMode marks the command line as a / search; lastSearch feeds n/N.
-	searchMode bool
-	lastSearch string
+	// searchReverse records whether the last search ran backward (?, #), so n/N
+	// honor its direction.
+	searchMode    bool
+	searchReverse bool
+	lastSearch    string
+
+	// opPendingObj / objAround carry a d/c/y operator across the i/a key while it
+	// waits for the text-object character (diw, ci", ya{).
+	opPendingObj rune
+	objAround    bool
 
 	// Command-line history (↑/↓ in the ":" and "/" prompts).
 	exHist     CmdHistory
@@ -557,26 +565,23 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toggleCase(m.takeCount())
 
 	// --- search ---
-	case "/":
+	case "/", "?":
 		m.searchMode = true
+		m.searchReverse = key == "?"
 		m.mode = modeCommand
-		m.cmd.Prompt = "/"
+		m.cmd.Prompt = key
 		m.cmd.SetValue("")
 		m.cmd.Focus()
 		m.searchHist.Open()
 		return m, textinput.Blink
 	case "n":
-		if from := m.curJumpPos(); m.search(m.lastSearch, 1) {
-			m.recordJump(from)
-		} else {
-			m.status = "pattern not found: " + m.lastSearch
-		}
+		m.searchRepeat(1)
 	case "N":
-		if from := m.curJumpPos(); m.search(m.lastSearch, -1) {
-			m.recordJump(from)
-		} else {
-			m.status = "pattern not found: " + m.lastSearch
-		}
+		m.searchRepeat(-1)
+	case "*":
+		m.searchWordUnderCursor(false)
+	case "#":
+		m.searchWordUnderCursor(true)
 
 	// --- enter Visual ---
 	case "v":
@@ -630,6 +635,19 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// --- edits ---
 	case "x":
 		m.deleteChars(m.takeCount())
+	case "X":
+		m.deleteCharsBefore(m.takeCount())
+	case "s":
+		m.pushUndo()
+		m.deleteChars(max(1, m.takeCount()))
+		m.mode = modeInsert
+	case "S":
+		m.pushUndo()
+		m.captureDelete(true, func() {
+			m.ta.CursorStart()
+			m.send(tea.KeyCtrlK)
+		})
+		m.mode = modeInsert
 	case "D":
 		m.pushUndo()
 		m.captureDelete(false, func() { m.send(tea.KeyCtrlK) }) // delete to end of line
@@ -706,6 +724,11 @@ func (m Model) runPending(op rune, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.captureDelete(false, func() { m.send(tea.KeyCtrlK) })
 		case "0", "^":
 			m.captureDelete(false, func() { m.send(tea.KeyCtrlU) }) // delete to line start
+		case "i", "a":
+			m.opPendingObj, m.objAround, m.pending = 'd', key == "a", []rune(key)[0]
+			return m, nil // diw, di", da{ … (await the object char)
+		default:
+			m.operatorMotionKey('d', key) // db, dj, dk, dG, dh, dl
 		}
 	case 'c':
 		switch key {
@@ -723,11 +746,25 @@ func (m Model) runPending(op rune, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "$":
 			m.captureDelete(false, func() { m.send(tea.KeyCtrlK) })
 			m.mode = modeInsert
+		case "i", "a":
+			m.opPendingObj, m.objAround, m.pending = 'c', key == "a", []rune(key)[0]
+			return m, nil // ciw, ci", ca( …
+		default:
+			m.operatorMotionKey('c', key) // cb, cj, ck …
 		}
 	case 'y':
-		if key == "y" {
+		switch key {
+		case "y":
 			m.yankLines(max(1, m.pendingCount)) // yy / 3yy -> yank line(s)
+		case "i", "a":
+			m.opPendingObj, m.objAround, m.pending = 'y', key == "a", []rune(key)[0]
+			return m, nil // yiw, ya" …
+		default:
+			m.operatorMotionKey('y', key) // yw, ye, y$, yb, yj …
 		}
+	case 'i', 'a': // text-object char after d/c/y then i/a
+		m.applyTextObject(m.opPendingObj, m.objAround, key)
+		m.opPendingObj = 0
 	case '<':
 		if key == "<" {
 			m.indentLines(max(1, m.pendingCount), -1) // << / 3<< -> dedent line(s)
@@ -816,7 +853,11 @@ func (m Model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cmd.Prompt = ":"
 			m.searchMode = false
 			m.lastSearch = m.cmd.Value()
-			if from := m.curJumpPos(); m.search(m.lastSearch, 1) {
+			dir := 1
+			if m.searchReverse {
+				dir = -1
+			}
+			if from := m.curJumpPos(); m.search(m.lastSearch, dir) {
 				m.recordJump(from)
 			} else {
 				m.status = "pattern not found: " + m.lastSearch
@@ -1264,7 +1305,7 @@ func stringEnd(s string, i int) int {
 }
 
 // charLiteralEnd returns the offset just past a char literal opening at s[i]
-// ('x', '\'', '\n', '\u{1F600}'), or i when the quote opens none. Byte-level
+// ('x', '\”, '\n', '\u{1F600}'), or i when the quote opens none. Byte-level
 // like stringEnd — the cursor row's escapes degrade it the same way strings
 // already degrade. Raw strings r#"…"# keep their inner string colored by the
 // ordinary double-quote branch; the # fences stay plain.
