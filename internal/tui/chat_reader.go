@@ -79,9 +79,23 @@ func clampInt(v, lo, hi int) int {
 // repeat the last search. Anything unrecognized falls through to page scrolling.
 func (c *chatModel) readerKey(msg tea.KeyMsg) {
 	c.readerNotice = ""
+	key := msg.String()
+	// A pending f/F/t/T consumes the next key as its target character.
+	if c.readerFindPending != 0 {
+		op := c.readerFindPending
+		c.readerFindPending = 0
+		if len(msg.Runes) == 1 {
+			c.readerFind(op, msg.Runes[0], max(1, c.readerCount))
+			c.readerLastFindOp, c.readerLastFindCh = op, msg.Runes[0]
+		}
+		c.readerCount = 0
+		c.afterMotion()
+		return
+	}
 	if c.pendingReaderG {
 		c.pendingReaderG = false
-		switch msg.String() {
+		c.readerCount = 0
+		switch key {
 		case "g": // gg
 			c.gotoDocTop()
 			c.afterMotion()
@@ -94,21 +108,43 @@ func (c *chatModel) readerKey(msg tea.KeyMsg) {
 		}
 		return
 	}
-	switch msg.String() {
+	// Numeric prefix: 1-9 always, 0 only to extend an in-progress count (else 0
+	// is the line-start motion).
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && c.readerCount > 0) {
+		c.readerCount = c.readerCount*10 + int(key[0]-'0')
+		return
+	}
+	n := max(1, c.readerCount)
+	c.readerCount = 0
+	switch key {
 	case "h", "left":
-		c.curCol--
+		c.curCol -= n
 	case "l", "right":
-		c.curCol++
+		c.curCol += n
 	case "j", "down":
-		c.curLine++
+		c.curLine += n
 	case "k", "up":
-		c.curLine--
+		c.curLine -= n
 	case "w":
-		c.wordForward()
+		for i := 0; i < n; i++ {
+			c.wordForward()
+		}
 	case "e":
-		c.wordEnd()
+		for i := 0; i < n; i++ {
+			c.wordEnd()
+		}
 	case "b":
-		c.wordBack()
+		for i := 0; i < n; i++ {
+			c.wordBack()
+		}
+	case "f", "F", "t", "T":
+		c.readerFindPending = []rune(key)[0]
+		c.readerCount = n // preserve the count for the target key
+		return
+	case ";":
+		c.repeatReaderFind(false, n)
+	case ",":
+		c.repeatReaderFind(true, n)
 	case "0":
 		c.curCol = 0
 	case "^":
@@ -172,6 +208,79 @@ func (c *chatModel) afterMotion() {
 		c.updateDocSelectionHead()
 	}
 	c.scrollToCursor()
+}
+
+// readerFind moves the cursor to the n-th f/F/t/T target on the current line;
+// on a miss the cursor stays put, as in Vim.
+func (c *chatModel) readerFind(op, ch rune, n int) {
+	runes := c.curRunes()
+	col := c.curCol
+	for k := 0; k < n; k++ {
+		next := findCharInLine(runes, col, op, ch)
+		if next < 0 {
+			return
+		}
+		col = next
+	}
+	c.curCol = col
+}
+
+// findCharInLine returns the column an f/F/t/T motion lands on from col, or -1
+// when the character isn't found on this line.
+func findCharInLine(runes []rune, col int, op, ch rune) int {
+	switch op {
+	case 'f':
+		for i := col + 1; i < len(runes); i++ {
+			if runes[i] == ch {
+				return i
+			}
+		}
+	case 't':
+		for i := col + 1; i < len(runes); i++ {
+			if runes[i] == ch {
+				return i - 1
+			}
+		}
+	case 'F':
+		for i := col - 1; i >= 0; i-- {
+			if runes[i] == ch {
+				return i
+			}
+		}
+	case 'T':
+		for i := col - 1; i >= 0; i-- {
+			if runes[i] == ch {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
+
+// repeatReaderFind repeats the last f/F/t/T (; keeps direction, , reverses it).
+func (c *chatModel) repeatReaderFind(reverse bool, n int) {
+	if c.readerLastFindOp == 0 {
+		return
+	}
+	op := c.readerLastFindOp
+	if reverse {
+		op = flipFind(op)
+	}
+	c.readerFind(op, c.readerLastFindCh, n)
+}
+
+func flipFind(op rune) rune {
+	switch op {
+	case 'f':
+		return 'F'
+	case 'F':
+		return 'f'
+	case 't':
+		return 'T'
+	case 'T':
+		return 't'
+	}
+	return op
 }
 
 func (c *chatModel) firstNonBlank() {

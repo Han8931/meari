@@ -92,6 +92,13 @@ type chatModel struct {
 	docVisual       bool
 	pendingReaderG  bool
 	followTarget    string
+	// readerCount accumulates a numeric motion prefix (5j, 3w). readerFindPending
+	// holds a pending f/F/t/T awaiting its target char; readerLastFindOp/Ch let
+	// ; and , repeat it.
+	readerCount       int
+	readerFindPending rune
+	readerLastFindOp  rune
+	readerLastFindCh  rune
 	// readerNotice is transient feedback (e.g. a copy confirmation) the parent
 	// pops and flashes in the status bar after routing a key here.
 	readerNotice string
@@ -726,6 +733,7 @@ func (c *chatModel) setLesson(text string) {
 	c.clearSelect()
 	c.docVisual = false
 	c.pendingReaderG = false
+	c.readerCount, c.readerFindPending = 0, 0
 	c.curLine, c.curCol = 0, 0
 	c.searchQuery, c.searchMatchCol, c.searchMatchLen = "", -1, 0
 	c.blocks = []chatBlock{{role: roleLesson, text: strings.TrimRight(text, "\n")}}

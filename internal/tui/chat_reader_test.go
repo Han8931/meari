@@ -198,6 +198,51 @@ func TestEnterLessonEdit(t *testing.T) {
 	}
 }
 
+// A numeric prefix repeats reader motions (3j, 5l).
+func TestReaderCounts(t *testing.T) {
+	c := newLessonPane()
+	c.focused = true
+	c.setSize(40, 10)
+	c.setLesson("l0\nl1\nl2\nl3\nl4\nl5")
+	c.curLine, c.curCol = 0, 0
+	c, _ = c.Update(rkey("3"))
+	c, _ = c.Update(rkey("j"))
+	if c.curLine != 3 {
+		t.Fatalf("3j should move down 3 lines, curLine=%d", c.curLine)
+	}
+	// 0 extends a count but is line-start on its own.
+	c, _ = c.Update(rkey("2"))
+	c, _ = c.Update(rkey("k"))
+	if c.curLine != 1 {
+		t.Fatalf("2k from line 3 should land on line 1, curLine=%d", c.curLine)
+	}
+}
+
+// f/F/t/T move within the line; ; repeats.
+func TestReaderCharFind(t *testing.T) {
+	c := newLessonPane()
+	c.focused = true
+	c.setSize(60, 6)
+	c.setLesson("alpha.beta.gamma")
+	body := 1 // contentLines[1] is the body
+	c.curLine, c.curCol = body, 0
+
+	c, _ = c.Update(rkey("f"))
+	c, _ = c.Update(rkey("."))
+	if c.curCol != 5 { // first '.' after "alpha"
+		t.Fatalf("f. should land on the first dot (col 5), got %d", c.curCol)
+	}
+	c, _ = c.Update(rkey(";")) // repeat: next '.'
+	if c.curCol != 10 {
+		t.Fatalf("; should advance to the next dot (col 10), got %d", c.curCol)
+	}
+	c, _ = c.Update(rkey("F")) // backward
+	c, _ = c.Update(rkey("."))
+	if c.curCol != 5 {
+		t.Fatalf("F. should go back to col 5, got %d", c.curCol)
+	}
+}
+
 func TestResolveTopicLink(t *testing.T) {
 	topics := map[string]curriculum.Topic{
 		"py-b-vars": {ID: "py-b-vars", Title: "Variables & Types"},
