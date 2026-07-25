@@ -25,6 +25,16 @@ this file tracks concrete, actionable items. Check things off as they land.
       `meari-course/Rust (Intermediate)`, finish the remaining revisions, compile every
       reference solution against its tests, and verify the final lesson order. Do not
       modify unrelated changes.
+- [ ] Offline course checkpoints — make conceptual answers checkable without an LLM:
+      keep code exercises compiler/test-backed; add deterministic multiple-choice,
+      classify/order, and “does this compile / what happens?” questions after each
+      module; use `rustc` as the oracle for Rust compile/output checks (match stable
+      outcomes or error codes, not full diagnostics); give every distractor targeted
+      feedback; and make genuinely free-form explanations self-checked with a model
+      answer, required-idea rubric, common misconceptions, reveal/retry controls, and
+      learner confidence rather than brittle keyword grading. Start with separate
+      `kind: quiz` checkpoint topics using the existing schema; consider multiple study
+      activities per lesson later so code, quiz, and reflection can coexist.
 - [ ] Spaced repetition / flashcards with SM-2 scheduling + `:review` due-queue
 - [ ] Quiz mode — multiple-choice generated from a note, AI-graded
 - [ ] Cloze deletions — auto fill-in-the-blank cards from a note's key sentences
