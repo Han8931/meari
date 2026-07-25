@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -209,7 +210,7 @@ func runCheck(args []string) error {
 	cfgPath := fs.String("config", "", "path to config file (default: <home>/config.toml)")
 	_ = fs.Parse(args)
 
-	cfg, _, _, err := loadConfig(*cfgPath)
+	cfg, base, resolvedCfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}
@@ -217,6 +218,21 @@ func runCheck(args []string) error {
 	info := tut.Info()
 
 	fmt.Println("Meari AI connection check (meari " + versionString() + ")")
+
+	// Flag a footprint left in $HOME by an older build that rooted itself there:
+	// meari now ignores it, so a real config/progress could be silently stranded.
+	if stray := config.StrayHomeFiles(base); len(stray) > 0 && (slices.Contains(stray, "config.toml") || len(stray) >= 2) {
+		fmt.Println("\n⚠ meari-looking files sit in your home directory but meari is NOT using them:")
+		for _, s := range stray {
+			fmt.Println("    ~/" + s)
+		}
+		fmt.Println("  meari reads its config & data from " + base)
+		if slices.Contains(stray, "config.toml") {
+			fmt.Println("  If ~/config.toml is your real config, move it: mv ~/config.toml " + resolvedCfg)
+		}
+		fmt.Println()
+	}
+
 	fmt.Printf("  provider:  %s\n", cfg.AI.Provider)
 	fmt.Printf("  base url:  %s\n", info.BaseURL)
 	fmt.Printf("  model:     %s\n", info.Model)

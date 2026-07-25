@@ -61,6 +61,29 @@ func ExpandHome(p string) (string, error) {
 	return p, nil
 }
 
+// StrayHomeFiles returns the meari-owned names sitting directly in $HOME that
+// the app is NOT using — a footprint left by running an older build from the
+// home directory before BaseDir excluded it. It's empty when base already IS
+// $HOME, or when nothing meari-shaped is there. Callers should treat a lone
+// generic hit (e.g. an unrelated ~/data) with a grain of salt; a ~/config.toml
+// or two+ matches is a strong signal.
+func StrayHomeFiles(base string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	if filepath.Clean(base) == filepath.Clean(home) {
+		return nil
+	}
+	var found []string
+	for _, name := range []string{"config.toml", "vault", "data", "workspace", "meari-course", "meari-publish", "exports"} {
+		if _, err := os.Stat(filepath.Join(home, name)); err == nil {
+			found = append(found, name)
+		}
+	}
+	return found
+}
+
 // isHomeDir reports whether p is the user's home directory (so the local-root
 // detection can skip it). A failure to resolve $HOME is treated as "not home",
 // leaving the normal detection in place.

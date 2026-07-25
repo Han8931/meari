@@ -110,6 +110,28 @@ func TestBaseDirGlobalDefault(t *testing.T) {
 	}
 }
 
+// StrayHomeFiles flags a meari footprint left in $HOME, and stays quiet when the
+// base already is $HOME.
+func TestStrayHomeFiles(t *testing.T) {
+	home := chdir(t, t.TempDir())
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(home, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// base elsewhere: the two entries are reported.
+	got := StrayHomeFiles(filepath.Join(home, ".config", "meari"))
+	if len(got) != 2 {
+		t.Fatalf("expected config.toml + data, got %v", got)
+	}
+	// base IS $HOME: nothing is "stray".
+	if s := StrayHomeFiles(home); s != nil {
+		t.Fatalf("home-rooted base should report nothing, got %v", s)
+	}
+}
+
 func TestExpandHome(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {

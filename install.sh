@@ -170,6 +170,26 @@ if $clean; then
     fi
 fi
 
+# --- warn about a stale $HOME footprint ---------------------------------------
+
+# install.sh never writes meari data to $HOME (only the binary lands in BIN_DIR).
+# But an OLDER build could root itself in $HOME when launched from there; meari
+# now always uses ~/.config/meari, so any such files would be silently ignored.
+# Flag them so a real config/progress is never stranded.
+stray=""
+for name in config.toml vault data workspace meari-course meari-publish exports; do
+    [ -e "$HOME/$name" ] && stray="$stray $name"
+done
+if [ -n "$stray" ]; then
+    count="$(printf '%s\n' $stray | grep -c .)"
+    if printf '%s\n' $stray | grep -qx config.toml || [ "$count" -ge 2 ]; then
+        warn "these meari-looking files sit in \$HOME but meari does NOT use them:"
+        for s in $stray; do printf '        ~/%s\n' "$s"; done
+        printf '      meari keeps everything in ~/.config/meari ($MEARI_HOME overrides).\n'
+        printf '      If ~/config.toml is your real config: mv ~/config.toml ~/.config/meari/config.toml\n'
+    fi
+fi
+
 # --- done --------------------------------------------------------------------
 
 cat <<EOF
