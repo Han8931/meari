@@ -204,6 +204,33 @@ type Model struct {
 	// "n" folds the sidebar; from the editor any other key replays the
 	// swallowed "," so its repeat-find binding still works.
 	pendingLeader bool
+	// pendingFind arms the ",ff" fuzzy lecture-finder chord (",f" then "f").
+	pendingFind bool
+
+	// Fuzzy lecture finder (",ff"): a full-screen overlay listing every lecture
+	// so the learner can jump to one. Mirrors the vault finder's shape.
+	finderMode   bool
+	finderInput  textinput.Model
+	finderCursor int
+	topicResults []topicResult
+
+	// Lecture-pane navigation state. searchMode reuses the command line for "/"
+	// search over the focused lecture. The lesson jumplist steps back/forward
+	// across visited lectures + cursor positions (⌃o / ⌃i), mirroring the
+	// editor's; inLessonJump guards it from recording its own navigation.
+	searchMode    bool
+	lessonJumps   []lessonJump
+	lessonJumpIdx int
+	inLessonJump  bool
+
+	// Lecture editing (":edit"/"i" on a file-backed lecture): the lesson source
+	// is loaded into a Vim editor; ":w" saves it back through the vault service.
+	// topicPathByID maps a curriculum topic to its source note path, populated
+	// only for file-backed (vault) courses — built-in/AI topics are absent.
+	lessonEditing  bool
+	lessonEditor   editor.Model
+	lessonEditPath string
+	topicPathByID  map[string]string
 
 	// Global ex-command line (":topic", ":clear", ":progress"). cmdMode shows the
 	// cmdLine input in the status row; it's opened with ":" from the sidebar and
@@ -296,6 +323,9 @@ func newModel(d Deps) Model {
 	cl := textinput.New()
 	cl.Prompt = ":"
 
+	fi := textinput.New()
+	fi.Prompt = "› "
+
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
 
 	m := Model{
@@ -309,15 +339,16 @@ func newModel(d Deps) Model {
 			WithArgCompleter(func(input string) []string {
 				return topicArgCandidates(d.Svc, input)
 			}),
-		chat:       newChat(),
-		lesson:     newLessonPane(),
-		topicInput: ti,
-		cmdLine:    cl,
-		curID:      curID,
-		challenges: map[string]tutor.Challenge{},
-		chatByKey:  map[string][]chatBlock{},
-		histByKey:  map[string][]tutor.ChatTurn{},
-		spin:       sp,
+		chat:        newChat(),
+		lesson:      newLessonPane(),
+		topicInput:  ti,
+		cmdLine:     cl,
+		finderInput: fi,
+		curID:       curID,
+		challenges:  map[string]tutor.Challenge{},
+		chatByKey:   map[string][]chatBlock{},
+		histByKey:   map[string][]tutor.ChatTurn{},
+		spin:        sp,
 	}
 	m.editor.SetShowLineNumbers(d.Cfg.LineNumbers())
 	m.seedOrder()
@@ -525,6 +556,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case editor.DoneMsg:
+		// A DoneMsg from the lecture editor (:q / :wq / ⌃q) means "leave edit
+		// mode", not "leave the app".
+		if m.lessonEditing {
+			return m.exitLessonEdit()
+		}
 		switch msg.Action {
 		case editor.ActionSubmit:
 			return m, m.startRun()
@@ -570,7 +606,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateOverlay(msg)
 	}
 	if m.cmdMode {
+		if m.searchMode {
+			return m.updateSearchLine(msg)
+		}
 		return m.updateCmdLine(msg)
+	}
+	if m.finderMode {
+		return m.updateLessonFinder(msg)
 	}
 
 	// Ctrl-W starts a window command; the next key chooses a pane by direction.
@@ -657,20 +699,42 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case paneLesson:
+		// While editing the lecture source, the whole pane is the Vim editor.
+		if m.lessonEditing {
+			return m.updateLessonEditor(msg)
+		}
 		// The lecture pane is never a typing surface, so bare keys are safe —
-		// same leader/command treatment as the sidebar.
+		// same leader/command treatment as the sidebar, plus the reader motions.
 		if leader {
-			if msg.String() == "n" {
+			switch msg.String() {
+			case "n":
 				return m.cmdFold()
+			case "f":
+				m.pendingFind = true // ",ff": arm the fuzzy lecture finder
+			}
+			return m, nil
+		}
+		if m.pendingFind {
+			m.pendingFind = false
+			if msg.String() == "f" {
+				return m.openLessonFinder()
 			}
 			return m, nil
 		}
 		switch msg.String() {
 		case ":":
 			return m.openCmdLine()
+		case "/":
+			return m.openLessonSearch()
 		case ",":
 			m.pendingLeader = true
 			return m, nil
+		case "ctrl+o":
+			return m.lessonJumpBack()
+		case "ctrl+i", "tab": // terminals deliver ⌃i as Tab; Tab is otherwise unused here
+			return m.lessonJumpForward()
+		case "i", "a", "o", "O": // enter edit with the matching Vim insert
+			return m.enterLessonEdit(msg.String())
 		case "alt+c", "ç", "Ç":
 			m.flash(copySelection(&m.lesson))
 			return m, nil
@@ -678,9 +742,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.flash(copyChat(&m.lesson, "all")) // the whole lecture document
 			return m, nil
 		}
-		var cmd tea.Cmd
-		m.lesson, cmd = m.lesson.Update(msg)
-		return m, cmd
+		return m.updateLesson(msg)
 
 	case paneChat:
 		switch msg.String() {
@@ -1571,6 +1633,15 @@ func helpView() string {
 		"  lesson { / }       previous / next paragraph (Vim; also chat Normal mode)",
 		"  mouse wheel        scroll the pane under the cursor",
 		"  ⌃c                 quit",
+		"",
+		bold("Lecture pane (Vim reader)"),
+		"  h j k l · w b · gg G   move the cursor",
+		"  v then motion, y   select text and copy it (⌥c too)",
+		"  / then n / N       search the lecture, next / previous match",
+		"  gd                 follow the [[wikilink]] under the cursor",
+		"  ⌃o / ⌃i            jump back / forward across lectures + positions",
+		"  ,ff                fuzzy-jump to any lecture",
+		"  i a o O / :edit    edit the lecture source (file-backed courses; ⌃s/:w saves)",
 	}, "\n")
 	return modalCard("Meari — help", cmds, "esc / q to close")
 }
@@ -1951,6 +2022,15 @@ func (m *Model) loadVaultCourse(key string) (curriculum.Curriculum, error) {
 	for _, w := range c.Warnings {
 		m.chat.append(roleSystem, "⚠ "+w)
 	}
+	// Remember which lectures are file-backed so ":edit"/"i" can save them.
+	m.topicPathByID = map[string]string{}
+	for _, mod := range c.Modules {
+		for _, t := range mod.Topics {
+			if t.NotePath != "" {
+				m.topicPathByID[t.ID] = t.NotePath
+			}
+		}
+	}
 	return c.Curriculum(), nil
 }
 
@@ -2094,6 +2174,245 @@ func (m *Model) startTopicView(t curriculum.Topic, view string) tea.Cmd {
 // materialize/strip pair below match on it verbatim.
 func lessonBlockText(t curriculum.Topic) string {
 	return strings.TrimRight(t.Title+"\n\n"+t.Lesson, "\n")
+}
+
+// --- lecture-pane keyboard navigation (see chat_reader.go) ---
+
+// updateLesson routes a key into the lecture pane's reader, then acts on any
+// signal it raised: a copy/notice to flash, or a [[wikilink]] to follow (gd).
+func (m Model) updateLesson(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.lesson, cmd = m.lesson.Update(msg)
+	if n := m.lesson.readerNotice; n != "" {
+		m.lesson.readerNotice = ""
+		m.flash(n)
+	}
+	if t := m.lesson.followTarget; t != "" {
+		m.lesson.followTarget = ""
+		return m.followLessonLink(t)
+	}
+	return m, cmd
+}
+
+// followLessonLink opens the lecture a [[wikilink]] points at (matched by title
+// or id), recording a jump so ⌃o returns.
+func (m Model) followLessonLink(target string) (tea.Model, tea.Cmd) {
+	id, ok := resolveTopicLink(target, m.topicByID)
+	if !ok {
+		m.flash("no lecture named \"" + target + "\"")
+		return m, nil
+	}
+	m.recordLessonJump()
+	t := m.topicByID[id]
+	cmd := m.startTopicView(t, "lesson")
+	m.flash("→ " + t.Title)
+	return m, cmd
+}
+
+// resolveTopicLink matches a wikilink target against the loaded topics by title
+// or id (case-insensitive), mirroring the vault's linkMatches.
+func resolveTopicLink(target string, topics map[string]curriculum.Topic) (string, bool) {
+	if strings.TrimSpace(target) == "" {
+		return "", false
+	}
+	for id, t := range topics {
+		if strings.EqualFold(target, t.Title) || strings.EqualFold(target, t.ID) {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// lessonJump is one entry in the cross-lecture jumplist: a topic plus the reader
+// cursor position within it.
+type lessonJump struct {
+	topicID   string
+	line, col int
+}
+
+// recordLessonJump pushes the current lecture + cursor onto the jumplist,
+// truncating any forward history — the same discipline as the editor's
+// jumplist. No-op while navigating the jumplist itself.
+func (m *Model) recordLessonJump() {
+	if m.inLessonJump || m.currentTopicID == "" {
+		return
+	}
+	from := lessonJump{topicID: m.currentTopicID, line: m.lesson.curLine, col: m.lesson.curCol}
+	m.lessonJumps = m.lessonJumps[:m.lessonJumpIdx]
+	if n := len(m.lessonJumps); n == 0 || m.lessonJumps[n-1] != from {
+		m.lessonJumps = append(m.lessonJumps, from)
+	}
+	if len(m.lessonJumps) > 100 {
+		m.lessonJumps = m.lessonJumps[1:]
+	}
+	m.lessonJumpIdx = len(m.lessonJumps)
+}
+
+// lessonJumpBack (⌃o) steps to an older lecture/position; the first step stashes
+// the live position so ⌃i can return.
+func (m Model) lessonJumpBack() (tea.Model, tea.Cmd) {
+	if m.lessonJumpIdx == 0 {
+		m.flash("at oldest jump")
+		return m, nil
+	}
+	if m.lessonJumpIdx == len(m.lessonJumps) {
+		m.lessonJumps = append(m.lessonJumps, lessonJump{m.currentTopicID, m.lesson.curLine, m.lesson.curCol})
+	}
+	m.lessonJumpIdx--
+	return m.gotoLessonJump(m.lessonJumps[m.lessonJumpIdx])
+}
+
+// lessonJumpForward (⌃i) steps back toward newer lectures/positions.
+func (m Model) lessonJumpForward() (tea.Model, tea.Cmd) {
+	if m.lessonJumpIdx >= len(m.lessonJumps)-1 {
+		m.flash("at newest jump")
+		return m, nil
+	}
+	m.lessonJumpIdx++
+	return m.gotoLessonJump(m.lessonJumps[m.lessonJumpIdx])
+}
+
+// gotoLessonJump opens the jump's lecture (without re-recording) and restores
+// the saved cursor position.
+func (m Model) gotoLessonJump(j lessonJump) (tea.Model, tea.Cmd) {
+	t, ok := m.topicByID[j.topicID]
+	if !ok {
+		m.flash("that lecture is no longer available")
+		return m, nil
+	}
+	m.inLessonJump = true
+	cmd := m.startTopicView(t, "lesson")
+	m.inLessonJump = false
+	m.lesson.curLine, m.lesson.curCol = j.line, j.col
+	m.lesson.clampCursor()
+	m.lesson.scrollToCursor()
+	return m, cmd
+}
+
+// openLessonSearch opens the "/" prompt over the focused lecture (reuses the
+// command-line input with a "/" face).
+func (m Model) openLessonSearch() (tea.Model, tea.Cmd) {
+	m.cmdMode = true
+	m.searchMode = true
+	m.cmdLine.Prompt = "/"
+	m.cmdLine.SetValue("")
+	return m, m.cmdLine.Focus()
+}
+
+// updateSearchLine drives the "/" prompt: Enter runs the search, Esc cancels.
+func (m Model) updateSearchLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyCtrlC:
+		return m, m.quit()
+	case tea.KeyEnter:
+		raw := strings.TrimSpace(m.cmdLine.Value())
+		m.closeSearchLine()
+		if raw != "" && !m.lesson.search(raw, true) {
+			m.flash("no match for \"" + raw + "\"")
+		}
+		return m, nil
+	case tea.KeyEsc:
+		m.closeSearchLine()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.cmdLine, cmd = m.cmdLine.Update(msg)
+	return m, cmd
+}
+
+func (m *Model) closeSearchLine() {
+	m.cmdMode = false
+	m.searchMode = false
+	m.cmdLine.Blur()
+	m.cmdLine.Prompt = ":"
+}
+
+// --- editing the lecture source (file-backed lectures only) ---
+
+// enterLessonEdit loads the current lecture's markdown source into a Vim editor
+// occupying the lecture slot. Only file-backed (vault-course) lectures can be
+// edited; built-in and AI lectures have no file to save to. entry is the Vim
+// insert key that opened it (i/a/o/O) — forwarded so editing starts in the
+// matching state; the editor opens at the top of the source.
+func (m Model) enterLessonEdit(entry string) (tea.Model, tea.Cmd) {
+	id := m.currentTopicID
+	path := m.topicPathByID[id]
+	if path == "" || m.deps.Svc == nil {
+		m.flash("this lecture isn't file-backed — nothing to save to")
+		return m, nil
+	}
+	t, ok := m.topicByID[id]
+	if !ok {
+		m.flash("no lecture open")
+		return m, nil
+	}
+	svc := m.deps.Svc
+	save := func(code string) error {
+		_, err := svc.SaveNote(path, code)
+		return err
+	}
+	vim := m.deps.Cfg.VimEditor()
+	ed := editor.New(t.Lesson, vim, save)
+	ed.SetLanguage("markdown")
+	ed.SetShowLineNumbers(m.deps.Cfg.LineNumbers())
+	if m.lessonW > 0 {
+		ed.SetSize(m.lessonW, m.contentH)
+	}
+	// With Vim keys on, replay i/a/o/O so insert begins as pressed. (Without Vim
+	// the editor is always in insert; forwarding the letter would type it.)
+	if vim && entry != "" {
+		tm, _ := ed.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(entry)})
+		ed = tm.(editor.Model)
+	}
+	m.lessonEditor = ed
+	m.lessonEditPath = path
+	m.lessonEditing = true
+	m.flash("editing lecture — ⌃s / :w save · esc / :q return")
+	return m, m.lessonEditor.Focus()
+}
+
+// updateLessonEditor routes keys to the lecture editor. ⌃s saves in place (:w
+// works too, through the editor); esc in Normal mode returns to the reader.
+func (m Model) updateLessonEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Type == tea.KeyCtrlS:
+		if err := m.saveLessonEdit(); err != nil {
+			m.flash("save failed: " + err.Error())
+		} else {
+			m.flash("saved ✓")
+		}
+		return m, nil
+	case msg.Type == tea.KeyEsc && m.lessonEditor.NormalMode():
+		return m.exitLessonEdit()
+	}
+	tm, cmd := m.lessonEditor.Update(msg)
+	m.lessonEditor = tm.(editor.Model)
+	return m, cmd
+}
+
+// exitLessonEdit leaves edit mode, re-rendering the reading view from the edited
+// buffer (disk is only written on save, so in-session edits stay visible).
+func (m Model) exitLessonEdit() (tea.Model, tea.Cmd) {
+	body := m.lessonEditor.Value()
+	if t, ok := m.topicByID[m.currentTopicID]; ok {
+		t.Lesson = body
+		m.topicByID[m.currentTopicID] = t
+		m.lesson.setLesson(lessonBlockText(t))
+	}
+	m.lessonEditing = false
+	m.lessonEditor = editor.Model{}
+	m.lessonEditPath = ""
+	return m, m.setFocus(paneLesson)
+}
+
+// saveLessonEdit writes the editor buffer back to the lecture's note, preserving
+// its frontmatter.
+func (m *Model) saveLessonEdit() error {
+	if m.deps.Svc == nil || m.lessonEditPath == "" {
+		return fmt.Errorf("nothing to save to")
+	}
+	_, err := m.deps.Svc.SaveNote(m.lessonEditPath, m.lessonEditor.Value())
+	return err
 }
 
 // materializeLessonInChat prepends the lecture to the conversation transcript
@@ -2736,6 +3055,9 @@ func (m *Model) layout() {
 	}
 	if m.lessonW > 0 {
 		m.lesson.setSize(m.lessonW, m.contentH)
+		if m.lessonEditing {
+			m.lessonEditor.SetSize(m.lessonW, m.contentH)
+		}
 	}
 	if m.chatW > 0 {
 		m.chat.setSize(m.chatW, m.contentH)
@@ -2759,6 +3081,9 @@ func (m Model) View() string {
 
 	if m.overlay != overlayNone {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.overlayView())
+	}
+	if m.finderMode {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.lessonFinderView())
 	}
 
 	var row string
@@ -2790,7 +3115,11 @@ func (m Model) View() string {
 			panes = append(panes, m.box(paneSidebar, m.sidebarW, m.contentH, m.sidebar.view()))
 		}
 		if m.lessonW > 0 { // lesson rows: the lecture pane fills the editor's slot
-			panes = append(panes, m.box(paneLesson, m.lessonW, m.contentH, m.lesson.view()))
+			lessonContent := m.lesson.view()
+			if m.lessonEditing { // editing the lecture source in the Vim editor
+				lessonContent = m.lessonEditor.View()
+			}
+			panes = append(panes, m.box(paneLesson, m.lessonW, m.contentH, lessonContent))
 		}
 		if m.editorW > 0 {
 			panes = append(panes, m.box(paneEditor, m.editorW, m.contentH, m.editorPaneView(m.editorW)))
@@ -3066,8 +3395,10 @@ func (m Model) statusView() string {
 	switch {
 	case m.pendingWindow:
 		hints = errStyle.Render("⌃w") + " window: h/l choose pane"
+	case m.focus == paneLesson && m.lessonEditing:
+		hints = "editing lecture · ⌃s/:w save · esc/:q back · full Vim"
 	case m.focus == paneLesson:
-		hints = "j/k ⌃d/⌃u scroll · drag/⌥c copy · ⌃w l chat · :view chat single pane"
+		hints = "hjkl move · v select · y/⌥c copy · / search · gd link · ⌃o/⌃i back/fwd · ,ff jump · i/a/o edit"
 	case m.focus == paneChat && m.chatCentric():
 		hints = "enter chat · :submit grade your answer · ⌥o/:copy copy · ⌃f/⌃b page · :view code"
 	case m.focus == paneChat:

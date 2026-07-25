@@ -118,6 +118,14 @@ var (
 	// Alt-C copies the selected text.
 	chatSelStyle = lipgloss.NewStyle().Foreground(selectedFg).Background(selectedBg)
 
+	// chatCursorStyle paints the keyboard reader cursor cell in the read-only
+	// lecture pane (Normal mode). Reverse video reads as a block cursor over
+	// any content without depending on the active theme's palette.
+	chatCursorStyle = lipgloss.NewStyle().Reverse(true)
+
+	// chatSearchStyle marks the current "/" match in the lecture pane.
+	chatSearchStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("232")).Background(lipgloss.Color("222"))
+
 	// noticeStyle renders transient command feedback in the status bar (copy
 	// confirmations, resize/fold notices, unknown commands…).
 	noticeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("222"))

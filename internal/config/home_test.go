@@ -64,6 +64,32 @@ func TestBaseDirCwdWithVault(t *testing.T) {
 	}
 }
 
+// Running from the home directory is the one exception: even when $HOME holds a
+// vault/ (or a stray config.toml), $HOME is never treated as the root — that
+// would scatter data/ workspace/ meari-course/ across the home. It falls
+// through to the global default instead.
+func TestBaseDirHomeIsNeverLocalRoot(t *testing.T) {
+	t.Setenv("MEARI_HOME", "")
+	home := chdir(t, t.TempDir())
+	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, "vault"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	base, err := BaseDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base == home {
+		t.Fatal("$HOME must never be treated as the meari root, even with a vault/")
+	}
+	if want := filepath.Join(xdg, "meari"); base != want {
+		t.Fatalf("BaseDir = %q, want %q", base, want)
+	}
+}
+
 // With no override and a plain cwd, BaseDir is <XDG_CONFIG_HOME>/meari, created.
 func TestBaseDirGlobalDefault(t *testing.T) {
 	t.Setenv("MEARI_HOME", "")

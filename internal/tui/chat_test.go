@@ -309,27 +309,42 @@ func TestLessonPaneReadOnlyView(t *testing.T) {
 	}
 }
 
-// Bare keys scroll the read-only pane; nothing ever reaches the (hidden) input.
+// The read-only pane carries a Vim reader cursor: j/k move it, the viewport
+// follows when it leaves the page, gg/G jump to the ends, ⌃d still pages — and
+// nothing ever reaches the (hidden) input.
 func TestLessonPaneKeysScroll(t *testing.T) {
+	key := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+
 	c := newLessonPane()
 	c.setSize(40, 5)
 	c.setLesson(strings.Repeat("line of the lecture\n", 40))
 
-	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	if c.vp.YOffset != 1 {
-		t.Fatalf("j should scroll down one line, offset = %d", c.vp.YOffset)
+	// j moves the cursor down; while it stays on the visible page nothing scrolls.
+	c, _ = c.Update(key("j"))
+	if c.curLine != 1 {
+		t.Fatalf("j should move the reader cursor down, curLine = %d", c.curLine)
 	}
-	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
-	if c.vp.YOffset != 0 {
-		t.Fatalf("k should scroll back up, offset = %d", c.vp.YOffset)
+	c, _ = c.Update(key("k"))
+	if c.curLine != 0 {
+		t.Fatalf("k should move the cursor back up, curLine = %d", c.curLine)
 	}
-	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
-	if !c.vp.AtBottom() {
-		t.Fatal("G should jump to the bottom")
+	// Driving the cursor past the page bottom scrolls the viewport to follow it.
+	for i := 0; i < 12; i++ {
+		c, _ = c.Update(key("j"))
 	}
-	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
-	if !c.vp.AtTop() {
-		t.Fatal("g should jump to the top")
+	if c.vp.YOffset == 0 {
+		t.Fatalf("cursor past the page bottom should scroll, offset = %d", c.vp.YOffset)
+	}
+	// G jumps to the last line and the bottom of the document.
+	c, _ = c.Update(key("G"))
+	if !c.vp.AtBottom() || c.curLine != len(c.contentLines)-1 {
+		t.Fatalf("G should jump to the last line/bottom (curLine=%d atBottom=%v)", c.curLine, c.vp.AtBottom())
+	}
+	// gg jumps back to the top.
+	c, _ = c.Update(key("g"))
+	c, _ = c.Update(key("g"))
+	if !c.vp.AtTop() || c.curLine != 0 {
+		t.Fatalf("gg should jump to the top (curLine=%d atTop=%v)", c.curLine, c.vp.AtTop())
 	}
 	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	if c.vp.YOffset == 0 {

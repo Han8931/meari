@@ -35,6 +35,9 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## Vault & knowledge graph
 
+- [ ] Follow links — jump to a linked note from the backlinks ("↩ Linked mentions") panel
+      (focus + `enter` to open) and from inline `[[wikilinks]]` under the cursor in the editor
+      (e.g. `gf`/`⌃]`); currently both are display-only, not navigable
 - [ ] `[[wikilink]]` autocomplete in the editor
 - [ ] Full-text search across the vault (in-memory inverted index now; SQLite-backed later)
 - [ ] Tag support (`#tag` / frontmatter tags) + tag browser in the left pane
@@ -71,6 +74,14 @@ The Wails desktop app exposes a subset of the TUI — bring the AI/vault feature
 
 ## Recently done
 
+- [x] Tutor lecture pane is a Vim reader/editor — keyboard cursor + Visual selection
+      (`hjkl`/`w`/`b`/`gg`/`G`, `v`+`y`/`⌥c` copy), `/` search with `n`/`N`, `gd` follows the
+      `[[wikilink]]` under the cursor to that lecture, `⌃o`/`⌃i` jump back/forward across
+      lectures + positions, `,ff` fuzzy-jumps to any lecture, and `i`/`:edit` edits the
+      lecture source (file-backed courses only; `⌃s`/`:w` saves, preserving frontmatter)
+- [x] Global home hardening — `meari` never treats `$HOME` as its root, so a stray
+      `config.toml`/`vault/` in the home dir can't scatter `data/ workspace/ meari-course/ …`
+      there (`config.BaseDir` excludes `$HOME`; `$MEARI_HOME` still opts in explicitly)
 - [x] AI note editing — `:polish`/`:edit` (whole note or Visual selection) → review in chat
       → `:apply`/`:discard`; `:ask`/`:discuss` a selection with the tutor (excerpt pinned to
       every turn so follow-ups stay grounded)

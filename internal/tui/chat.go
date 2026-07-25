@@ -82,13 +82,31 @@ type chatModel struct {
 	// loaded into the viewport.
 	sel          chatSelection
 	contentLines []string
+
+	// --- read-only reader cursor (noInput lecture pane only; see chat_reader.go) ---
+	// curLine indexes contentLines; curCol is a rune index into the ANSI-stripped
+	// display line. docVisual is a keyboard Visual selection (reusing sel);
+	// pendingReaderG arms the two-key gg jump. followTarget is set when gd
+	// resolves a [[wikilink]] under the cursor, for the parent to open.
+	curLine, curCol int
+	docVisual       bool
+	pendingReaderG  bool
+	followTarget    string
+	// readerNotice is transient feedback (e.g. a copy confirmation) the parent
+	// pops and flashes in the status bar after routing a key here.
+	readerNotice string
+	// searchQuery is the last "/" pattern; searchMatch marks the current match
+	// span on curLine for highlighting.
+	searchQuery    string
+	searchMatchCol int // rune col of the current match on curLine, -1 if none
+	searchMatchLen int // rune length of the current match
 }
 
 // chatSelection is a span of transcript cells between the press anchor and the
 // dragged head. active stays false until the mouse actually moves, so a plain
 // click only clears the previous selection.
 type chatSelection struct {
-	active               bool
+	active                bool
 	anchorLine, anchorCol int
 	headLine, headCol     int
 }
@@ -694,30 +712,22 @@ func (c chatModel) Update(msg tea.Msg) (chatModel, tea.Cmd) {
 	return c, cmd
 }
 
-// readOnlyKey scrolls the document view: bare Vim keys are safe here because
-// there is no input box to type into.
+// readOnlyKey drives the lecture pane's keyboard reader: a Vim-style cursor with
+// Normal/Visual motions, y to copy, and gd to follow a wikilink. The full
+// implementation lives in chat_reader.go; bare keys are safe here because there
+// is no input box to type into.
 func (c *chatModel) readOnlyKey(msg tea.KeyMsg) {
-	switch msg.String() {
-	case "j", "down":
-		c.vp.ScrollDown(1)
-	case "k", "up":
-		c.vp.ScrollUp(1)
-	case "g", "home":
-		c.vp.GotoTop()
-	case "G", "end":
-		c.vp.GotoBottom()
-	case "{":
-		c.paragraphJump(-1)
-	case "}":
-		c.paragraphJump(1)
-	default:
-		c.scrollKey(msg) // ⌃d/⌃u/⌃f/⌃b, PgUp/PgDn, Shift-arrows
-	}
+	c.readerKey(msg)
 }
 
-// setLesson replaces the document with one lesson block and opens at the top.
+// setLesson replaces the document with one lesson block and opens at the top,
+// resetting the reader cursor to the start.
 func (c *chatModel) setLesson(text string) {
 	c.clearSelect()
+	c.docVisual = false
+	c.pendingReaderG = false
+	c.curLine, c.curCol = 0, 0
+	c.searchQuery, c.searchMatchCol, c.searchMatchLen = "", -1, 0
 	c.blocks = []chatBlock{{role: roleLesson, text: strings.TrimRight(text, "\n")}}
 	c.reflow()
 	c.vp.GotoTop()
@@ -1038,8 +1048,8 @@ func pasteChat(c *chatModel) string {
 }
 
 func (c chatModel) view() string {
-	if c.noInput { // read-only document view: transcript only
-		return c.overlaySelection(c.vp.View())
+	if c.noInput { // read-only document view: transcript only, with the reader cursor
+		return c.overlayCursor(c.overlaySelection(c.vp.View()))
 	}
 	parts := make([]string, 0, 4)
 	parts = append(parts, c.overlaySelection(c.vp.View()))

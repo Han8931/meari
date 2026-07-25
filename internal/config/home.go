@@ -16,14 +16,18 @@ import (
 //  1. $MEARI_HOME, if set (an explicit override; "~/" expands).
 //  2. The current directory IF it already looks like a meari home/checkout —
 //     a config.toml or a vault/ is present — so running from the repo or a
-//     portable folder keeps everything local (the historical behavior).
+//     portable folder keeps everything local (the historical behavior). The
+//     home directory itself is deliberately excluded: a stray config.toml or an
+//     unrelated vault/ (e.g. an Obsidian vault) in $HOME must never turn $HOME
+//     into the root and scatter data/ workspace/ meari-course/ … across it.
+//     Set $MEARI_HOME to opt into a home-rooted layout explicitly.
 //  3. $XDG_CONFIG_HOME/meari (default ~/.config/meari) — the global default,
 //     created on first run.
 func BaseDir() (string, error) {
 	if h := strings.TrimSpace(os.Getenv("MEARI_HOME")); h != "" {
 		return ExpandHome(h)
 	}
-	if wd, err := os.Getwd(); err == nil {
+	if wd, err := os.Getwd(); err == nil && !isHomeDir(wd) {
 		if isFile(filepath.Join(wd, "config.toml")) || isDir(filepath.Join(wd, "vault")) {
 			return wd, nil
 		}
@@ -55,6 +59,22 @@ func ExpandHome(p string) (string, error) {
 		return filepath.Join(home, strings.TrimPrefix(p[1:], "/")), nil
 	}
 	return p, nil
+}
+
+// isHomeDir reports whether p is the user's home directory (so the local-root
+// detection can skip it). A failure to resolve $HOME is treated as "not home",
+// leaving the normal detection in place.
+func isHomeDir(p string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	ap, err1 := filepath.Abs(p)
+	ah, err2 := filepath.Abs(home)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return filepath.Clean(ap) == filepath.Clean(ah)
 }
 
 func isFile(p string) bool {
