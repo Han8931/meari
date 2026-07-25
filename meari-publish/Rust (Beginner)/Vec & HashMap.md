@@ -69,7 +69,41 @@ for x in &mut v  { *x *= 2; }          // mutable borrow — doubles in place
 for x in v       { print!("{x} "); }   // consumes v
 ```
 
-Same borrow-vs-consume choice as in [[Control Flow]].
+This is [[Ownership & Moves]] and [[References & Borrowing]] applied to a loop.
+
+Spell out the three forms by asking what the loop receives:
+
+| Loop | Each `x` is | Can `v` be used afterward? |
+| ---- | ----------- | --------------------------- |
+| `for x in &v` | `&T`, temporary read access | yes |
+| `for x in &mut v` | `&mut T`, temporary edit access | yes |
+| `for x in v` | `T`, an owned element | no; `v` moved into the loop |
+
+The last form consumes the vector:
+
+```rust
+let names = vec![String::from("Ana"), String::from("Bo")];
+
+for name in names {
+    println!("{name}");
+}
+
+// println!("{}", names.len()); // error: names was moved into the loop
+```
+
+Conceptually, the loop takes ownership of `names`, then yields its elements one
+at a time. Use this form when you are finished with the collection. Add `&` when
+you only want to inspect it:
+
+```rust
+let names = vec![String::from("Ana"), String::from("Bo")];
+
+for name in &names {
+    println!("{name}");
+}
+
+println!("still have {} names", names.len());
+```
 
 ### How a Vec grows
 
@@ -168,9 +202,11 @@ will not allow a reference into the old buffer to remain usable afterward.
 
 ## Try it
 
-1. Create a `Vec`, push three numbers, then pop one off.
-2. Use `.get(10)` on a short vector and handle the `None` case.
-3. Count words in a short string using `HashMap` and the `entry` API.
+1. **Trace:** Predict whether `v` survives each of `for x in &v`,
+   `for x in &mut v`, and `for x in v`.
+2. **Build:** Create a `Vec`, push three numbers, then pop one off.
+3. **Handle absence:** Use `.get(10)` on a short vector and handle `None`.
+4. **Create:** Count words in a short string using `HashMap` and `entry`.
 
 > **Takeaway:** `Vec<T>` is your growable list (index with `[i]` for bugs, `.get`
 > for maybes), and `HashMap<K,V>` is your key-value store (get returns an

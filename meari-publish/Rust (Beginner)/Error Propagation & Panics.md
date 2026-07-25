@@ -33,26 +33,28 @@ cleanly, and about the escape hatch when an error truly can't be recovered:
 ## The problem: manual propagation is noisy
 
 Without help, passing an error upward means unwrapping and re-returning at every
-step. (One new piece of syntax shows up in the return type below:
-`Box<dyn std::error::Error>` means "some error value, boxed on the heap" — a
-catch-all that lets one function surface several different kinds of error. Read
-it as "any error" for now; [[Box, Rc & RefCell]] covers `Box` in full.)
+step. Start with two operations that have the same error type: both parse text
+as an `i32`.
 
 ```rust
-fn read_number(path: &str) -> Result<i32, Box<dyn std::error::Error>> {
-    let contents = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => return Err(Box::new(e)),   // forward the I/O error by hand
+fn parse_sum(a: &str, b: &str) -> Result<i32, std::num::ParseIntError> {
+    let left = match a.parse::<i32>() {
+        Ok(number) => number,
+        Err(error) => return Err(error),
     };
-    let n = match contents.trim().parse::<i32>() {
-        Ok(n) => n,
-        Err(e) => return Err(Box::new(e)),   // ...and again for the parse error
+
+    let right = match b.parse::<i32>() {
+        Ok(number) => number,
+        Err(error) => return Err(error),
     };
-    Ok(n)
+
+    Ok(left + right)
 }
 ```
 
-That `match … return Err(e)` boilerplate repeats for every fallible call.
+Read `Result<i32, ParseIntError>` as “either an `i32` result, or a parsing
+error.” Each `match` does the same plumbing: extract the success value or return
+the error unchanged.
 
 ## The `?` operator
 
@@ -61,40 +63,45 @@ That `match … return Err(e)` boilerplate repeats for every fallible call.
 whole function immediately.**
 
 ```rust
-fn read_number(path: &str) -> Result<i32, Box<dyn std::error::Error>> {
-    let contents = std::fs::read_to_string(path)?;  // Err → early return
-    let n: i32 = contents.trim().parse()?;          // Err → early return
-    Ok(n)
+fn parse_sum(a: &str, b: &str) -> Result<i32, std::num::ParseIntError> {
+    let left: i32 = a.parse()?;   // Err → return it; Ok → bind the number
+    let right: i32 = b.parse()?;  // same flow again
+    Ok(left + right)
 }
 ```
 
 ```
-   read_to_string(path)?
+   a.parse()?
         │
-        ├── Ok(text)  ──►  bind text, continue
-        └── Err(e)    ──►  return Err(e) from read_number  (short-circuit)
+        ├── Ok(number) ──► bind number to left, continue
+        └── Err(error) ──► return Err(error) from parse_sum
 ```
 
 Two conditions to use `?`:
 
 1. The enclosing function must itself return a `Result` (or `Option`) — `?`
    needs somewhere to return the error *to*.
-2. The error types must be compatible. `Box<dyn Error>` is a common beginner
-   choice because most errors convert into it automatically.
+2. The error returned by the operation must fit the error type declared by the
+   enclosing function. Here both are `ParseIntError`, so no conversion is
+   needed.
 
 `?` also works on `Option`, returning `None` early.
 
 ## `?` in `main`
 
-`main` can return a `Result`, letting you use `?` at the top level:
+`main` can return a `Result`, letting you use `?` at the top level. This example
+performs only file I/O, so one concrete error type is enough:
 
 ```rust
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let n = read_number("count.txt")?;
-    println!("read {n}");
+fn main() -> std::io::Result<()> {
+    let text = std::fs::read_to_string("message.txt")?;
+    println!("{text}");
     Ok(())
 }
 ```
+
+Read `Result<(), std::io::Error>` as “success carries no interesting value;
+failure carries an I/O error.” `Ok(())` constructs that successful empty result.
 
 ## The Python contrast
 
@@ -177,11 +184,34 @@ converted into the function's declared error type.
 Use `match` when this function can recover locally; use `?` when the caller is
 better placed to decide.
 
+## What if operations have different error types?
+
+A function may read a file and then parse its contents, producing either an
+I/O error or a parsing error. Real applications commonly define an error enum
+with one variant for each case. Libraries can then match those variants and
+respond precisely.
+
+You will also encounter `Box<dyn std::error::Error>`, which roughly means “an
+owned value of some type implementing the `Error` trait.” It is convenient for
+small applications that only need to report several possible errors. Its parts
+are introduced later:
+
+- [[Traits]] explains `dyn Error`.
+- [[Box, Rc & RefCell]] explains `Box`.
+
+You do not need that catch-all syntax to understand `?`: first master
+propagating one concrete error type, as `parse_sum` does above.
+
 ## Try it
 
-1. Write a function that reads a file with `std::fs::read_to_string` and returns a `Result`.
-2. Use `?` instead of a manual `match` to propagate the error.
-3. Replace an `unwrap()` with `expect("explain what went wrong")`, then with proper `match` handling.
+1. **Expand:** Rewrite one `parse()?` as an explicit `match`.
+2. **Trace:** Follow `parse_sum("2", "x")` and identify the exact point where the
+   function returns.
+3. **Fill:** Write a two-step parsing function using `?`.
+4. **Choose:** For bad user input and an impossible internal invariant, explain
+   which should return `Result` and which may justify a panic.
+5. **Repair:** Replace an `unwrap()` first with `expect`, then with proper
+   `match` handling.
 
 > **Takeaway:** `?` propagates errors up the call stack with one character,
 > turning verbose `match` chains into linear code. Use `Result` for expected,

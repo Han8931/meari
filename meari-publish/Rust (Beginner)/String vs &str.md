@@ -32,8 +32,9 @@ to text. Once you see that, `String` vs `&str` clicks.
 | `String` | an owned, heap-allocated string | **yes**      | yes       | heap + stack handle |
 | `&str`   | a borrowed *view* into a string | no           | no        | points elsewhere  |
 
-Think of it exactly like `Vec<T>` vs `&[T]` from
-[[Arrays, Tuples & Slices]]: `String` is the owner, `&str` is a slice of one.
+For now, think “owned text” versus “borrowed view of text.” The next lesson,
+[[Arrays, Tuples & Slices]], applies the same owner/view relationship to
+sequences: `Vec<T>` versus `&[T]`.
 
 ```
    let owned = String::from("hello");
@@ -57,8 +58,10 @@ let view: &str = &owned;               // borrow a String as a &str
 let view2: &str = &owned[0..2];        // a sub-slice: "he"
 ```
 
-A literal like `"hello"` is baked into your binary, so it's a `&'static str` — a
-borrow that lives for the entire program. You never *own* a literal.
+A literal like `"hello"` is stored with the compiled program, so it can be
+borrowed for the program's entire run. Rust writes that type as `&'static str`.
+The `'static` part names how long the reference is valid; you do not need to
+write it yourself in ordinary literal code.
 
 ## The rule of thumb
 
@@ -154,9 +157,14 @@ use `&str`.
 
 ## Try it
 
-1. Write a `greet(name: &str)` function and call it with both a string literal and a `String`.
-2. Combine two strings with `format!` and confirm the originals are still usable.
-3. Print both `s.len()` and `s.chars().count()` for `"héllo"`.
+1. **Classify:** For a literal, a `String::from(...)`, and `&owned`, state which
+   value owns text and which only borrows it.
+2. **Fill:** Write `greet(name: &str)` and call it with both a literal and a
+   borrowed `String`.
+3. **Compare ownership:** Combine two strings with `format!` and confirm the
+   originals remain usable.
+4. **Measure:** Print both `s.len()` and `s.chars().count()` for `"héllo"` and
+   explain why the numbers differ.
 
 > **Takeaway:** `String` owns and grows; `&str` borrows and reads. Store owned
 > text as `String`, but accept `&str` in your function signatures for maximum

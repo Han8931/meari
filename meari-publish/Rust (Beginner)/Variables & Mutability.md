@@ -12,7 +12,7 @@ study:
     }
   kind: code
   lang: rust
-  prompt: Complete `update_score()`: declare mutable `score` as 10, change it to 15, then shadow it with `score + 5` and return the result.
+  prompt: 'Complete `update_score()`: declare mutable `score` as 10, change it to 15, then shadow it with `score + 5` and return the result.'
   starter: |
     fn update_score() -> i32 {
         0
@@ -144,9 +144,12 @@ println!("{message}");     // outer is visible again
 
 ## Try it
 
-1. Write `let x = 5; x = 6;` and read the compiler error. Then fix it with `mut`.
-2. Shadow a variable so it changes from a string to a number: `"42"` → `42`.
-3. Create a `const` for a maximum score or limit.
+1. **Classify:** For each example above, identify the binding, value, and type.
+2. **Repair:** Write `let x = 5; x = 6;`, read the error, then fix it with `mut`.
+3. **Compare:** Shadow a variable so its type changes; explain why mutation
+   could not make the same type change.
+4. **Create:** Add a `const` for a maximum score and explain why its type must be
+   written explicitly.
 
 > **Takeaway:** immutable-by-default plus shadowing lets you write transformation
 > pipelines that are both safe and readable. Add `mut` deliberately, not by

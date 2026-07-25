@@ -36,10 +36,13 @@ types that own heap data and add extra powers on top. Three carry you a long way
 ## Recap: stack vs heap
 
 ```
-   STACK: fast, fixed-size, auto-managed (function-local values)
-   HEAP:  flexible size, lives as long as an owner keeps it
-          — you reach it through a pointer on the stack
+   STACK: stores fixed-size call frames, local values, and pointer handles
+   HEAP:  stores dynamically allocated data that an owner refers to
 ```
+
+These are storage locations, not ownership modes. A stack value may own heap
+data, as `String` does, and a value implementing `Copy` is determined by its
+type—not merely by where a particular value happens to reside.
 
 ## `Box<T>`: put a value on the heap
 
@@ -97,9 +100,9 @@ sibling is `Arc`.
 
 ## The Python contrast
 
-In Python this machinery is entirely invisible: *every* object is already
-heap-allocated and reference-counted, and any shared object can be mutated
-freely:
+In common Python implementations this machinery is mostly invisible: variables
+refer to runtime-managed objects, and shared mutable objects can be changed
+through any alias:
 
 ```python
 a = ["shared"]
@@ -184,9 +187,13 @@ wrap everything in `Rc<RefCell<_>>`.
 
 ## Try it
 
-1. Put an integer in a `Box` with `Box::new(5)` and print it with `*boxed`.
-2. Create an `Rc<String>`, clone it with `Rc::clone`, and print `Rc::strong_count`.
-3. Read the `RefCell` example, but do not worry if it feels advanced on the first pass.
+1. **Choose:** For ordinary ownership, recursive data, shared ownership, and
+   shared mutation, select `T`, `Box<T>`, `Rc<T>`, or `Rc<RefCell<T>>`.
+2. **Fill:** Put an integer in a `Box` and print it with `*boxed`.
+3. **Trace counts:** Create an `Rc<String>`, clone it twice, and predict the
+   strong count after each clone is dropped.
+4. **Optional diagnosis:** Create two overlapping mutable `RefCell` borrows and
+   explain why this failure is a runtime panic rather than a compiler error.
 
 > **Takeaway:** reach for `Box` to heap-allocate, `Rc` to share ownership, and
 > `RefCell` to mutate shared data (accepting a runtime borrow check). `Rc<RefCell<T>>`

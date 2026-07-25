@@ -22,8 +22,11 @@ title: Why Rust
 
 Rust is a systems programming language built around one bold promise: **memory
 safety without a garbage collector**. It aims to give you the raw speed of C and
-C++ while eliminating whole categories of bugs — dangling pointers, data races,
-buffer overflows — *before your program ever runs*, at compile time.
+C++ while preventing safe code from causing undefined behavior through dangling
+references, double frees, data races, or unchecked out-of-bounds memory access.
+Many violations are rejected at compile time; checks that depend on runtime
+values, such as a dynamic array index, safely panic instead of reading arbitrary
+memory.
 
 ## The three pitches
 
@@ -32,23 +35,25 @@ buffer overflows — *before your program ever runs*, at compile time.
    use-after-free, double-free, and data races. (Rust still has `unsafe`, FFI,
    deliberate panics, and ordinary logic bugs — safety here means memory safety,
    not the absence of all bugs.)
-2. **Speed** — Rust compiles to native machine code with no runtime and no
-   garbage collector pausing your program. "Zero-cost abstractions": high-level
-   code compiles down to what you'd have written by hand.
+2. **Speed** — Rust compiles to native machine code without a virtual machine or
+   garbage-collected managed runtime. "Zero-cost abstractions": high-level code
+   is designed to compile down to code comparable to what you could write by
+   hand.
 3. **Concurrency** — the same rules that keep memory safe also make data races a
    *compile error*. This is Rust's famous "fearless concurrency."
 
 ## Rust vs. a language you already know
 
-If you're coming from Python, the mental model is quite different:
+If you know typical CPython, this optional comparison highlights the different
+mental models:
 
 | Dimension        | Python                    | Rust                          |
 | ---------------- | ------------------------- | ----------------------------- |
-| Execution        | Interpreted at runtime    | Compiled to a native binary   |
+| Execution        | Usually bytecode on a VM  | Compiled to a native binary   |
 | Typing           | Dynamic (checked at run)  | Static (checked at compile)   |
-| Memory managed by| Garbage collector         | Ownership & lifetimes         |
+| Memory managed by| Runtime/reference counting + cycle GC | Ownership & lifetimes |
 | Errors surface   | Often at runtime          | Mostly at compile time        |
-| Speed            | Slower, GC pauses         | C-level, predictable          |
+| CPU-bound speed  | Usually slower            | Typically fast and predictable|
 
 The trade is real: you do more work up front to satisfy the compiler. In return,
 "if it compiles, it usually works" becomes a genuine experience rather than a
@@ -58,7 +63,7 @@ Even "Hello, world" hints at the difference in philosophy:
 
 ```rust
 fn main() {
-    println!("Hello, world!");   // typed, compiled, no runtime
+    println!("Hello, world!");   // typed and compiled to native code
 }
 ```
 
@@ -109,9 +114,12 @@ maintenance justify the up-front rigor.
 
 ## Try it
 
-1. In one sentence, explain what Rust means by “memory safety without a garbage collector.”
-2. Name one task where Python is probably the better choice, and one where Rust might pay off.
-3. Look at the Python/Rust comparison table and pick the difference you think will affect you most.
+1. **Explain:** In one sentence, define “memory safety without a garbage
+   collector.”
+2. **Distinguish timing:** Give one example Rust rejects at compile time and one
+   safe operation that can still panic at runtime.
+3. **Choose a tool:** Name one task where a scripting language may be the faster
+   choice and one where Rust's guarantees may repay the learning cost.
 
 > **Takeaway:** Rust moves an entire class of bugs from *runtime crashes* to
 > *compiler errors*, at the cost of a steeper learning curve driven by the

@@ -139,28 +139,31 @@ When you care about a *single* pattern, a full `match` is noisy. `if let` is the
 concise form:
 
 ```rust
-let config: Option<i32> = Some(5);
+let message = Message::Write(String::from("hello"));
 
 // verbose
-match config {
-    Some(v) => println!("got {v}"),
-    None => {}
+match message {
+    Message::Write(text) => println!("got {text}"),
+    _ => {}
 }
 
 // concise — same thing
-if let Some(v) = config {
-    println!("got {v}");
+let message = Message::Write(String::from("hello"));
+if let Message::Write(text) = message {
+    println!("got {text}");
 }
 ```
 
 `let else` handles the "bind it or bail out" pattern cleanly:
 
 ```rust
-let Some(v) = config else {
-    println!("no config; giving up");
-    return;
-};
-// v is available for the rest of the function
+fn written_text(message: Message) -> String {
+    let Message::Write(text) = message else {
+        return String::from("not a written message");
+    };
+
+    text // available because the pattern matched
+}
 ```
 
 ## Why this matters
@@ -192,9 +195,14 @@ All arms must return compatible types. This is the same rule you learned for an
 
 ## Try it
 
-1. Define an enum `Light` with `Red`, `Yellow`, and `Green`.
-2. Use `match` to print what a driver should do for each light.
-3. Rewrite one single-case `match` as `if let`.
+1. **Classify:** Explain why a traffic light is “red or yellow or green,” not a
+   struct containing all three states.
+2. **Build:** Define `Light` with `Red`, `Yellow`, and `Green`.
+3. **Exhaust:** Use `match` to produce an instruction for every variant, then
+   add a fourth variant and read the compiler error.
+4. **Unpack:** Match a data-carrying variant and name the local variable created
+   by its pattern.
+5. **Shorten:** Rewrite one single-case `match` as `if let`.
 
 > **Takeaway:** model mutually exclusive alternatives as enum variants (which can
 > carry data), then handle them with `match`. Exhaustiveness turns "I forgot a

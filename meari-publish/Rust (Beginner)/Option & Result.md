@@ -27,10 +27,12 @@ subject: Rust (Beginner)
 title: Option & Result
 ---
 
-Most languages represent "no value" with `null` and "it failed" with exceptions.
-Rust has **neither**. Instead it uses two ordinary enums — `Option` and `Result`
-— so absence and failure become values the type system forces you to handle.
-This is [[Enums & Pattern Matching]] put to work.
+Many languages commonly represent “no value” with `null` and failure with
+exceptions. Safe, idiomatic Rust instead uses two ordinary enums—`Option` and
+`Result`—so absence and failure become values the type system forces you to
+handle. Raw pointers can be null and Rust can panic, but neither is the ordinary
+way to model an optional value or a recoverable error. This lesson is
+[[Enums & Pattern Matching]] put to work.
 
 ## `Option<T>`: a value that might be absent
 
@@ -40,6 +42,11 @@ enum Option<T> {      // built into the standard library
     None,             // there is no value
 }
 ```
+
+Here `T` means “whatever type may be inside.” If `T` is `char`, the complete
+type is `Option<char>` and the present variant is `Some(char)`. You can read
+angle brackets this way for now; [[Generics]] later explains how one definition
+works for many choices of `T`.
 
 Because there's no `null`, a function that might not return something returns an
 `Option`:
@@ -111,7 +118,39 @@ match parse_age("30") {
 | Models      | presence / absence  | success / failure + reason |
 | Carries why | no                  | yes — the `E` error value  |
 
-## Getting the value out
+## Handling every possibility
+
+Do not picture an `Option<i32>` as “an `i32` that might be broken.” It is a
+complete value with one of two shapes:
+
+```
+Option<i32>
+   ├── Some(42)  → contains an i32
+   └── None      → contains no i32
+```
+
+A `match` converts both shapes into the result your program needs:
+
+```rust
+let maybe_number: Option<i32> = Some(4);
+
+let doubled: i32 = match maybe_number {
+    Some(number) => number * 2,
+    None => 0,
+};
+```
+
+Trace it as:
+
+1. Inspect which variant `maybe_number` contains.
+2. If it is `Some`, bind the inner value to `number`.
+3. If it is `None`, use the fallback.
+4. Both arms produce an `i32`, so the whole `match` produces an `i32`.
+
+The wrapper has not been “ignored”; handling both variants is what safely turns
+an `Option<i32>` into a definite `i32`.
+
+## Convenience methods
 
 **`match`** is the fully explicit way, but the standard library gives you
 concise helpers for common cases:
@@ -122,7 +161,6 @@ let maybe: Option<i32> = Some(5);
 maybe.unwrap();            // 5    — but PANICS if None
 maybe.expect("need a value"); // 5 — panic with your message if None
 maybe.unwrap_or(0);       // 5, or 0 if it were None (a safe default)
-maybe.unwrap_or_else(|| compute_default()); // default computed lazily
 ```
 
 > `unwrap` and `expect` end the program with a panic on `None` or `Err`. They can
@@ -130,32 +168,11 @@ maybe.unwrap_or_else(|| compute_default()); // default computed lazily
 > what the program should do when the value is absent or the operation fails;
 > handle that case or propagate it to the caller (next lesson).
 
-## Combinators: transform without unwrapping
-
-You can operate on the value *inside* an `Option`/`Result` without tearing it
-open, which keeps error handling flat and readable:
-
-```rust
-let len: Option<usize> =
-    Some("hello").map(|s| s.len());        // Some(5)
-
-let doubled: Option<i32> =
-    Some(4).filter(|&n| n > 0).map(|n| n * 2); // Some(8)
-
-// chain fallible steps; the first None/Err short-circuits
-let n: Option<i32> = Some("42").and_then(|s| s.parse().ok()); // Some(42)
-```
-
-| Method        | Does                                              |
-| ------------- | ------------------------------------------------- |
-| `map`         | transform the inner value if present              |
-| `and_then`    | chain another Option/Result-returning step        |
-| `unwrap_or`   | supply a fallback value                           |
-| `ok_or`       | turn an `Option` into a `Result` with an error    |
-
 Handling every `Option`/`Result` by hand gets verbose when errors need to travel
 up through many function calls. The `?` operator streamlines exactly that — see
-[[Error Propagation & Panics]].
+[[Error Propagation & Panics]]. Later, once closures have been introduced,
+[[Closures & Iterators]] shows `map`, `filter`, and `and_then` as compact ways
+to transform wrapped values.
 
 ## Follow the type parameter
 
@@ -164,22 +181,17 @@ In `Option<i32>`, `i32` is the type inside `Some`; `None` carries no number. In
 `Err`. The wrapper is part of the type—you cannot use an `Option<i32>` directly
 where an `i32` is required because the value might be absent.
 
-```rust
-let maybe_number: Option<i32> = Some(4);
-let doubled = match maybe_number {
-    Some(number) => number * 2,
-    None => 0,
-};
-```
-
-Here matching converts both possibilities into one definite `i32`. Ask “what
-should happen in every variant?” before reaching for `unwrap`.
+Ask “what should happen in every variant?” before reaching for `unwrap`.
 
 ## Try it
 
-1. Write a function that returns `Option<char>` for the first character of a string.
-2. Match on that `Option` and handle both `Some` and `None`.
-3. Parse a string into a number with `"42".parse::<i32>()` and handle the `Result`.
+1. **Classify:** Decide whether “find a matching item” and “parse user input”
+   should return `Option` or `Result`, and explain why.
+2. **Trace:** Follow both `Some(4)` and `None` through the `doubled` match.
+3. **Fill:** Write a function returning `Option<char>` for the first character
+   of a string.
+4. **Handle failure:** Parse `"42"` and `"nope"` with `.parse::<i32>()`, matching
+   both `Ok` and `Err`.
 
 > **Takeaway:** Rust replaces `null` with `Option` and exceptions with `Result`,
 > making "might be absent" and "might fail" explicit in every signature. The

@@ -55,7 +55,7 @@ captured:
 | -------- | ----------------------------- | -------------- |
 | `Fn`     | only *reads* captures         | many times     |
 | `FnMut`  | *mutates* captured state      | many times     |
-| `FnOnce` | *consumes*/moves captures out | at least once* |
+| `FnOnce` | *consumes*/moves captures out | at most once* |
 
 <sub>*A `FnOnce` may be callable only once. The traits nest: every `Fn` is also
 `FnMut`, and every `FnMut` is also `FnOnce`.</sub>
@@ -77,6 +77,16 @@ force `FnOnce`. `greet` here still implements `Fn`, because it only *reads* the
 
 (`Fn`, `FnMut`, and `FnOnce` are *traits* — shared-behavior contracts formally
 introduced in [[Traits]].)
+
+Do not memorize the trait names on a first pass. Start with the behavior:
+
+```
+body only reads captured state    → can call repeatedly
+body changes captured state       → closure binding may need `mut`
+body moves captured state away    → that closure call consumes it
+```
+
+The trait names become useful when a function accepts a closure as a parameter.
 
 ## Iterators
 
@@ -198,13 +208,43 @@ makes the compiler message easier to understand.
 (`let result: Vec<_> = ...`) or use `collect::<Vec<_>>()`; `_` asks Rust to infer
 the element type while you specify the container.
 
+## Transforming `Option` and `Result`
+
+The same closure syntax works with the wrappers from [[Option & Result]].
+These methods run the closure only when the appropriate inner value exists:
+
+```rust
+let len: Option<usize> =
+    Some("hello").map(|text| text.len());       // Some(5)
+
+let doubled: Option<i32> =
+    Some(4).filter(|n| *n > 0).map(|n| n * 2); // Some(8)
+
+let absent: Option<i32> =
+    None.map(|n: i32| n * 2);                  // None; closure never runs
+```
+
+| Method | Mental expansion |
+| ------ | ---------------- |
+| `option.map(f)` | `Some(x) → Some(f(x))`; `None → None` |
+| `result.map(f)` | `Ok(x) → Ok(f(x))`; `Err(e) → Err(e)` |
+| `and_then(f)` | run a step that itself returns `Option` or `Result` |
+| `unwrap_or(x)` | use the inner success value or a fallback |
+
+Start with `match` when the flow is unclear. Reach for these methods after you
+can expand them back into both variants in your head.
+
 ## Try it
 
-1. Write a closure `|x| x * 2` and call it with a number.
-2. Use `.iter().map(...).collect()` to double every number in a vector.
-3. Use `.filter(...)` to keep only even numbers.
+1. **Trace:** Predict how many times a closure runs in
+   `(1..=5).filter(...).take(1).collect()`.
+2. **Fill:** Write a closure `|x| x * 2` and call it with a number.
+3. **Transform:** Use `.iter().map(...).collect()` to double a vector.
+4. **Compare ownership:** Run equivalent pipelines starting with `.iter()` and
+   `.into_iter()`, then check whether the original vector survives.
+5. **Expand:** Rewrite one `Option::map` call as a `match`.
 
-> **Takeaway:** closures are capturing anonymous functions (`Fn`/`FnMut`/`FnOnce`
-> by how they capture; `move` to take ownership); iterators are lazy pipelines
-> where adapters build a recipe and a consumer runs it — expressive *and*
-> zero-cost.
+> **Takeaway:** closures are anonymous functions whose bodies determine whether
+> they read, mutate, or consume captured state; `move` changes captures to owned
+> captures. Iterators are lazy pipelines where adapters build a recipe and a
+> consumer runs it.

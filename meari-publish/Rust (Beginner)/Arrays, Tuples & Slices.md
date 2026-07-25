@@ -145,7 +145,11 @@ type from length; a slice omits the length because it is stored at runtime.
 
 ```rust
 fn sum(values: &[i32]) -> i32 {
-    values.iter().sum()
+    let mut total = 0;
+    for &value in values {
+        total += value;
+    }
+    total
 }
 
 let array = [1, 2, 3];
@@ -156,11 +160,18 @@ println!("{} {}", sum(&array), sum(&vector));
 One function accepts both collections without copying either. Slicing can panic
 at runtime if a range is out of bounds, so ensure `start <= end <= len`.
 
+In the study exercise you will see `for &x in xs`. A slice loop normally yields
+`&i32` references. The pattern `&x` immediately copies the referenced `i32` into
+a plain local `x`; it is shorthand for iterating as `for item in xs` and then
+using `let x = *item`.
+
 ## Try it
 
-1. Make an array of five numbers and print its first element.
-2. Create a tuple like `("Ana", 30)` and destructure it into two variables.
-3. Take a slice of an array with `&arr[1..3]` and print its length.
+1. **Classify:** For `[i32; 4]`, `(i32, bool)`, and `&[i32]`, state whether the
+   type owns data and whether its length is part of the type.
+2. **Build:** Make an array of five numbers and print its first element.
+3. **Destructure:** Create `("Ana", 30)` and bind its fields to two names.
+4. **Borrow:** Take `&arr[1..3]`, then explain the indexes and resulting length.
 
 > **Takeaway:** arrays and tuples are fixed, owned, stack-friendly bundles;
 > slices are cheap borrowed windows into them. Prefer accepting a slice `&[T]`

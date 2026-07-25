@@ -62,8 +62,8 @@ println!("{p:#?}");    // pretty, multi-line
 ## `Clone` and `Copy` — duplicating values
 
 These tie straight back to [[Ownership & Moves]]. `Clone` gives you an explicit
-deep copy via `.clone()`; `Copy` makes assignment *duplicate* the value instead
-of moving it:
+duplication operation via `.clone()`; `Copy` makes assignment duplicate the
+value instead of moving it:
 
 ```rust
 #[derive(Clone, Copy)]
@@ -120,8 +120,8 @@ let c = Config::default();   // Config { verbose: false, level: 0 }
 | Derive        | Gives you                          | Example                    |
 | ------------- | ---------------------------------- | -------------------------- |
 | `Debug`       | `{:?}` / `{:#?}` printing           | `println!("{p:?}")`        |
-| `Clone`       | explicit `.clone()` deep copy       | `let q = p.clone();`       |
-| `Copy`        | implicit copy on assign (stack only)| `let q = p;` (p still ok)  |
+| `Clone`       | explicit type-defined duplication   | `let q = p.clone();`       |
+| `Copy`        | implicit bitwise copy on assignment | `let q = p;` (p still ok)  |
 | `PartialEq`   | `==` and `!=`                       | `a == b`                   |
 | `PartialOrd`/`Ord` | `<`, `>`, `.sort()`              | `v.sort()`                 |
 | `Default`     | `Type::default()`                   | `Config::default()`        |
@@ -170,11 +170,15 @@ and `PartialEq` but intentionally not `Clone` or `Copy`.
 
 ## Try it
 
-1. Add `#[derive(Debug)]` to a struct and print it with `{:?}`.
-2. Add `PartialEq` and compare two values with `==`.
-3. Try deriving `Copy` for a struct containing a `String`. Read the compiler error.
+1. **Match capability:** Choose the derive needed for `{:?}`, `==`, and
+   assignment that leaves the source usable.
+2. **Fill:** Add `Debug` and `PartialEq` to a struct, then print and compare it.
+3. **Diagnose:** Try deriving `Copy` for a struct containing a `String` and
+   explain the compiler error using the field requirement.
+4. **Predict:** Explain why cloning an `Rc<T>` need not duplicate `T`.
 
 > **Takeaway:** `#[derive(...)]` auto-implements routine traits from your fields
-> — `Debug` for `{:?}` printing, `Clone`/`Copy` for duplication, `PartialEq`/
+> — `Debug` for `{:?}` printing, `Clone`/`Copy` for explicit or implicit
+> duplication, `PartialEq`/
 > `PartialOrd` for comparing and sorting, `Default` for a zero value — as long as
 > every field supports the same trait.

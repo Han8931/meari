@@ -24,6 +24,16 @@ title: References & Borrowing
 would make sharing data painful. **Borrowing** is the fix: a reference lets you
 *use* a value without *owning* it, like lending a book instead of giving it away.
 
+Another useful phrasing is **temporary permission**:
+
+```
+owned T   = responsibility for keeping and cleaning up the value
+&T        = temporary permission to read it
+&mut T    = temporary exclusive permission to read and change it
+```
+
+Creating a reference does not create another owner and does not clone the value.
+
 ## Creating a reference with `&`
 
 ```rust
@@ -92,6 +102,16 @@ let r2 = &mut v;        // ❌ cannot borrow `v` as mutable:
 println!("{r1}");
 ```
 
+The rule is about **overlapping use**, not merely about two names appearing in
+the same block. Read this as a timeline:
+
+```
+create shared borrow ─────── last use of shared borrow
+        &text                         │
+          └──────── read permission ──┘
+                                      └── mutation may begin here
+```
+
 ## The Python contrast
 
 Python already passes objects "by reference," but with **no borrow checker** —
@@ -141,7 +161,7 @@ A practical rule of thumb for function parameters:
 
 Prefer borrowing (`&T`) by default — it's the least restrictive on your caller.
 
-## A borrow has a usable region
+## A borrow lasts through its last use
 
 A borrow usually lasts until its **last use**, not necessarily until the closing
 brace. This is why the following is accepted:
@@ -156,6 +176,16 @@ text.push('!');     // mutable access is now safe
 If you add another `println!("{view}")` after `push`, the program is rejected.
 When debugging a borrow error, look for the reference's last use, not only where
 it was created.
+
+Work through a borrow error in this order:
+
+1. Find the line where the reference is created.
+2. Find every later use of that reference.
+3. Mark whether each borrow is shared (`&`) or mutable (`&mut`).
+4. Find where those usable regions overlap.
+
+The compiler is not saying mutation is always forbidden. It is saying mutation
+cannot overlap a permission that would be invalidated by that mutation.
 
 ## References do not own or clone
 
@@ -179,9 +209,12 @@ than you might expect.
 
 ## Try it
 
-1. Write a function that takes `&str` and returns its length.
-2. Write a function that takes `&mut String` and appends an exclamation mark.
-3. Try to create one shared borrow and one mutable borrow of the same value at the same time. Read the error.
+1. **Trace:** Label the owner and the borrower in the `length(&name)` example.
+2. **Fill:** Write a function that takes `&str` and returns its length.
+3. **Mutate:** Write a function that takes `&mut String` and appends an
+   exclamation mark.
+4. **Diagnose:** Create one shared borrow and one mutable borrow whose uses
+   overlap. Move the shared borrow's last use earlier until it compiles.
 
 > **Takeaway:** borrowing lets many parts of a program read shared data, or one
 > part mutate it, but never both at once — and never past the data's lifetime.

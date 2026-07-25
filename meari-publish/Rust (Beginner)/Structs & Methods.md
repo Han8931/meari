@@ -192,6 +192,11 @@ makes no such promise — any method can mutate the object.
 ## Trace construction field by field
 
 ```rust
+struct Book {
+    title: String,
+    pages: u32,
+}
+
 let title = String::from("Rust Notes");
 let book = Book { title, pages: 120 };
 ```
@@ -208,9 +213,13 @@ borrowing rules still apply.
 
 ## Try it
 
-1. Define a `Book` struct with `title: String` and `pages: u32`.
-2. Add a method `is_long(&self) -> bool` that returns true if `pages > 300`.
-3. Create a `Book`, call the method, and print the result.
+1. **Trace:** For `Book { title, pages: 120 }`, identify which field moves and
+   which copies.
+2. **Build:** Define `Book` with `title: String` and `pages: u32`.
+3. **Fill:** Add `is_long(&self) -> bool` returning whether `pages > 300`.
+4. **Compare receivers:** Explain what would change if the method took
+   `&mut self` or `self`.
+5. **Create:** Construct a `Book`, call the method, and print the result.
 
 > **Takeaway:** structs name your data; `impl` blocks attach behavior. Default to
 > `&self`, upgrade to `&mut self` when you mutate, and reserve `self` for methods

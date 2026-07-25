@@ -141,6 +141,9 @@ now—use `cargo fmt`, and let repeated examples make it familiar.
 
 ## Try it
 
-1. Create a new project with `cargo new hello_rust`, then run it with `cargo run`.
-2. Change the message in `println!` and run it again.
-3. Run `cargo check` for fast feedback, then `cargo fmt` to format the code.
+1. **Order:** Put “compile,” “run `main`,” and “read `Cargo.toml`” in the order
+   used by `cargo run`.
+2. **Build:** Create a project with `cargo new hello_rust`, then run it.
+3. **Repair:** Introduce an undefined variable, run `cargo check`, and identify
+   the error code, source location, and explanation.
+4. **Practice:** Change the message, run `cargo fmt`, then run the program again.

@@ -32,21 +32,22 @@ one question: **which variable is responsible for this value right now?** Rust
 uses the answer to clean up memory safely, without a garbage collector or a
 manual `free` call.
 
-## The three rules
+## The three rules for ordinary owned values
 
 ```
-  1. Every value has exactly ONE owner.
-  2. There can only be one owner at a time.
-  3. When the owner goes out of scope, the value is DROPPED (freed).
+  1. Every owned value has a variable or field responsible for it.
+  2. That responsibility moves; it is not silently duplicated.
+  3. When the owner goes out of scope, the value is DROPPED.
 ```
 
-That's the entire model. The compiler enforces it, so cleanup is automatic *and*
-provably correct.
+Call that responsible variable or field the **owner**. Most of this course uses
+one clear owner at a time. Optional smart pointers such as `Rc` can coordinate
+shared ownership explicitly; they do not invalidate this starting model.
 
 ## Scope and `drop`
 
-When a value's owner leaves its block, Rust automatically frees the value — no
-`free()`, no `delete`, no GC:
+When a value's owner leaves its block, Rust runs that value's cleanup — no
+manual `free()` or `delete`, and no garbage collector deciding when to act:
 
 ```rust
 fn main() {
@@ -57,9 +58,14 @@ fn main() {
 
 ## Stack vs heap (why moves exist)
 
-Simple values (`i32`, `bool`, `char`) sit entirely on the **stack** — cheap to
-copy. A `String` or `Vec` is different: a small handle on the stack points to
-data on the **heap**.
+The stack and heap explain why some values need cleanup, but they do **not**
+decide whether assignment copies or moves.
+
+- An `i32` contains its whole value directly and needs no heap allocation.
+- A `String` value is a small handle—pointer, length, and capacity—that owns a
+  separate byte buffer on the heap.
+- A user-defined type may contain only direct fields and still choose move
+  behavior. The actual rule is whether the type implements `Copy`.
 
 ```
    let s = String::from("hi");
@@ -74,8 +80,9 @@ data on the **heap**.
 
 ## A move transfers ownership
 
-Assigning a heap value to another variable does **not** copy the heap data — it
-*moves* the handle, and the old variable becomes invalid:
+Assigning a non-`Copy` value to another variable transfers responsibility. Rust
+calls this a **move**. For a `String`, the small handle is copied internally, the
+heap bytes stay in place, and the old variable becomes unusable:
 
 ```rust
 let s1 = String::from("hello");
@@ -92,9 +99,21 @@ println!("{s1}");      // ❌ error: value borrowed after move
    s2 ●──► "hello"       ← only ONE owner, as rule #2 demands
 ```
 
-Why invalidate `s1`? If both `s1` and `s2` pointed at the same heap buffer, then
-when *both* went out of scope Rust would try to free it **twice** — a classic
-double-free bug. Moving prevents that by construction.
+Why invalidate `s1`? If both handles independently believed they owned the same
+buffer, both would try to clean it up—a double free. Rust instead transfers the
+one cleanup responsibility to `s2`.
+
+Trace the state after each line:
+
+| Line | `s1` | `s2` | Who will free the buffer? |
+| ---- | ---- | ---- | ------------------------- |
+| `let s1 = String::from("hello");` | usable | absent | `s1` |
+| `let s2 = s1;` | moved, unusable | usable | `s2` |
+| end of scope | no longer usable | dropped | cleanup has run |
+
+“Unusable” does not mean the name vanished or the bytes were erased. It means
+the compiler will reject any path that tries to use that name as though it still
+owned the value.
 
 ## The Python contrast — the biggest one in this course
 
@@ -115,8 +134,8 @@ gets freed exactly once — no GC required, no double-free possible.
 
 ## `Copy` types don't move
 
-Types that live entirely on the stack implement the `Copy` trait, so assignment
-duplicates them and the original stays valid:
+Some types implement the `Copy` trait. For them, assignment duplicates the
+value and both variables remain usable:
 
 ```rust
 let x = 5;
@@ -124,22 +143,26 @@ let y = x;             // x is COPIED, not moved
 println!("{x} {y}");   // ✅ both usable — 5 5
 ```
 
-| Behavior on assign | Types                                         |
-| ------------------ | --------------------------------------------- |
-| **Copy** (cheap)   | `i32`, `f64`, `bool`, `char`, tuples of Copy  |
-| **Move** (handle)  | `String`, `Vec<T>`, most heap-owning types    |
+| Behavior on assign | Decided by                         | Common examples |
+| ------------------ | ---------------------------------- | --------------- |
+| **Copy**           | the type implements `Copy`         | numbers, `bool`, `char`, references, tuples of `Copy` values |
+| **Move**           | the type does not implement `Copy` | `String`, `Vec<T>`, many structs |
 
-## `clone()` for an explicit deep copy
+## `clone()` for explicit duplication
 
-When you genuinely want two independent owners of heap data, ask for it
-explicitly with `.clone()` — the visible `.clone()` call is Rust telling you
-"this costs a heap copy":
+When you genuinely want another value, ask for it explicitly with `.clone()`.
+For `String`, cloning duplicates the heap buffer:
 
 ```rust
 let s1 = String::from("hello");
 let s2 = s1.clone();   // deep copy — s1 and s2 each own their own buffer
 println!("{s1} {s2}"); // ✅ both valid
 ```
+
+`clone()` means “run this type's explicit duplication behavior,” not universally
+“deep-copy every reachable object.” A later example is `Rc::clone`, which
+creates another owner of the same allocation. The important promise is that
+cloning is visible in your source and may do meaningful work.
 
 ## Moves happen at function boundaries too
 
@@ -160,10 +183,10 @@ without becoming its owner. That is the subject of the next lesson,
 
 ## A more precise mental model
 
-“Stack types copy, heap types move” is a useful first approximation, but the
-actual rule is: assignment copies only when the type implements `Copy`; otherwise
-it moves. A type can contain only stack data and still choose not to be `Copy`.
-The compiler follows the trait, not the storage location.
+The rule to retain is: **assignment copies only when the type implements
+`Copy`; otherwise it moves.** A type can contain only direct, fixed-size data and
+still choose not to be `Copy`. The compiler follows the trait, not an informal
+stack-versus-heap classification.
 
 A move also does not physically move the heap bytes. Rust copies the small
 `String` handle (pointer, length, and capacity) into the new variable and then
@@ -202,10 +225,14 @@ message much less mysterious.
 
 ## Try it
 
-1. Move a `String` from `s1` to `s2`, then try to print both. Read the error.
-2. Repeat the same experiment with an `i32`. Why does it still work?
-3. Use `.clone()` on a `String` and confirm both variables remain usable.
+1. **Trace:** For `let a = String::from("x"); let b = a;`, write the owner after
+   each statement before compiling it.
+2. **Repair:** Move a `String` from `s1` to `s2`, try to print `s1`, then repair
+   the program once by using only `s2` and once by cloning.
+3. **Compare:** Repeat the assignment with an `i32`. Explain the result using
+   the words “implements `Copy`.”
+4. **Create:** Pass a `String` into a function that returns it to the caller.
 
-> **Takeaway:** one owner, dropped at end of scope. Assignment *moves* heap
-> types (invalidating the source) and *copies* stack types. Reach for `.clone()`
-> only when you truly need a second independent owner.
+> **Takeaway:** one clear owner is responsible for cleanup. Assignment copies a
+> `Copy` type; otherwise it moves ownership and invalidates the source. A move
+> usually transfers responsibility without moving the heap allocation itself.

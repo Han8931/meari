@@ -122,7 +122,14 @@ fn notify(item: &impl Summary) {
 That `<T: PartialOrd>` from the generics lesson was exactly this pattern —
 `PartialOrd` is just a trait for "can be ordered."
 
-## Static vs dynamic dispatch
+## Static dispatch: the beginner default
+
+With `<T: Summary>` or `&impl Summary`, Rust knows each call's concrete type at
+compile time and can call the implementation directly. This is **static
+dispatch**. It is the ordinary starting point; use it unless you have a reason
+to store different concrete types together.
+
+## Dynamic dispatch: different types in one collection
 
 There are two ways to be generic over a trait, and the difference matters:
 
@@ -155,15 +162,22 @@ table of the type's method implementations, consulted at runtime:
 | `<T: Trait>` / `impl Trait`    | static (compile)    | zero-cost, inlined| the type is known at compile time |
 | `dyn Trait` (trait object)     | dynamic (runtime)   | small indirection | you need a *mix* of types together|
 
-Reach for generics by default; reach for `dyn Trait` when you genuinely need a
-heterogeneous collection like that `Vec<Box<dyn Summary>>`.
+Do not try to memorize the representation. The decision is:
 
-## You've already met traits
+```
+one concrete type per call, known at compile time → &impl Trait / <T: Trait>
+different concrete types in one collection       → Box<dyn Trait>
+```
+
+Reach for generics by default. Treat `dyn Trait` as a second-stage tool for a
+genuine heterogeneous collection such as `Vec<Box<dyn Summary>>`.
+
+## Traits across this course
 
 - `Box<dyn std::error::Error>` in [[Error Propagation & Panics]] is a trait
   object — any error type behind one pointer.
-- `Fn`, `FnMut`, `FnOnce` in [[Closures & Iterators]] are traits closures
-  implement.
+- `Fn`, `FnMut`, and `FnOnce` in the next lesson,
+  [[Closures & Iterators]], are traits implemented by closures.
 - `PartialOrd` in [[Generics]] is the "can be compared" trait.
 
 One rule to know: you can `impl` a trait for a type only if **you define the
@@ -216,9 +230,14 @@ the concrete types genuinely must differ at runtime.
 
 ## Try it
 
-1. Define a trait `Named` with a method `name(&self) -> &str`.
-2. Implement it for a simple `User` struct.
-3. Write a function that takes `&impl Named` and prints the name.
+1. **Classify:** In the `Summary` example, identify the trait, two implementing
+   types, a required method, and a default method.
+2. **Fill:** Define `Named` with `name(&self) -> &str` and implement it for
+   `User`.
+3. **Use a bound:** Write a function taking `&impl Named` and print the name.
+4. **Explain:** State why implementing a trait does not create a new object.
+5. **Optional:** Explain why a mixed `Article`/`Tweet` vector needs `dyn Summary`
+   while a single call to `notify` does not.
 
 > **Takeaway:** a trait is a contract of shared behavior; `impl Trait for Type`
 > fulfils it, and default methods cut boilerplate. Use trait *bounds* to make

@@ -124,12 +124,12 @@ explicit methods:
 ```rust
 let x: u8 = 255;
 x.wrapping_add(1);   // 0   — wrap on purpose
-x.checked_add(1);    // None — returns Option, Some(_) if it fit
 x.saturating_add(1); // 255 — clamp at the max
 ```
 
-That `Option` return connects to [[Option & Result]], where absence-as-a-value
-becomes a central theme. Next: putting values to work in [[Control Flow]].
+There is also `checked_add`, which reports “no result” instead of overflowing.
+After [[Option & Result]] introduces that return type, its signature will read
+naturally.
 
 ## Literals, annotations, and suffixes
 
@@ -145,27 +145,25 @@ let d = 1_000_000;   // underscores improve readability only
 When an error says “expected `usize`, found `i32`,” it is describing the two
 sides of an operation, not claiming either type is universally wrong.
 
-## Prefer checked conversion for uncertain data
+## Choose a conversion deliberately
 
-Use `as` when truncation or wrapping is intentional. For uncertain input, a
-checked conversion is safer:
+Before converting, ask:
 
-```rust
-let large: u16 = 300;
-let byte = u8::try_from(large);
+1. Can every source value fit in the destination type?
+2. If not, do I intentionally want truncation, wrapping, or saturation?
+3. If losing information would be a bug, should conversion report failure?
 
-match byte {
-    Ok(n) => println!("converted: {n}"),
-    Err(_) => println!("300 does not fit in a u8"),
-}
-```
-
-You will learn `Result` and `match` later. For now, notice that `as` produces a
-value unconditionally, while `try_from` reports failure.
+Use `as` only when its information-loss behavior is understood and intentional.
+Rust also provides checked conversions such as `u8::try_from(large)`, which
+report failure rather than changing `300` into `44`. [[Option & Result]]
+introduces the success-or-failure type used by that API.
 
 
 ## Try it
 
-1. Create variables of type `i32`, `f64`, `bool`, and `char`, then print them.
-2. Try adding an `i32` and an `f64`. Read the error, then fix it with `as`.
-3. Cast `300 as u8` and print the result. Does it match your expectation?
+1. **Read:** For each scalar declaration above, identify the value and its type.
+2. **Repair:** Try adding an `i32` and an `f64`. Read the error, then fix it with
+   an explicit conversion.
+3. **Predict:** Before running it, calculate `300 as u8`.
+4. **Choose:** Explain whether `as`, a checked conversion, or no conversion is
+   appropriate for a user-entered age.

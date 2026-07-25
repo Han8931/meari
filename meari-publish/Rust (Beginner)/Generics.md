@@ -4,26 +4,20 @@ id: rust-b-generics
 source: meari-course
 study:
   answer: |
-    fn largest<T: PartialOrd + Copy>(xs: &[T]) -> T {
-        let mut max = xs[0];
-        for &x in xs {
-            if x > max {
-                max = x;
-            }
-        }
-        max
+    fn choose_first<T>(first: T, _second: T) -> T {
+        first
     }
   kind: code
   lang: rust
-  prompt: 'Write a generic `largest<T: PartialOrd + Copy>(xs: &[T]) -> T` returning the maximum element. Assume `xs` is non-empty.'
+  prompt: 'Complete `choose_first<T>(first: T, _second: T) -> T` so it returns the first value. Both arguments must have the same type, but the function must work for any type.'
   starter: |
-    fn largest<T: PartialOrd + Copy>(xs: &[T]) -> T {
-        xs[0]
+    fn choose_first<T>(first: T, _second: T) -> T {
+        todo!()
     }
   tests:
-    - assert_eq!(largest(&[1, 5, 3]), 5);
-    - assert_eq!(largest(&[1.5, 2.5, 0.5]), 2.5);
-    - assert_eq!(largest(&['a', 'c', 'b']), 'c');
+    - assert_eq!(choose_first(1, 2), 1);
+    - assert_eq!(choose_first("left", "right"), "left");
+    - assert_eq!(choose_first(String::from("a"), String::from("b")), "a");
 subject: Rust (Beginner)
 title: Generics
 ---
@@ -35,12 +29,13 @@ type safety.
 
 ## The problem generics solve
 
-Say you want the largest element of a slice. Without generics you'd write it
-once for integers, again for characters, again for… everything:
+Say you want a function that returns the first item in a slice. Without generics
+you would write it once for integers, again for characters, and again for every
+other type:
 
 ```rust
-fn largest_i32(list: &[i32]) -> &i32 { /* ... */ }
-fn largest_char(list: &[char]) -> &char { /* ... identical logic ... */ }
+fn first_i32(items: &[i32]) -> Option<&i32> { items.first() }
+fn first_char(items: &[char]) -> Option<&char> { items.first() }
 ```
 
 The bodies are identical; only the type differs. That's exactly the duplication
@@ -52,26 +47,21 @@ Introduce a **type parameter** `T` in angle brackets after the function name,
 then use it like any type:
 
 ```rust
-fn largest<T: PartialOrd>(list: &[T]) -> &T {
-    let mut biggest = &list[0];
-    for item in list {
-        if item > biggest {     // needs T to be comparable — see the bound below
-            biggest = item;
-        }
-    }
-    biggest
+fn first<T>(items: &[T]) -> Option<&T> {
+    items.first()
 }
 
-let nums = vec![3, 7, 2, 9, 4];
-let best = largest(&nums);           // T = i32
-let letters = vec!['q', 'a', 'z'];
-let top = largest(&letters);         // T = char
+let nums = vec![3, 7, 2];
+let number = first(&nums);       // T = i32; result is Option<&i32>
+
+let letters = vec!['q', 'a'];
+let letter = first(&letters);    // T = char; result is Option<&char>
 ```
 
-The `T: PartialOrd` part is a **trait bound** — it says "`T` can be any type,
-*as long as* it can be compared with `>`." Without it, `item > biggest` wouldn't
-compile, because not every type is orderable. Traits are the whole next lesson,
-[[Traits]]; for now, read `<T: PartialOrd>` as "some comparable type `T`."
+`T` is a placeholder for one concrete type chosen at each call. In the first
+call every `T` becomes `i32`; in the second every `T` becomes `char`. The
+function body does not need to know which one because `.first()` works without
+performing any type-specific operation on the element.
 
 ## Generic structs and enums
 
@@ -127,11 +117,11 @@ performs *monomorphization*: it stamps out a concrete copy of the generic code
 for each type you actually use, exactly as if you'd hand-written them:
 
 ```
-   generic:   fn largest<T>(list: &[T]) -> &T
+   generic:   fn first<T>(items: &[T]) -> Option<&T>
                         │  you called it with i32 and char
           ┌─────────────┴─────────────┐
           ▼                           ▼
-   fn largest_i32(&[i32])       fn largest_char(&[char])
+   first for &[i32]             first for &[char]
         (concrete, inlined, as fast as bespoke code)
 ```
 
@@ -144,19 +134,14 @@ Python is dynamically typed, so it gets generics "for free" — a function just
 works on whatever you pass:
 
 ```python
-def largest(items):            # no type parameter needed
-    biggest = items[0]
-    for item in items:
-        if item > biggest:
-            biggest = item
-    return biggest
+def first(items):              # no type parameter needed
+    return items[0] if items else None
 ```
 
-But that freedom is unchecked: pass a list mixing incompatible types and it
-crashes at *runtime* with a `TypeError`. Rust's `<T: PartialOrd>` proves, at
-compile time, that whatever `T` you pick can actually be compared. Python's
-`typing.TypeVar` adds generic *hints* for documentation and tooling, but nothing
-enforces them the way Rust does.
+Python's freedom is checked dynamically. Rust checks at compile time that one
+call uses one consistent `T`. Python's `typing.TypeVar` can express a similar
+relationship for documentation and external type checkers, but the Python
+runtime does not enforce it.
 
 ## Read a generic signature aloud
 
@@ -180,14 +165,21 @@ fn print_twice<T: std::fmt::Display>(value: T) {
 
 Without `Display`, the function body is not allowed to format an unknown `T`.
 Bounds are promises available to the generic implementation, not merely
-restrictions placed on callers.
+restrictions placed on callers. `Display` is a **trait** and this requirement is
+a **trait bound**. [[Traits]] explains how to define capabilities and use bounds
+in detail.
 
 ## Try it
 
-1. Write a generic `first<T>(items: &[T]) -> &T` function that returns `&items[0]`.
-2. Call it with a `Vec<i32>` and a `Vec<&str>`.
-3. Explain in plain English what the `T` stands for.
+1. **Read aloud:** Explain each occurrence of `T` in
+   `fn first<T>(items: &[T]) -> Option<&T>`.
+2. **Fill:** Write that `first` function using `.first()`.
+3. **Compare calls:** Call it with a `Vec<i32>` and a `Vec<&str>`, naming the
+   concrete `T` in each call.
+4. **Diagnose:** Try `choose_first(1, "two")` and explain why one call cannot
+   choose two different meanings for `T`.
 
 > **Takeaway:** generics (`<T>`) let one function, struct, or enum serve many
-> types. Trait bounds like `<T: PartialOrd>` say what a type must be able to
-> *do*, and monomorphization compiles it all down to concrete, zero-cost code.
+> types. Every `T` in one call represents the same concrete type. Trait bounds
+> add capabilities that the generic body may use, and monomorphization compiles
+> generic code into concrete implementations.

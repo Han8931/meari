@@ -188,9 +188,12 @@ become clearer by doing so.
 
 ## Try it
 
-1. Create a `math` module with a public `add` function.
-2. Call it from `main` using `math::add(2, 3)`.
-3. Run `cargo fmt` after editing your code.
+1. **Separate roles:** In one sentence each, explain `mod`, `use`, and `pub`.
+2. **Build:** Create `math` with public `add`, then call `math::add(2, 3)`.
+3. **Move files:** Put `math` in `src/math.rs` and identify the declaration that
+   makes Rust include it.
+4. **Diagnose:** Make `add` private, read the error, then restore `pub`.
+5. **Practice:** Run `cargo fmt` after editing.
 
 > **Takeaway:** modules (`mod`, `pub`, `use`) organize code into namespaces with
 > private-by-default visibility, while `cargo add` plus `use` pulls in the vast

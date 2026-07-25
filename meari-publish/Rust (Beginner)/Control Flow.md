@@ -109,85 +109,9 @@ Python has no `loop … break value` construct — you'd use `while True:` with 
 `break`, but it can't *return* a value out of the loop the way Rust's `loop`
 does.
 
-## Iterating a collection: borrow vs consume
-
-How you write the `for` loop decides whether you can still use the collection
-afterward. The important detail is that a `for` loop must first obtain an
-**iterator** from the expression after `in`. It can obtain that iterator by
-borrowing the collection or by taking ownership of it.
-
-### Borrowing the collection
-
-```rust
-let names = vec!["Ana", "Bo", "Cy"];
-
-for n in &names {          // BORROW each item — names is still usable after
-    println!("{n}");
-}
-println!("{}", names.len()); // ✅ still fine
-```
-
-Here the loop expression is `&names`, a shared reference to the vector. The
-iterator therefore borrows `names` and yields a reference to each element. It
-never owns the vector. When the loop ends, the borrow ends, so the original
-owner—`names`—is still valid.
-
-Trace the ownership:
-
-```text
-names owns the Vec
-        │
-        └── loop temporarily borrows &names
-                └── n borrows one element at a time
-
-loop ends → temporary borrows end → names still owns the Vec
-```
-
-### Consuming the collection
-
-```rust
-let names = vec!["Ana", "Bo", "Cy"];
-
-for n in names {           // CONSUME names — it's moved into the loop
-    println!("{n}");
-}
-// println!("{}", names.len()); // ❌ names was moved away
-```
-
-This time the expression after `in` is `names` itself, not `&names`. `Vec` does
-not implement `Copy`, so giving it to the loop **moves ownership** into the
-vector's iterator. The iterator then yields owned elements one at a time. After
-the loop, the iterator and remaining vector storage are dropped. The binding
-`names` still exists as a name, but it no longer owns a value, so Rust refuses
-to let you call `.len()` on it.
-
-Conceptually, the loop behaves roughly like this:
-
-```rust
-let mut iterator = names.into_iter(); // names is moved here
-while let Some(n) = iterator.next() {
-    println!("{n}");
-}
-// iterator is dropped; names cannot be used again
-```
-
-The compiler error often says **“borrow of moved value: `names`.”** The word
-“borrow” refers to what `.len()` tries to do: method calls borrow their receiver
-temporarily. That borrow is impossible because `names` lost ownership earlier
-at `for n in names`.
-
-The difference is therefore not caused by `println!` or by the loop body. It is
-caused by the expression given to the loop:
-
-```
-  for n in &names   → iterator borrows the Vec → names survives
-  for n in names    → iterator owns the Vec    → names is moved
-```
-
-Use `&names` when you only need to read and want to keep the collection. Use
-`names` when you are finished with the collection and want the loop to take its
-elements. A third form, `&mut names`, temporarily borrows the vector mutably and
-lets the loop edit each element in place.
+For now, use `for` with numeric ranges. Later, after ownership and collections
+have names, [[Vec & HashMap]] spells out why `for item in values`,
+`for item in &values`, and `for item in &mut values` behave differently.
 
 ## Labeled breaks for nested loops
 
@@ -203,7 +127,7 @@ When loops nest, a plain `break` only exits the innermost one. Label a loop with
 }
 ```
 
-## Expressions, statements, and `()`
+## Expressions, statements, and `()`: a reminder
 
 An **expression** evaluates to a value; a **statement** performs an action and
 does not pass a useful value on.
@@ -229,9 +153,11 @@ Tracing these values on paper quickly exposes most off-by-one errors.
 
 1. Write an `if` expression that stores either `"small"` or `"big"` in a variable.
 2. Use a `for` loop to print the numbers 1 through 5.
-3. Create a `Vec` and loop over it once with `&v` and once by consuming `v`.
+3. Use a `while` loop to count down from 3.
+4. Remove the final expression from an `if` branch and read the resulting type
+   error.
 
 > **Takeaway:** lean on Rust's expression orientation — `let x = if …` and
 > `let x = loop { … break v }` replace clumsy mutable temporaries. And decide
-> deliberately whether a `for` loop should **borrow** (`&`) or **consume** its
-> collection.
+> use a final expression rather than a mutable temporary when a branch or loop
+> is calculating a value.
