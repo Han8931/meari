@@ -1,6 +1,10 @@
 package editor
 
-import "testing"
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // --- text objects ---
 
@@ -174,5 +178,19 @@ func TestBackwardSearch(t *testing.T) {
 	m = apply(m, key("?"), key("f"), key("o"), key("o"), enter()) // ?foo
 	if row, _ := m.cursorPos(); row != 2 {
 		t.Fatalf("?foo from the bottom should land on line 2, row=%d", row)
+	}
+}
+
+// ⌃e / ⌃y are Normal-mode scroll motions (implemented as cursor line moves).
+func TestEditorCtrlEY(t *testing.T) {
+	m := New("l0\nl1\nl2\nl3", true, nil)
+	m.SetSize(40, 10)
+	m = apply(m, tea.KeyMsg{Type: tea.KeyCtrlE})
+	if r, _ := m.cursorPos(); r != 1 {
+		t.Fatalf("ctrl+e row=%d, want 1", r)
+	}
+	m = apply(m, tea.KeyMsg{Type: tea.KeyCtrlY})
+	if r, _ := m.cursorPos(); r != 0 {
+		t.Fatalf("ctrl+y row=%d, want 0", r)
 	}
 }

@@ -190,6 +190,18 @@ func (c *chatModel) readerKey(msg tea.KeyMsg) {
 	case "N":
 		c.search("", false)
 		return
+	case "ctrl+e": // scroll the view down a line, cursor following (Vim ⌃e)
+		for i := 0; i < n; i++ {
+			c.vp.ScrollDown(1)
+		}
+		c.clampCursorToView()
+		return
+	case "ctrl+y": // scroll up a line (Vim ⌃y)
+		for i := 0; i < n; i++ {
+			c.vp.ScrollUp(1)
+		}
+		c.clampCursorToView()
+		return
 	default:
 		if c.scrollKey(msg) { // ⌃d/⌃u/⌃f/⌃b, PgUp/PgDn, Shift-arrows
 			c.clampCursorToView()

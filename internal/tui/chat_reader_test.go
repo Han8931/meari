@@ -243,6 +243,24 @@ func TestReaderCharFind(t *testing.T) {
 	}
 }
 
+// ⌃e / ⌃y scroll the lecture reader a line at a time.
+func TestReaderCtrlEY(t *testing.T) {
+	c := newLessonPane()
+	c.focused = true
+	c.setSize(40, 5)
+	c.setLesson(strings.Repeat("line of text\n", 40))
+
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	if c.vp.YOffset != 1 {
+		t.Fatalf("⌃e should scroll down one line, YOffset=%d", c.vp.YOffset)
+	}
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	c, _ = c.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	if c.vp.YOffset != 1 {
+		t.Fatalf("⌃y should scroll back up to 1, YOffset=%d", c.vp.YOffset)
+	}
+}
+
 func TestResolveTopicLink(t *testing.T) {
 	topics := map[string]curriculum.Topic{
 		"py-b-vars": {ID: "py-b-vars", Title: "Variables & Types"},
