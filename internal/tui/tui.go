@@ -3267,10 +3267,15 @@ func (m Model) dashboardView() string {
 	}
 
 	greeting := lipgloss.NewStyle().Bold(true).Render("What will you learn today?")
-	body := greeting + "\n\n" + strings.Join(rows, "\n")
+	body := ""
+	if banner := m.dashboardBanner(colW); banner != "" {
+		body += banner + "\n\n"
+	}
+	body += greeting
 	if q := m.quoteView(colW); q != "" {
 		body += "\n\n\n" + q
 	}
+	body += "\n\n\n" + strings.Join(rows, "\n")
 
 	head := titleBar.Width(m.width).Render("Meari — 메아리")
 	hints := "↑/↓ or j/k move · enter choose · q / esc quit"
@@ -3279,7 +3284,43 @@ func (m Model) dashboardView() string {
 	return head + "\n" + mid + "\n" + foot
 }
 
-// quoteView renders the daily epigraph beneath the launch options: an italic,
+// dashboardBanner renders the "meari" wordmark shown atop the launch screen. It
+// is skipped on terminals too narrow to fit it or too short to spare the rows,
+// so the option list always stays reachable. The launch screen centers each
+// line individually, so every line is padded to the banner's width to keep the
+// glyphs aligned as one block.
+func (m Model) dashboardBanner(width int) string {
+	art := []string{
+		`███╗   ███╗███████╗ █████╗ ██████╗ ██╗`,
+		`████╗ ████║██╔════╝██╔══██╗██╔══██╗██║`,
+		`██╔████╔██║█████╗  ███████║██████╔╝██║`,
+		`██║╚██╔╝██║██╔══╝  ██╔══██║██╔══██╗██║`,
+		`██║ ╚═╝ ██║███████╗██║  ██║██║  ██║██║`,
+		`╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝`,
+	}
+	// Pad to a common width; every glyph row must be identical length so the
+	// per-line centering doesn't stagger the wordmark.
+	bw := 0
+	for _, ln := range art {
+		if w := lipgloss.Width(ln); w > bw {
+			bw = w
+		}
+	}
+	if width < bw || m.height < 18 {
+		return "" // no room — keep the option list front and center
+	}
+	accent := backlinkHeaderStyle // bold teal, matches the app
+	var lines []string
+	for _, ln := range art {
+		if pad := bw - lipgloss.Width(ln); pad > 0 {
+			ln += strings.Repeat(" ", pad)
+		}
+		lines = append(lines, accent.Render(ln))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// quoteView renders the daily epigraph above the launch options: an italic,
 // gutter-barred line with a dim attribution (the page-sage style).
 func (m Model) quoteView(width int) string {
 	q := m.quote
