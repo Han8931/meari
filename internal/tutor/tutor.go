@@ -35,6 +35,11 @@ type Challenge struct {
 	// Lang is the programming language the tests run in ("python" or "go").
 	// Empty means Python, for backward compatibility with LLM-generated content.
 	Lang string `json:"-"`
+	// Solution is the canonical reference answer shipped with built-in course
+	// topics (from a note's study.answer). When present, ":answer" reveals it
+	// directly with no model call, so answers stay checkable fully offline.
+	// Empty for LLM-generated challenges, which have no pre-written answer.
+	Solution string `json:"-"`
 }
 
 // Tutor issues model requests for one configured provider.

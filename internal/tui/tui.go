@@ -1394,9 +1394,29 @@ func (m Model) cmdAnswer() (tea.Model, tea.Cmd) {
 		m.flash("no challenge open — pick one on the left first")
 		return m, nil
 	}
+	// Built-in course topics ship a canonical answer (study.answer). Reveal it
+	// verbatim — it's the exact solution the tests check, and it works with no
+	// AI provider configured. Fall back to the tutor only when none was shipped
+	// (LLM-generated challenges), which needs a provider.
+	if sol := strings.TrimSpace(m.current.Solution); sol != "" {
+		m.chat.append(roleLesson, "Model answer\n\n"+m.formatSolution(sol))
+		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: "Model answer:\n" + sol})
+		return m, nil
+	}
 	m.pending++
 	m.loadKind = "writing model answer"
 	return m, answerCmd(m.deps.Tutor, m.current)
+}
+
+// formatSolution renders a shipped reference answer for the chat. Code answers
+// are wrapped in a fenced block tagged with the challenge language so they
+// syntax-highlight like the tutor's own answers; prose answers (essay/quiz) are
+// shown as-is.
+func (m Model) formatSolution(sol string) string {
+	if isReflectionLang(m.current.Lang) {
+		return sol
+	}
+	return "```" + challengeLang(m.current) + "\n" + sol + "\n```"
 }
 
 // cmdClear handles ":clear" (chat transcript), ":clear progress", and
@@ -2152,6 +2172,7 @@ func (m *Model) startTopicView(t curriculum.Topic, view string) tea.Cmd {
 		StarterCode: t.Challenge.StarterCode,
 		Tests:       t.Challenge.Tests,
 		Lang:        lang,
+		Solution:    t.Challenge.Solution,
 	}
 	m.current = ch
 	*m.curID = ch.ID
