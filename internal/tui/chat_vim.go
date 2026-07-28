@@ -1,7 +1,8 @@
 package tui
 
-// chat_vim.go extends the chat input's light Vim layer with a character-wise
-// Visual mode (v → motions → y/d/x/c) plus gg/G first/last-line jumps. Like
+// chat_vim.go extends the chat input's light Vim layer with Visual mode —
+// character-wise (v) and linewise (V), both → motions → y/d/x/c — plus gg/G
+// first/last-line jumps. Like
 // the in-app editor, it drives the bubbles textarea from outside: motions move
 // the real cursor (sent as keys or via inputMoveTo), the selection span is
 // tracked as flat rune indices into Value(), and operations rewrite the value.
@@ -98,22 +99,80 @@ func (c *chatModel) inputLastLine() {
 
 // --- Visual mode ---
 
-// enterVisual anchors a character-wise selection at the cursor.
-func (c *chatModel) enterVisual() {
+// inputOnChar clamps a flat index onto a real character, Vim-style: the
+// textarea lets the cursor rest one past the last rune of a line, but a Visual
+// selection is inclusive of the rune UNDER the cursor. Without this, entering
+// Visual where Esc leaves you — at the end of the draft — spans nothing, so no
+// highlight paints and y/d/c are silent no-ops. An empty line has no character
+// to sit on and is left alone.
+func inputOnChar(runes []rune, idx int) int {
+	if idx > len(runes) {
+		idx = len(runes)
+	}
+	if idx < 0 {
+		return 0
+	}
+	atLineEnd := idx == len(runes) || runes[idx] == '\n'
+	if atLineEnd && idx > 0 && runes[idx-1] != '\n' {
+		return idx - 1
+	}
+	return idx
+}
+
+// inputLineBounds returns the flat span of the logical line holding idx, as
+// [lineStart, lineEnd) with the '\n' terminator excluded.
+func inputLineBounds(runes []rune, idx int) (lineStart, lineEnd int) {
+	if idx > len(runes) {
+		idx = len(runes)
+	}
+	lineStart = 0
+	for i := idx - 1; i >= 0; i-- {
+		if runes[i] == '\n' {
+			lineStart = i + 1
+			break
+		}
+	}
+	lineEnd = len(runes)
+	for i := idx; i < len(runes); i++ {
+		if runes[i] == '\n' {
+			lineEnd = i
+			break
+		}
+	}
+	return lineStart, lineEnd
+}
+
+// enterVisual anchors a selection at the cursor — character-wise (v) or
+// linewise (V). The real cursor snaps onto a character so the highlight is
+// visible from the first keystroke.
+func (c *chatModel) enterVisual(linewise bool) {
+	runes := []rune(c.input.Value())
+	if on := inputOnChar(runes, c.cursorFlat()); on != c.cursorFlat() {
+		r, col := inputRowColOf(runes, on)
+		c.inputMoveTo(r, col)
+	}
 	c.visual = true
+	c.vLine = linewise
 	c.vAnchor = c.cursorFlat()
 }
 
 // visualSpanInput returns the value's runes and the selection as a half-open
-// range [start, cut) — inclusive of the rune under the cursor, Vim-style.
+// range [start, cut) — inclusive of the rune under the cursor, Vim-style. In
+// linewise mode (V) the span widens to whole lines, trailing '\n' included so
+// d removes the line outright.
 func (c *chatModel) visualSpanInput() (runes []rune, start, cut int) {
 	runes = []rune(c.input.Value())
-	a, b := c.vAnchor, c.cursorFlat()
+	a, b := inputOnChar(runes, c.vAnchor), inputOnChar(runes, c.cursorFlat())
 	if a > b {
 		a, b = b, a
 	}
-	if a < 0 {
-		a = 0
+	if c.vLine {
+		start, _ = inputLineBounds(runes, a)
+		_, cut = inputLineBounds(runes, b)
+		if cut < len(runes) {
+			cut++ // the '\n' closing the last selected line
+		}
+		return runes, start, cut
 	}
 	if b < len(runes) {
 		b++
@@ -128,7 +187,7 @@ func (c *chatModel) visualSpanInput() (runes []rune, start, cut int) {
 // leaves the cursor at the selection start.
 func (c *chatModel) visualYankInput() string {
 	runes, start, cut := c.visualSpanInput()
-	c.visual = false
+	c.visual, c.vLine = false, false
 	if start >= cut {
 		return ""
 	}
@@ -146,7 +205,18 @@ func (c *chatModel) visualYankInput() string {
 // mode afterwards (c).
 func (c *chatModel) visualDeleteInput(change bool) {
 	runes, start, cut := c.visualSpanInput()
-	c.visual = false
+	linewise := c.vLine
+	c.visual, c.vLine = false, false
+	// Vim's Vc empties the selected lines but keeps one to type on, so the
+	// trailing newline swallowed by the linewise span is put back.
+	if linewise && change && cut > start && cut <= len(runes) && runes[cut-1] == '\n' {
+		cut--
+	}
+	// Vd on the trailing lines has no newline of its own to take; it eats the
+	// one above instead, so no blank line is left behind.
+	if linewise && !change && cut == len(runes) && start > 0 && runes[start-1] == '\n' {
+		start--
+	}
 	if start >= cut {
 		return
 	}
@@ -174,8 +244,22 @@ func (c *chatModel) visualKey(msg tea.KeyMsg) string {
 		return ""
 	}
 	switch msg.String() {
-	case "esc", "v":
-		c.visual = false
+	case "esc":
+		c.visual, c.vLine = false, false
+	// v and V toggle their own flavor off and switch between the two, keeping
+	// the anchor — exactly Vim's behavior.
+	case "v":
+		if c.vLine {
+			c.vLine = false
+		} else {
+			c.visual = false
+		}
+	case "V":
+		if c.vLine {
+			c.visual, c.vLine = false, false
+		} else {
+			c.vLine = true
+		}
 	// --- motions (extend the selection) ---
 	case "h", "left":
 		send(tea.KeyLeft)
@@ -312,11 +396,18 @@ func (c chatModel) paintInputSelection(lines []string) {
 		}
 		row := rows[i]
 		lo, hi := max(row.start, selStart), min(row.end, selCut)
-		if lo >= hi {
+		var loCol, hiCol int
+		switch {
+		case lo < hi:
+			loCol = promptW + runewidth.StringWidth(string(row.runes[:lo-row.start]))
+			hiCol = promptW + runewidth.StringWidth(string(row.runes[:hi-row.start]))
+		// A blank line inside a linewise selection has no text to tint, so give
+		// it the one-cell block Vim shows for the newline.
+		case c.vLine && row.start >= selStart && row.start < selCut:
+			loCol, hiCol = promptW, promptW+1
+		default:
 			continue
 		}
-		loCol := promptW + runewidth.StringWidth(string(row.runes[:lo-row.start]))
-		hiCol := promptW + runewidth.StringWidth(string(row.runes[:hi-row.start]))
 		w := ansi.StringWidth(lines[i])
 		if loCol >= w {
 			continue

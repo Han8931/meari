@@ -53,10 +53,12 @@ type chatModel struct {
 	// return to typing. pendingOp holds the first key of dd/cc.
 	normal    bool
 	pendingOp rune
-	// visual is the input's character-wise Visual mode (v from Normal);
-	// vAnchor is the selection anchor as a flat rune index into the value.
-	// pendingG arms the two-key gg jump (Normal and Visual alike).
+	// visual is the input's Visual mode (v/V from Normal); vLine marks the
+	// linewise flavor (V), which snaps the span to whole lines. vAnchor is the
+	// selection anchor as a flat rune index into the value. pendingG arms the
+	// two-key gg jump (Normal and Visual alike).
 	visual   bool
+	vLine    bool
 	vAnchor  int
 	pendingG bool
 
@@ -831,7 +833,9 @@ func (c *chatModel) normalKey(msg tea.KeyMsg) {
 		c.exitNormal()
 	// --- input-buffer jumps and Visual mode ---
 	case "v":
-		c.enterVisual()
+		c.enterVisual(false)
+	case "V":
+		c.enterVisual(true)
 	case "g":
 		c.pendingG = true
 		return // keep pendingOp; gg completes on the next key

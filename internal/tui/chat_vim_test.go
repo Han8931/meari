@@ -108,6 +108,83 @@ func TestChatInputVisualPaint(t *testing.T) {
 	}
 }
 
+// Esc leaves the cursor one past the last rune; v there must still grab the
+// character under it (Vim's inclusive cursor) rather than an empty span.
+func TestChatInputVisualAtEndOfLine(t *testing.T) {
+	forceColorTUI(t)
+	c := visualChat(t, "hello world")
+	c.input.SetCursor(len("hello world"))
+	pressChat(&c, "v")
+	_, start, cut := c.visualSpanInput()
+	if start != 10 || cut != 11 {
+		t.Fatalf("selection [%d,%d), want [10,11) — the final rune", start, cut)
+	}
+	if !strings.Contains(c.inputView(), "48;5;") {
+		t.Fatal("no selection background painted at end of line")
+	}
+}
+
+// V selects whole lines, j extends by a line, and d removes them outright.
+func TestChatInputVisualLinewise(t *testing.T) {
+	forceColorTUI(t)
+	c := visualChat(t, "one\ntwo\nthree")
+	pressChat(&c, "V")
+	if !c.visual || !c.vLine {
+		t.Fatal("V should enter linewise Visual")
+	}
+	_, start, cut := c.visualSpanInput()
+	if start != 0 || cut != 4 { // "one\n"
+		t.Fatalf("V selection [%d,%d), want [0,4)", start, cut)
+	}
+	if !strings.Contains(c.inputView(), "48;5;") {
+		t.Fatal("no selection background painted in linewise Visual")
+	}
+	pressChat(&c, "j", "d")
+	if got := c.input.Value(); got != "three" {
+		t.Fatalf("after Vjd: %q, want %q", got, "three")
+	}
+
+	// Deleting the last line takes the newline above it, leaving no blank.
+	c = visualChat(t, "one\ntwo")
+	pressChat(&c, "G", "V", "d")
+	if got := c.input.Value(); got != "one" {
+		t.Fatalf("after GVd: %q, want %q", got, "one")
+	}
+}
+
+// Vc empties the line but keeps it, landing in Insert mode (as Vim does).
+func TestChatInputVisualLinewiseChange(t *testing.T) {
+	c := visualChat(t, "one\ntwo")
+	pressChat(&c, "V", "c")
+	if got := c.input.Value(); got != "\ntwo" {
+		t.Fatalf("after Vc: %q, want %q", got, "\ntwo")
+	}
+	if c.normal {
+		t.Fatal("Vc should end in Insert mode")
+	}
+}
+
+// v and V switch flavors while keeping the anchor; the same key twice exits.
+func TestChatInputVisualToggle(t *testing.T) {
+	c := visualChat(t, "one\ntwo")
+	pressChat(&c, "v", "V")
+	if !c.visual || !c.vLine {
+		t.Fatal("V from character-wise Visual should switch to linewise")
+	}
+	pressChat(&c, "v")
+	if !c.visual || c.vLine {
+		t.Fatal("v from linewise Visual should switch back to character-wise")
+	}
+	pressChat(&c, "v")
+	if c.visual {
+		t.Fatal("v in character-wise Visual should exit")
+	}
+	pressChat(&c, "V", "V")
+	if c.visual || c.vLine {
+		t.Fatal("V in linewise Visual should exit")
+	}
+}
+
 // :explain uses the editor selection (or chat drag) and asks in simple words.
 func TestVaultExplainSelection(t *testing.T) {
 	m := newTestVaultModel(t)
