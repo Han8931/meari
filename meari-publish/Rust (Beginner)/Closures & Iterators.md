@@ -44,7 +44,7 @@ println!("{}", scale(5));          // 50
 
 Types are usually inferred, so closures are far terser than named functions.
 
-### How closures capture
+### Later: how closures capture
 
 A closure borrows or takes what it uses, following the same
 [[References & Borrowing|borrowing]] rules. The trait it implements, though, is
@@ -189,7 +189,7 @@ Iterator chains express *what* you want, not the bookkeeping of *how*. Prefer
 them for transformations; reach for an explicit loop when the logic is genuinely
 imperative or the borrow interplay gets awkward.
 
-## `iter`, `iter_mut`, and `into_iter`
+## Later: `iter`, `iter_mut`, and `into_iter`
 
 These three starting points control ownership:
 
@@ -208,7 +208,7 @@ makes the compiler message easier to understand.
 (`let result: Vec<_> = ...`) or use `collect::<Vec<_>>()`; `_` asks Rust to infer
 the element type while you specify the container.
 
-## Transforming `Option` and `Result`
+## Later: transforming `Option` and `Result`
 
 The same closure syntax works with the wrappers from [[Option & Result]].
 These methods run the closure only when the appropriate inner value exists:
@@ -233,6 +233,25 @@ let absent: Option<i32> =
 
 Start with `match` when the flow is unclear. Reach for these methods after you
 can expand them back into both variants in your head.
+
+## Syntax checkpoint
+
+Read this pipeline from left to right:
+
+```rust
+values.iter().map(|x| x * 2).sum()
+```
+
+1. `.iter()` borrows the values one at a time.
+2. `|x| x * 2` is a small unnamed function; the bars surround its input.
+3. `.map(...)` applies that function to each item lazily.
+4. `.sum()` drives the iterator and combines its outputs.
+
+Start with `map` and one consumer. Add `filter`, capture rules, and closure trait
+names only after this shape is comfortable. You are ready to continue when you
+can translate a simple `for` loop into `.iter().map(...).collect()` or `.sum()`.
+The final core lesson organizes the functions and types you have learned into
+modules and introduces external crates.
 
 ## Try it
 

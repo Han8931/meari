@@ -6,19 +6,18 @@ study:
   answer: |
     fn update_score() -> i32 {
         let mut score = 10;
-        score = 15;
-        let score = score + 5;
+        score += 5;
         score
     }
   kind: code
   lang: rust
-  prompt: 'Complete `update_score()`: declare mutable `score` as 10, change it to 15, then shadow it with `score + 5` and return the result.'
+  prompt: 'Complete `update_score()`: declare mutable `score` as 10, add 5 to it with `+=`, then return it.'
   starter: |
     fn update_score() -> i32 {
         0
     }
   tests:
-    - assert_eq!(update_score(), 20);
+    - assert_eq!(update_score(), 15);
 subject: Rust (Beginner)
 title: Variables & Mutability
 ---
@@ -42,7 +41,7 @@ If you try to mutate an immutable binding, the compiler stops you *and* suggests
 adding `mut`. The rule of thumb: reach for `mut` only when you genuinely need to
 change a value in place.
 
-## Shadowing is not mutation
+## Later: shadowing is not mutation
 
 You can declare a new variable with the same name as an old one. This
 **shadows** the previous binding — it's a brand-new variable that happens to
@@ -65,7 +64,7 @@ shadow :  new binding each time,        type may CHANGE
           let n = "5";  let n = 5;      // &str → i32
 ```
 
-## `const` — compile-time constants
+## Later: `const` — compile-time constants
 
 ```rust
 const MAX_POINTS: u32 = 100_000;
@@ -141,6 +140,22 @@ let message = "outer";
 }
 println!("{message}");     // outer is visible again
 ```
+
+## Syntax checkpoint
+
+Read these three lines one symbol at a time:
+
+```rust
+let score = 10;          // create an immutable binding
+let mut lives = 3;       // `mut` permits later assignment
+lives -= 1;              // shorthand for: lives = lives - 1
+```
+
+`let` creates a name; `mut` changes what that name is allowed to do. Neither
+word describes the number's type. You are ready for the next lesson when you
+can explain why changing `score` is rejected but changing `lives` is allowed.
+Next, Rust gives names such as `i32`, `f64`, and `bool` to the kinds of values
+these bindings hold.
 
 ## Try it
 

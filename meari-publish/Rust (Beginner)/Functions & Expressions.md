@@ -58,9 +58,9 @@ fn multiply(left: i32, right: i32) -> i32
 ```
 
 Rust requires every parameter type to be written explicitly. The arrow
-`-> Type` states the return type. (`i32` is Rust's usual whole-number type; the
-next lessons introduce types in detail.) When there is no arrow, the function
-returns the **unit value** `()`, meaning “no useful result”:
+`-> Type` states the return type. (`i32` is Rust's usual whole-number type; see
+[[Data Types & Type Casting]] if you need a refresher.) When there is no arrow,
+the function returns the **unit value** `()`, meaning “no useful result”:
 
 ```rust
 fn announce() {
@@ -182,6 +182,27 @@ def add(a, b):
 The Rust difference that matters most is not the braces. It is that the
 signature is a checked contract: `fn add(a: i32, b: i32) -> i32` tells both the
 reader and compiler exactly what may enter and leave.
+
+## Syntax checkpoint
+
+Read a signature in four pieces instead of as one dense line:
+
+```rust
+fn add(a: i32, b: i32) -> i32 {
+//  ^^^  ^^^^^^  ^^^^^^    ^^^
+//  name input 1 input 2   output
+    a + b
+}
+```
+
+The commas separate inputs, `:` separates each input's name from its type, and
+`->` points to the output type. Inside the braces, the final expression supplies
+the output. Do not combine this with explicit `return` yet unless you need an
+early exit.
+
+You are ready for control flow when you can write one two-parameter function
+and explain why its final expression has no semicolon. The next lesson keeps
+that same “a block produces its final value” rule and applies it to `if`.
 
 ## Try it
 

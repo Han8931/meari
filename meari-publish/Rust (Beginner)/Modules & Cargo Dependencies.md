@@ -74,7 +74,7 @@ fn main() {
 | `pub`          | anywhere the parent is reachable        |
 | `pub(crate)`   | anywhere in this crate, but not outside |
 
-## Modules across files
+## Later: modules across files
 
 Once a module grows, move it to its own file. `mod foo;` (note the semicolon,
 not a block) tells Rust to load `foo` from a file:
@@ -123,7 +123,7 @@ cargo add rand          # edits Cargo.toml for you
 
 ```toml
 [dependencies]
-rand = "0.8"
+rand = "0.9"
 ```
 
 Then `use` it in your code just like a standard-library module:
@@ -132,7 +132,7 @@ Then `use` it in your code just like a standard-library module:
 use rand::Rng;
 
 fn main() {
-    let n = rand::thread_rng().gen_range(1..=6);   // roll a die
+    let n = rand::rng().random_range(1..=6);       // roll a die
     println!("rolled a {n}");
 }
 ```
@@ -167,7 +167,7 @@ ownership. From here the natural next steps are **lifetimes** in depth, **writin
 tests** with `#[test]`, and **concurrency** — where the borrow rules you learned
 pay off as fearless parallelism.
 
-## Separate `mod`, `use`, and `pub`
+## Later: separate `mod`, `use`, and `pub`
 
 Beginners often treat these as three forms of import, but they solve different
 problems:
@@ -185,6 +185,25 @@ Cargo packages may contain a library crate (`src/lib.rs`), binary crates
 (`src/main.rs` or `src/bin/*.rs`), or both. A small project usually starts with
 one package and one binary crate; do not split files until names and responsibilities
 become clearer by doing so.
+
+## Syntax checkpoint
+
+Do not learn `mod`, `pub`, and `use` as one operation:
+
+```rust
+mod math;              // include the module in this crate
+pub fn add() {}        // permit access across a module boundary
+use crate::math::add;  // make an existing path shorter here
+```
+
+A dependency adds one earlier step: Cargo first records and downloads an
+external crate; then Rust code can refer to paths inside it. `use` by itself
+neither downloads code nor changes privacy.
+
+You have completed the core path when you can explain package → crate → module,
+move one module into its own file, and add one dependency with Cargo. Return to
+the **Later** sections as projects make their details relevant. The smart-pointer
+lesson is optional and should not block you from building ordinary Rust code.
 
 ## Try it
 

@@ -132,7 +132,7 @@ and, in threaded code, data races. Rust's "many readers **or** one writer" rule
 forbids the dangerous combination at compile time, which is the whole basis of
 its fearless concurrency.
 
-## No dangling references
+## Later: no dangling references
 
 Rust also refuses to let a reference outlive the data it points to — a dangling
 pointer is a compile error, not a runtime crash:
@@ -161,7 +161,7 @@ A practical rule of thumb for function parameters:
 
 Prefer borrowing (`&T`) by default — it's the least restrictive on your caller.
 
-## A borrow lasts through its last use
+## Later: a borrow lasts through its last use
 
 A borrow usually lasts until its **last use**, not necessarily until the closing
 brace. This is why the following is accepted:
@@ -206,6 +206,24 @@ println!("{count}"); // 5
 For method calls such as `s.len()`, Rust often inserts the needed borrowing or
 dereferencing automatically. That convenience is why `*` appears less often
 than you might expect.
+
+## Syntax checkpoint
+
+Compare these calls before learning any lifetime notation:
+
+```rust
+read(&text);          // lend shared read access
+change(&mut text);    // lend exclusive change access
+consume(text);        // give ownership away
+```
+
+The `&` belongs to the borrow, while `mut` says that borrow may modify the
+value. In both mutable positions—the binding and the borrow—Rust makes the
+permission visible: `let mut text` and `&mut text`.
+
+You are ready to continue when you can choose among `T`, `&T`, and `&mut T` for
+a simple parameter. The next lesson applies that exact choice to text: owned
+`String` versus borrowed `&str`.
 
 ## Try it
 

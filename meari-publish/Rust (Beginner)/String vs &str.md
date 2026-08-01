@@ -155,6 +155,25 @@ Unicode libraries. Also, `&String` means “borrow this particular owned contain
 while `&str` means “borrow text from any source”; this is why parameters normally
 use `&str`.
 
+## Syntax checkpoint
+
+Read the ampersand before reading the word `str`:
+
+```rust
+fn count(text: &str) -> usize {
+    text.len()
+}
+```
+
+`&str` means “borrowed text”; `String` means “owned text.” The function above
+only reads, so it borrows. A caller with a `String` writes `count(&owned)`, while
+a string literal can be passed directly with `count("hello")`.
+
+You are ready to continue when you can choose `&str` for read-only input and
+`String` for a returned value that must own its text. The next lesson uses the
+same owner/view distinction for sequences: an owned array and a borrowed
+`&[T]` slice.
+
 ## Try it
 
 1. **Classify:** For a literal, a `String::from(...)`, and `&owned`, state which

@@ -36,7 +36,7 @@ let ok:    bool  = true;     // true / false
 let grade: char  = 'A';      // a single Unicode scalar, in single quotes
 ```
 
-### Integers come in many widths
+### Later: integers come in many widths
 
 | Signed | Unsigned | Bits | Approx. range (signed)          |
 | ------ | -------- | ---- | ------------------------------- |
@@ -70,7 +70,7 @@ let letter  = 65u8 as char;     // 'A'
 let byte    = 'A' as u8;        // 65
 ```
 
-### Watch out when casting *down*
+### Later: watch out when casting *down*
 
 Casting to a smaller type can silently lose information:
 
@@ -110,7 +110,7 @@ Rust rejects `a + b` across types until you cast explicitly. Python also has
 arbitrary-precision integers, so it never overflows the way the next section
 describes.
 
-## Overflow behavior
+## Later: overflow behavior
 
 What happens when arithmetic exceeds a type's range depends on the build:
 
@@ -158,6 +158,22 @@ Rust also provides checked conversions such as `u8::try_from(large)`, which
 report failure rather than changing `300` into `44`. [[Option & Result]]
 introduces the success-or-failure type used by that API.
 
+
+## Syntax checkpoint
+
+```rust
+let count: i32 = 3;
+let ratio = count as f64;
+```
+
+Read `:` as “has type” and `as` as “convert to.” Thus the first line says
+“`count` has type `i32` and value 3”; the second makes a new `f64` value. The
+original `count` remains an `i32`—a conversion produces another value rather
+than changing a binding's type.
+
+You are ready to continue when you can annotate one variable and deliberately
+convert one number. The next lesson places these same type names in function
+signatures, where they describe inputs and outputs.
 
 ## Try it
 

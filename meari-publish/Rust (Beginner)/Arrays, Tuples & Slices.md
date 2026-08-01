@@ -4,37 +4,28 @@ id: rust-b-compound
 source: meari-course
 study:
   answer: |
-    fn min_max(xs: &[i32]) -> (i32, i32) {
-        let mut lo = xs[0];
-        let mut hi = xs[0];
-        for &x in xs {
-            if x < lo {
-                lo = x;
-            }
-            if x > hi {
-                hi = x;
-            }
-        }
-        (lo, hi)
+    fn first_and_last(xs: &[i32]) -> (i32, i32) {
+        (xs[0], xs[xs.len() - 1])
     }
   kind: code
   lang: rust
-  prompt: 'Write `min_max(xs: &[i32]) -> (i32, i32)` returning the smallest and largest values as a tuple. Assume `xs` is non-empty.'
+  prompt: 'Write `first_and_last(xs: &[i32]) -> (i32, i32)` returning the first and last values as a tuple. Assume `xs` is non-empty.'
   starter: |
-    fn min_max(xs: &[i32]) -> (i32, i32) {
+    fn first_and_last(xs: &[i32]) -> (i32, i32) {
         (0, 0)
     }
   tests:
-    - assert_eq!(min_max(&[3, 1, 2]), (1, 3));
-    - assert_eq!(min_max(&[5]), (5, 5));
-    - assert_eq!(min_max(&[-2, 4, 0]), (-2, 4));
+    - assert_eq!(first_and_last(&[3, 1, 2]), (3, 2));
+    - assert_eq!(first_and_last(&[5]), (5, 5));
+    - assert_eq!(first_and_last(&[-2, 4, 0]), (-2, 0));
 subject: Rust (Beginner)
 title: Arrays, Tuples & Slices
 ---
 
-Scalars hold one value; **compound types** group several. Rust's three
-fixed-shape building blocks are arrays, tuples, and slices. (The growable
-cousins — `Vec` and `HashMap` — get their own lesson in [[Vec & HashMap]].)
+Scalars hold one value; **compound types** group several. This lesson starts
+with arrays and tuples, which have a fixed shape, then introduces slices, which
+are borrowed views into a sequence. (The growable cousins — `Vec` and `HashMap`
+— get their own lesson in [[Vec & HashMap]].)
 
 ## Arrays: same type, fixed length
 
@@ -49,9 +40,8 @@ println!("{}", days[0]);       // 1 — indexing
 println!("{}", days.len());    // 3
 ```
 
-A local array lives **on the stack** (like any value, though, an array lives
-wherever its owner does — inside a `Box`, `Vec`, or heap struct it rides on the
-heap). Every index is **bounds-checked** at runtime —
+For now, treat an array as one local value with all of its elements together.
+Every index is **bounds-checked** at runtime —
 reading `days[9]` panics rather than reading random memory (that's the safety
 guarantee in action):
 
@@ -164,6 +154,23 @@ In the study exercise you will see `for &x in xs`. A slice loop normally yields
 `&i32` references. The pattern `&x` immediately copies the referenced `i32` into
 a plain local `x`; it is shorthand for iterating as `for item in xs` and then
 using `let x = *item`.
+
+## Syntax checkpoint
+
+These brackets have related but different jobs:
+
+```rust
+let values: [i32; 3] = [10, 20, 30];
+let view: &[i32] = &values[0..2];
+```
+
+Read `[i32; 3]` as “an array of exactly three `i32` values.” Read `&[i32]` as
+“a borrowed slice containing some number of `i32` values.” In `[0..2]`, the
+ending index 2 is excluded, so the view contains positions 0 and 1.
+
+You are ready to continue when you can index an array, destructure a tuple, and
+recognize that a slice borrows rather than copies. The next lesson gives names
+to groups of fields so code can say `user.name` instead of `person.0`.
 
 ## Try it
 

@@ -74,7 +74,7 @@ let mut u = u;
 u.age += 1;             // needs `mut u`
 ```
 
-### Two ergonomic shortcuts
+### Later: two ergonomic shortcuts
 
 **Field init shorthand** — when a variable has the same name as the field:
 
@@ -96,7 +96,7 @@ Because `User` owns a `String`, `..u` **moves** those non-`Copy` fields out of
 was moved into `u2`). This is the same move rule from [[Ownership & Moves]]
 showing up in struct syntax.
 
-## Other struct shapes
+## Later: other struct shapes
 
 | Kind         | Definition              | Use for                                   |
 | ------------ | ----------------------- | ----------------------------------------- |
@@ -210,6 +210,25 @@ Calling `book.is_long()` is roughly method-call syntax for
 `Book::is_long(&book)`. Rust automatically creates the `&book` borrow required
 by the receiver. This automatic borrowing is convenient, but the ordinary
 borrowing rules still apply.
+
+## Syntax checkpoint
+
+Separate the type, the value, and its behavior:
+
+```rust
+struct Rectangle { width: u32, height: u32 } // define the shape
+let r = Rectangle { width: 3, height: 4 };   // create one value
+r.area();                                    // call behavior on it
+```
+
+A struct definition lists `field: Type`; a struct value lists `field: value`.
+An `impl Rectangle` block is simply where methods for `Rectangle` are defined.
+For a first method, use `&self`: it means the method borrows the value named on
+the left of the dot.
+
+You are ready to continue when you can construct a struct and write one `&self`
+method that reads a field. The next lesson changes the model from “all these
+fields together” to “exactly one of these alternatives.”
 
 ## Try it
 

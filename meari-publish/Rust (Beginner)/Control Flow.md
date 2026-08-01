@@ -113,7 +113,7 @@ For now, use `for` with numeric ranges. Later, after ownership and collections
 have names, [[Vec & HashMap]] spells out why `for item in values`,
 `for item in &values`, and `for item in &mut values` behave differently.
 
-## Labeled breaks for nested loops
+## Later: labeled breaks for nested loops
 
 When loops nest, a plain `break` only exits the innermost one. Label a loop with
 `'name:` to break out of an outer loop directly:
@@ -148,6 +148,29 @@ return.
 For `for i in 1..=3`, Rust obtains `1`, `2`, and `3` one at a time, binds each to
 `i`, and runs the body. The loop creates `i`; you do not declare it beforehand.
 Tracing these values on paper quickly exposes most off-by-one errors.
+
+## Syntax checkpoint
+
+Start with only the most common forms:
+
+```rust
+if temperature < 0 {
+    println!("freezing");
+}
+
+for n in 1..4 {
+    println!("{n}");
+}
+```
+
+Read the first as “if this `bool` condition is true, run this block.” Read the
+second as “for each number from 1 up to, but not including, 4, run this block.”
+You can postpone `loop` values and labels until ordinary `if` and `for` feel
+comfortable.
+
+You are ready to continue when you can predict which branch runs and which
+numbers a range produces. The following lesson is a conceptual pause: it
+explains why Rust performs so many checks before the ownership section begins.
 
 ## Try it
 

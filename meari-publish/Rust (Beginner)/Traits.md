@@ -129,9 +129,11 @@ compile time and can call the implementation directly. This is **static
 dispatch**. It is the ordinary starting point; use it unless you have a reason
 to store different concrete types together.
 
-## Dynamic dispatch: different types in one collection
+## Optional preview: dynamic dispatch for mixed collections
 
-There are two ways to be generic over a trait, and the difference matters:
+You do not need this section to define or use ordinary traits. Read it only
+when you need one collection to hold several different concrete types. There
+are two ways to be generic over a trait:
 
 ```rust
 // STATIC dispatch: one type per call site, resolved at compile time (fast)
@@ -227,6 +229,24 @@ It is a compile-time relationship between a behavior and a type.
 Start with `impl Trait` or `<T: Trait>`; both use static dispatch and are usually
 the simplest choice. Treat `dyn Trait` as a separate, later tool for cases where
 the concrete types genuinely must differ at runtime.
+
+## Syntax checkpoint
+
+Keep the three roles on separate lines:
+
+```rust
+trait Named { fn name(&self) -> &str; } // define a capability
+impl Named for User { /* method */ }    // give User that capability
+fn show(x: &impl Named) { /* use it */ }// accept any capable type
+```
+
+Read `impl Named for User` as “implement the `Named` contract for `User`.” Read
+`&impl Named` as “borrow a value of some type that implements `Named`.” You do
+not need `dyn`, boxes, or vtables to use ordinary trait bounds.
+
+You are ready to continue when you can define one trait, implement it for one
+struct, and call the method. The next lesson shows a special case where the
+compiler can generate common implementations from a type's fields.
 
 ## Try it
 

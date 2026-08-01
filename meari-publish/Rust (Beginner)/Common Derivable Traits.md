@@ -95,8 +95,8 @@ Version(1, 0) == Version(2, 0);   // false
 
 ## `PartialOrd` / `Ord` — ordering
 
-These enable `<`, `>`, and sorting. This is what the `largest<T: PartialOrd>`
-function in [[Generics]] required of its type:
+These enable `<`, `>`, and sorting. A generic function that compares values
+would require its type to implement `PartialOrd`:
 
 ```rust
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -106,7 +106,7 @@ let mut scores = vec![Score(30), Score(10), Score(20)];
 scores.sort();          // works because Score implements Ord
 ```
 
-## `Default` — a sensible zero value
+## Later: `Default` — a sensible zero value
 
 ```rust
 #[derive(Default)]
@@ -153,7 +153,7 @@ The difference in flavor: Python's dataclass bundles a common set on by default,
 while Rust makes each capability an explicit opt-in — and, for `Copy`, ties it
 directly to the ownership model you learned earlier.
 
-## Derive generates ordinary implementations
+## Later: derive generates ordinary implementations
 
 `#[derive(Debug)]` is an attribute attached to the next item. During compilation
 Rust generates an implementation much like one you could write by hand. There
@@ -167,6 +167,23 @@ a type implementing `Drop` cannot also implement `Copy`.
 
 Derive the capabilities your code needs. It is normal for a type to be `Debug`
 and `PartialEq` but intentionally not `Clone` or `Copy`.
+
+## Syntax checkpoint
+
+```rust
+#[derive(Debug, PartialEq)]
+struct Point { x: i32, y: i32 }
+```
+
+`#[...]` is an **attribute** attached to the item directly below it. Inside
+`derive`, commas separate the traits Rust should implement. Here `Debug` enables
+`{:?}` formatting and `PartialEq` enables `==`; deriving does not alter the
+fields or create a value.
+
+You are ready to continue when you can select a derive for printing or equality
+and understand that every field must support it. The next lesson uses closures
+and iterators; their advanced type relationships are traits too, but a first
+pass only needs their visible `|x| ...` syntax.
 
 ## Try it
 

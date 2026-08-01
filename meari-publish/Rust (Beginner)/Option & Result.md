@@ -150,7 +150,7 @@ Trace it as:
 The wrapper has not been “ignored”; handling both variants is what safely turns
 an `Option<i32>` into a definite `i32`.
 
-## Convenience methods
+## Later: convenience methods
 
 **`match`** is the fully explicit way, but the standard library gives you
 concise helpers for common cases:
@@ -182,6 +182,29 @@ In `Option<i32>`, `i32` is the type inside `Some`; `None` carries no number. In
 where an `i32` is required because the value might be absent.
 
 Ask “what should happen in every variant?” before reaching for `unwrap`.
+
+## Syntax checkpoint
+
+Read the outer type first, then what it may contain:
+
+```rust
+Option<i32>       // Option containing an i32 when it is Some
+Result<i32, E>    // Result containing an i32 on success or E on failure
+```
+
+The angle brackets provide type information; they do not access a value. At
+runtime you handle the variants you already know:
+
+```rust
+match maybe {
+    Some(number) => number,
+    None => 0,
+}
+```
+
+You are ready to continue when you can choose `Option` for absence, `Result` for
+failure, and match both cases. The next lesson does not replace `match`; it adds
+`?` as shorthand for the repeated “return the error, otherwise continue” case.
 
 ## Try it
 

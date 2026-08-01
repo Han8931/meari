@@ -184,7 +184,7 @@ converted into the function's declared error type.
 Use `match` when this function can recover locally; use `?` when the caller is
 better placed to decide.
 
-## What if operations have different error types?
+## Later: operations with different error types
 
 A function may read a file and then parse its contents, producing either an
 I/O error or a parsing error. Real applications commonly define an error enum
@@ -201,6 +201,24 @@ are introduced later:
 
 You do not need that catch-all syntax to understand `?`: first master
 propagating one concrete error type, as `parse_sum` does above.
+
+## Syntax checkpoint
+
+Read `?` as a control-flow instruction attached to the result immediately
+before it:
+
+```rust
+let number: i32 = text.parse()?;
+```
+
+This means: parse the text; if it is `Ok(number)`, place the number in the
+binding; if it is `Err(error)`, return that error from the current function.
+Therefore the surrounding function must advertise failure with a compatible
+`Result<..., ...>` return type.
+
+You are ready to continue when you can expand one `?` into a two-arm `match`.
+The next lesson shows why collections return `Option` from lookups and how
+borrowing controls iteration.
 
 ## Try it
 

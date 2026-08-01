@@ -96,7 +96,8 @@ enum Option<T> { Some(T), None }
 enum Result<T, E> { Ok(T), Err(E) }
 ```
 
-You'll study these two enums in detail in [[Option & Result]].
+You have already used these two enums in [[Option & Result]]; this is the
+syntax behind their angle brackets.
 
 ## Generic methods
 
@@ -110,7 +111,7 @@ impl<T> Point<T> {
 }
 ```
 
-## Zero-cost: monomorphization
+## Later: zero-cost monomorphization
 
 Here's the payoff. Generics cost **nothing** at runtime. At compile time Rust
 performs *monomorphization*: it stamps out a concrete copy of the generic code
@@ -155,6 +156,8 @@ fn first<T>(items: &[T]) -> Option<&T>
 reference to one `T`.” Every occurrence of `T` must mean the same concrete type
 for one call. Calling it with `&[i32]` makes all three `T`s mean `i32`.
 
+### Later: adding a capability
+
 A bound narrows “any type” to types with a capability:
 
 ```rust
@@ -168,6 +171,23 @@ Bounds are promises available to the generic implementation, not merely
 restrictions placed on callers. `Display` is a **trait** and this requirement is
 a **trait bound**. [[Traits]] explains how to define capabilities and use bounds
 in detail.
+
+## Syntax checkpoint
+
+Replace `T` mentally with one concrete type:
+
+```rust
+fn choose<T>(value: T) -> T { value }
+```
+
+For `choose(3)`, read every `T` as `i32`. For `choose("hi")`, read every `T` as
+`&str`. `<T>` declares the placeholder; later appearances use it. One call must
+choose one consistent meaning for `T`.
+
+You are ready to continue when you can read a generic signature aloud and name
+the concrete `T` at a call. The next lesson answers a new question: if the body
+wants to print, compare, or otherwise operate on `T`, how does it require that
+capability?
 
 ## Try it
 

@@ -13,10 +13,14 @@ study:
     }
   kind: code
   lang: rust
-  prompt: 'Write `word_count(text: &str) -> HashMap<String, u32>` counting how many times each whitespace-separated word appears. (`HashMap` is already in scope.)'
+  prompt: 'Complete the one marked line in `word_count`: use `entry`, `or_insert(0)`, and `+= 1` to update the count for each word. (`HashMap` is already in scope.)'
   starter: |
     fn word_count(text: &str) -> HashMap<String, u32> {
-        HashMap::new()
+        let mut counts = HashMap::new();
+        for word in text.split_whitespace() {
+            // Replace only this line.
+        }
+        counts
     }
   tests:
     - assert_eq!(word_count("a b a").get("a"), Some(&2));
@@ -105,7 +109,7 @@ for name in &names {
 println!("still have {} names", names.len());
 ```
 
-### How a Vec grows
+### Later: how a Vec grows
 
 A `Vec` keeps spare **capacity**; when it fills, it allocates a bigger buffer and
 moves the elements. Length ≤ capacity always:
@@ -171,7 +175,7 @@ The counting pattern `*counts.entry(word).or_insert(0) += 1` is Python's
 "key missing" case (via the `Option` from `.get`), whereas Python's `d[k]` just
 raises a `KeyError` at runtime.
 
-## Choosing a collection
+## Later: choosing another collection
 
 | Type          | Use for                              | Ordered?          |
 | ------------- | ------------------------------------ | ----------------- |
@@ -199,6 +203,27 @@ names.push(String::from("Bo")); // now mutation is allowed
 
 This matters because `push` may reallocate the vector and move its buffer. Rust
 will not allow a reference into the old buffer to remain usable afterward.
+
+## Syntax checkpoint
+
+Learn collection syntax in two separate steps:
+
+```rust
+let mut numbers = Vec::new();
+numbers.push(3);
+
+let mut scores = HashMap::new();
+scores.insert("Ana", 10);
+```
+
+`Type::new()` constructs an empty value; `.method(...)` acts on an existing
+value. Both bindings need `mut` because `push` and `insert` change them. A
+lookup such as `scores.get("Ana")` borrows the stored value and returns an
+`Option` because the key may be absent.
+
+You are ready to continue when you can build and loop over a `Vec`, and perform
+a handled lookup in a `HashMap`. The next lesson explains the `<T>` and `<K, V>`
+notation that lets one collection definition work with many element types.
 
 ## Try it
 

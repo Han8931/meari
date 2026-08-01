@@ -70,7 +70,7 @@ Without the `Box`, `List` would contain a `List` directly — infinite size. The
                       └─────┘           └──────────────┘
 ```
 
-## `Rc<T>`: multiple owners (single-threaded)
+## Optional: `Rc<T>` — multiple owners (single-threaded)
 
 Ownership says *one* owner — but sometimes several parts genuinely need to own
 the same data (think a node referenced by many others). `Rc<T>` — "reference
@@ -116,7 +116,7 @@ mutation (that's `RefCell`), so you never think about it. Rust has no such
 runtime, so it makes you *opt in* to each capability with `Box`, `Rc`, and
 `RefCell` — the trade-off being that the cost is always visible in the code.
 
-## `RefCell<T>`: interior mutability
+## Optional: `RefCell<T>` — interior mutability
 
 `Rc` gives shared ownership, but it only hands out *immutable* access — and the
 borrow rules forbid mutating shared data. `RefCell<T>` bends this by moving the
@@ -136,7 +136,7 @@ let a = cell.borrow_mut();
 let b = cell.borrow_mut();        // 💥 panic: already mutably borrowed
 ```
 
-## Combining shared ownership and mutation: `Rc<RefCell<T>>`
+## Optional: combining shared ownership and mutation
 
 Put them together and you get data with **multiple owners that can also be
 mutated** — the standard beginner pattern for shared, editable structures like
@@ -184,6 +184,24 @@ a count, but shared ownership can make cleanup harder to reason about. `RefCell`
 moves an error from compile time to a possible runtime panic. If the compiler
 rejects an ordinary borrow, first reconsider the data design; do not automatically
 wrap everything in `Rc<RefCell<_>>`.
+
+## Syntax checkpoint
+
+On a first pass, stop after this one shape:
+
+```rust
+let boxed = Box::new(5);
+let number = *boxed;
+```
+
+`Box::new(5)` creates an owner whose value is stored on the heap. `*boxed`
+accesses the value behind the pointer. The nested angle brackets in
+`Rc<RefCell<T>>` describe wrappers inside wrappers; they are not new ownership
+rules, and you do not need to use that combination yet.
+
+This lesson has no required successor. You have learned enough when you can
+recognize `Box<T>` and explain why ordinary `T`, `&T`, and `&mut T` should remain
+your default choices.
 
 ## Try it
 

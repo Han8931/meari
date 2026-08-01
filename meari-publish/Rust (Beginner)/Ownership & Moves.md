@@ -209,7 +209,7 @@ The owner is first the outer `sentence`, then the parameter `text`, then the new
 outer `sentence`. There is one usable owner at every point. Returning ownership
 works, but borrowing is more convenient for temporary access.
 
-### Partial moves
+### Later: partial moves
 
 Moving a non-`Copy` field can make only part of a compound value unavailable:
 
@@ -222,6 +222,23 @@ println!("{}", pair.1);   // untouched i32 field is still usable
 
 You need not use partial moves yet, but recognizing one makes the compiler's
 message much less mysterious.
+
+## Syntax checkpoint: trace names, not memory diagrams
+
+For a first pass, write “usable” or “moved” beside each name:
+
+```rust
+let first = String::from("hello"); // first: usable
+let second = first;                // first: moved; second: usable
+```
+
+`String::from(...)` constructs owned text. The `::` selects the `from` function
+associated with the `String` type. The important ownership event is the second
+line: because `String` is not `Copy`, assignment transfers the value.
+
+You are ready to continue when you can predict which name is usable after an
+assignment and after passing a `String` into a function. The next lesson adds
+`&`, which lets a function use that value without taking it.
 
 ## Try it
 

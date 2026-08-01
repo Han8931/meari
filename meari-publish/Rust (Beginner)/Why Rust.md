@@ -112,6 +112,18 @@ prototype you'll throw away tomorrow, a garbage-collected language is often the
 faster path. Rust pays off when correctness, performance, or long-term
 maintenance justify the up-front rigor.
 
+## Before ownership
+
+No new Rust syntax is required in this lesson. Keep only this question in mind:
+
+> Who is responsible for cleaning up a value when it is no longer needed?
+
+Languages with garbage collectors answer “the runtime.” Rust usually answers
+“the value's owner, at a point checked by the compiler.” The next lesson turns
+that sentence into concrete behavior using two ordinary assignments. You are
+ready for it even if terms such as *borrow checker* and *lifetime* are still
+only names.
+
 ## Try it
 
 1. **Explain:** In one sentence, define “memory safety without a garbage

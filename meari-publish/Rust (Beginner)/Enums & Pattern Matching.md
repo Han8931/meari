@@ -133,7 +133,7 @@ The decisive difference is **exhaustiveness**. Rust checks at compile time that
 every variant is handled — forget one and the program won't build. Python's
 `match` has no such check, so a missing case simply falls through at runtime.
 
-## `if let` and `let else`: matching one case
+## Later: `if let` and `let else` for one case
 
 When you care about a *single* pattern, a full `match` is noisy. `if let` is the
 concise form:
@@ -192,6 +192,27 @@ let instruction = match light {
 
 All arms must return compatible types. This is the same rule you learned for an
 `if` expression, now applied to more than two possible shapes.
+
+## Syntax checkpoint
+
+Begin with variants that carry no data:
+
+```rust
+enum Light { Red, Green }
+
+let instruction = match light {
+    Light::Red => "stop",
+    Light::Green => "go",
+};
+```
+
+`Light::Red` means “the `Red` variant belonging to `Light`.” In each match arm,
+`=>` separates a pattern from the value to produce, and the comma ends the arm.
+Because `match` is an expression, its result can go on the right side of `=`.
+
+You are ready to continue when you can write one arm per variant and explain
+why omitting one is an error. The next lesson introduces two standard enums;
+their unfamiliar angle brackets do not change how matching works.
 
 ## Try it
 

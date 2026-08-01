@@ -63,9 +63,10 @@ fn main() {
 ```
 
 - `fn main()` is the entry point — execution starts here.
-- `println!` ends in `!`, which marks it as a **macro**, not a function. Macros
-  are expanded at compile time; `println!` uses this to type-check your format
-  string and arguments. You'll meet more macros like `vec!` and `format!` later.
+- `println!` prints a line. The `!` means it is a **macro**, a Rust feature
+  that looks like a function call. For now, treat `println!` as the standard
+  way to print; the next lesson explains the punctuation in this line one
+  piece at a time. You'll meet `vec!` and `format!` later.
 
 ## The everyday Cargo commands
 
@@ -113,7 +114,7 @@ Read the message from the top and begin with the first reported error. Later
 errors can be consequences of that first problem. The explanation after the
 caret describes what Rust expected at the marked location, and the suggestion
 is a possible fix rather than a command you must follow. Next up:
-[[Variables & Mutability]].
+[[Reading Rust Code, One Piece at a Time]].
 
 ## What happens when you run `cargo run`?
 
@@ -138,6 +139,22 @@ Braces delimit the function body and parentheses hold arguments. Rust ignores
 most whitespace, but punctuation is meaningful. You need not memorize it all
 now—use `cargo fmt`, and let repeated examples make it familiar.
 
+
+## Syntax checkpoint
+
+At this point, you only need to recognize this shape—you do not need to write it
+from memory yet:
+
+```rust
+fn main() {
+    println!("Hello");
+}
+```
+
+Read it as: “define `main`; inside it, print one line.” If that sentence makes
+sense and you can run the program with `cargo run`, you are ready to continue.
+The next lesson pauses on every punctuation mark in this example before adding
+variables.
 
 ## Try it
 
