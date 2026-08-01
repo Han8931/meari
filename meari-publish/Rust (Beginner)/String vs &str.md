@@ -4,19 +4,19 @@ id: rust-b-string
 source: meari-course
 study:
   answer: |
-    fn shout(s: &str) -> String {
-        format!("{}!", s.to_uppercase())
+    fn full_name(first: &str, last: &str) -> String {
+        format!("{first} {last}")
     }
   kind: code
   lang: rust
-  prompt: 'Write `shout(s: &str) -> String` returning the text upper-cased with a `!` appended (take `&str`, return an owned `String`).'
+  prompt: 'Complete `full_name(first: &str, last: &str) -> String` with `format!("{first} {last}")`. It borrows two string slices and returns a new owned `String`.'
   starter: |
-    fn shout(s: &str) -> String {
+    fn full_name(first: &str, last: &str) -> String {
         String::new()
     }
   tests:
-    - assert_eq!(shout("hi"), "HI!");
-    - assert_eq!(shout("rust"), "RUST!");
+    - assert_eq!(full_name("Ana", "Smith"), "Ana Smith");
+    - assert_eq!(full_name("Rust", "Learner"), "Rust Learner");
 subject: Rust (Beginner)
 title: String vs &str
 ---

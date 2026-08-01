@@ -24,7 +24,7 @@ study:
     }
   kind: code
   lang: rust
-  prompt: Define a trait `Animal` with `sound(&self) -> String`, plus unit structs `Dog` and `Cat` implementing it to return "woof" and "meow".
+  prompt: The trait, structs, and `impl` blocks are already provided. Replace each `String::new()` so `Dog.sound()` returns `"woof"` and `Cat.sound()` returns `"meow"`.
   starter: |
     trait Animal {
         fn sound(&self) -> String;

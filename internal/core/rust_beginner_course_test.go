@@ -28,7 +28,7 @@ func TestRustCourseStudyChallenges(t *testing.T) {
 		name, dir, folder, id string
 		topics                int
 	}{
-		{"beginner", "meari-publish", "Rust (Beginner)", "rust-beginner", 21},
+		{"beginner", "meari-publish", "Rust (Beginner)", "rust-beginner", 22},
 		{"intermediate", "meari-course", "Rust (Intermediate)", "rust-intermediate", 18},
 	}
 	for _, tc := range courses {

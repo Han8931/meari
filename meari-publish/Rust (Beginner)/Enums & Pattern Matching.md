@@ -21,7 +21,7 @@ study:
     }
   kind: code
   lang: rust
-  prompt: 'Define an enum `Coin` with variants `Penny`, `Nickel`, `Dime`, `Quarter`, and `value_in_cents(coin: &Coin) -> u32` using a `match`.'
+  prompt: 'The `Coin` enum is already provided. Complete only `value_in_cents` by matching each variant to its value: `Penny` = 1, `Nickel` = 5, `Dime` = 10, and `Quarter` = 25.'
   starter: |
     enum Coin {
         Penny,

@@ -9,7 +9,7 @@ study:
     }
   kind: code
   lang: rust
-  prompt: 'Write `first_and_last(xs: &[i32]) -> (i32, i32)` returning the first and last values as a tuple. Assume `xs` is non-empty.'
+  prompt: 'Complete `first_and_last(xs: &[i32]) -> (i32, i32)`. For this non-empty slice, use `xs[0]` for the first value and `xs[xs.len() - 1]` for the last, then return them as a tuple.'
   starter: |
     fn first_and_last(xs: &[i32]) -> (i32, i32) {
         (0, 0)

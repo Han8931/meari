@@ -4,24 +4,19 @@ id: rust-b-ownership
 source: meari-course
 study:
   answer: |
-    fn longer(a: String, b: String) -> String {
-        if a.len() >= b.len() {
-            a
-        } else {
-            b
-        }
+    fn return_to_caller(text: String) -> String {
+        text
     }
   kind: code
   lang: rust
-  prompt: 'Write `longer(a: String, b: String) -> String` that takes ownership of both strings and returns whichever is longer (return `a` on a tie).'
+  prompt: 'Complete `return_to_caller(text: String) -> String` by returning `text`. The `String` moves into the function and then moves back to the caller.'
   starter: |
-    fn longer(a: String, b: String) -> String {
-        a
+    fn return_to_caller(text: String) -> String {
+        String::new()
     }
   tests:
-    - assert_eq!(longer(String::from("hi"), String::from("hello")), "hello");
-    - assert_eq!(longer(String::from("abc"), String::from("de")), "abc");
-    - assert_eq!(longer(String::from("ab"), String::from("cd")), "ab");
+    - assert_eq!(return_to_caller(String::from("hello")), "hello");
+    - assert_eq!(return_to_caller(String::new()), "");
 subject: Rust (Beginner)
 title: Ownership & Moves
 ---

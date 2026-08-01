@@ -4,25 +4,20 @@ id: rust-b-option-result
 source: meari-course
 study:
   answer: |
-    fn first_even(xs: &[i32]) -> Option<i32> {
-        for &x in xs {
-            if x % 2 == 0 {
-                return Some(x);
-            }
-        }
-        None
+    fn first_char(text: &str) -> Option<char> {
+        text.chars().next()
     }
   kind: code
   lang: rust
-  prompt: 'Write `first_even(xs: &[i32]) -> Option<i32>` returning the first even number, or `None` if there isn''t one.'
+  prompt: 'Complete `first_char(text: &str) -> Option<char>` with `text.chars().next()`. `next()` returns `Some(character)` for non-empty text and `None` for empty text.'
   starter: |
-    fn first_even(xs: &[i32]) -> Option<i32> {
+    fn first_char(text: &str) -> Option<char> {
         None
     }
   tests:
-    - assert_eq!(first_even(&[1, 3, 4, 6]), Some(4));
-    - assert_eq!(first_even(&[1, 3, 5]), None);
-    - assert_eq!(first_even(&[2]), Some(2));
+    - assert_eq!(first_char("rust"), Some('r'));
+    - assert_eq!(first_char(""), None);
+    - assert_eq!(first_char("éclair"), Some('é'));
 subject: Rust (Beginner)
 title: Option & Result
 ---
