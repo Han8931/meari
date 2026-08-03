@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Complete `return_to_caller(text: String) -> String` by returning `text`. The `String` moves into the function and then moves back to the caller.'
+  hint: |
+    `text` was moved in through the parameter, so you already own it — just name it on the last line to move it back out. No `String::new()` and no `.clone()`.
   starter: |
     fn return_to_caller(text: String) -> String {
         String::new()

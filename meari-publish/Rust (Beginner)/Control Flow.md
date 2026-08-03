@@ -16,6 +16,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Write `describe(n: i32) -> i32` as an `if` expression: return -1 for a negative number, 0 for zero, and 1 for a positive number.'
+  hint: |
+    Make the whole `if / else if / else` the return value: each branch ends in a bare number with no semicolon, so the matching branch's value falls out as the result.
   starter: |
     fn describe(n: i32) -> i32 {
         0

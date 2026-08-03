@@ -12,6 +12,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Write `parse_sum(a: &str, b: &str) -> Result<i32, std::num::ParseIntError>` that parses both strings to `i32` with the `?` operator and returns their sum.'
+  hint: |
+    Let `?` do the work: put it after each `.parse()` so a bad string returns the error early and a good one yields the number. The `: i32` annotation tells `parse` what to produce; finish with `Ok(...)`.
   starter: |
     fn parse_sum(a: &str, b: &str) -> Result<i32, std::num::ParseIntError> {
         Ok(0)

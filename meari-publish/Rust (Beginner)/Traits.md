@@ -25,6 +25,8 @@ study:
   kind: code
   lang: rust
   prompt: The trait, structs, and `impl` blocks are already provided. Replace each `String::new()` so `Dog.sound()` returns `"woof"` and `Cat.sound()` returns `"meow"`.
+  hint: |
+    Only the method bodies need fixing — the trait and impls are already in place. Return an owned `String` built from a literal (e.g. via `.to_string()`) that matches each animal.
   starter: |
     trait Animal {
         fn sound(&self) -> String;

@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Complete `choose_first<T>(first: T, _second: T) -> T` so it returns the first value. Both arguments must have the same type, but the function must work for any type.'
+  hint: |
+    The generic `<T>` is already declared; simply return the first argument as-is. Don't `.clone()` and don't leave the `todo!()` — hand back the value you received.
   starter: |
     fn choose_first<T>(first: T, _second: T) -> T {
         todo!()

@@ -12,6 +12,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Create a module `math` containing a public `add(a: i32, b: i32) -> i32` function.'
+  hint: |
+    Put the function inside `mod math { ... }`. Module items are private by default, so mark the function `pub` or `math::add` won't be reachable from outside.
   starter: |
     mod math {
         pub fn add(a: i32, b: i32) -> i32 {

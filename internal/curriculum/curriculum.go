@@ -23,6 +23,7 @@ type Challenge struct {
 	StarterCode string   // the stub the learner edits
 	Solution    string   // hidden reference answer (used only to self-verify tests)
 	Tests       []string // assertions: Python asserts, or Go test-body statements
+	Hint        string   // optional nudge shown by ":hint" without revealing the answer
 }
 
 // QuizQuestion is one multiple-choice item of a quiz step.

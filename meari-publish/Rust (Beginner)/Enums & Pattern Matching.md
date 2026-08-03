@@ -22,6 +22,8 @@ study:
   kind: code
   lang: rust
   prompt: 'The `Coin` enum is already provided. Complete only `value_in_cents` by matching each variant to its value: `Penny` = 1, `Nickel` = 5, `Dime` = 10, and `Quarter` = 25.'
+  hint: |
+    `match` the coin and give one arm per variant (`Coin::Penny => 1`, and so on). Because every variant is listed, you won't need a `_` wildcard arm.
   starter: |
     enum Coin {
         Penny,

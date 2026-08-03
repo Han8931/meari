@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Write `average(a: i32, b: i32) -> f64` returning the mean of the two values as an f64 (cast with `as f64`).'
+  hint: |
+    Divide in floating point, not integers: cast each argument with `as f64` first and divide by `2.0` (not `2`), otherwise the result truncates.
   starter: |
     fn average(a: i32, b: i32) -> f64 {
         0.0

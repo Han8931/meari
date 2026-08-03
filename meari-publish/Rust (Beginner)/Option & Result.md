@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Complete `first_char(text: &str) -> Option<char>` with `text.chars().next()`. `next()` returns `Some(character)` for non-empty text and `None` for empty text.'
+  hint: |
+    Iterate the text as characters with `.chars()`, then ask that iterator for its next item — it already returns `Some(c)` or `None`, exactly the return type, so you can hand it straight out.
   starter: |
     fn first_char(text: &str) -> Option<char> {
         None

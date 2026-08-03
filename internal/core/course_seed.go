@@ -86,6 +86,9 @@ func (s *Service) writeSeedCourse(id, title, dir, level string, cur curriculum.C
 			if t.Challenge.Solution != "" {
 				study["answer"] = t.Challenge.Solution
 			}
+			if t.Challenge.Hint != "" {
+				study["hint"] = t.Challenge.Hint
+			}
 			if len(t.Quiz) > 0 {
 				study["kind"] = "quiz"
 				qs := make([]any, 0, len(t.Quiz))

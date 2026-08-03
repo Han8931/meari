@@ -17,6 +17,8 @@ study:
   kind: code
   lang: rust
   prompt: Define a `Rectangle` struct with `width` and `height` (both `u32`) and an `area(&self) -> u32` method.
+  hint: |
+    Declare the two fields in the struct, then write `area` inside an `impl Rectangle` block. It borrows the value with `&self` and multiplies `self.width` by `self.height`.
   starter: |
     struct Rectangle {
         width: u32,
