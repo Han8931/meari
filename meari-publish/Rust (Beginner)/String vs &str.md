@@ -21,171 +21,288 @@ subject: Rust (Beginner)
 title: String vs &str
 ---
 
-Newcomers trip over Rust having *two* string types. It's not arbitrary — it's
-[[Ownership & Moves|ownership]] and [[References & Borrowing|borrowing]] applied
-to text. Once you see that, `String` vs `&str` clicks.
+Rust has two common text types:
 
-## The two types
+- `String` is text that **owns its data**.
+- `&str` is a **borrowed view** of text owned somewhere else.
 
-| Type   | What it is                    | Owns the data? | Growable? | Lives where       |
-| ------ | ----------------------------- | -------------- | --------- | ----------------- |
-| `String` | an owned, heap-allocated string | **yes**      | yes       | heap + stack handle |
-| `&str`   | a borrowed *view* into a string | no           | no        | points elsewhere  |
+That is the main idea. Most of the time, your choice follows one simple rule:
 
-For now, think “owned text” versus “borrowed view of text.” The next lesson,
-[[Arrays, Tuples & Slices]], applies the same owner/view relationship to
-sequences: `Vec<T>` versus `&[T]`.
+> Use `String` when a value must own or change its text. Use `&str` when code
+> only needs to read text for a while.
 
-```
-   let owned = String::from("hello");
+This is [[Ownership & Moves|ownership]] and
+[[References & Borrowing|borrowing]] applied to text.
 
-   STACK              HEAP
-   ┌──────────┐       ┌───┬───┬───┬───┬───┐
-   │ ptr  ●───┼─────► │ h │ e │ l │ l │ o │   ← String owns this buffer
-   │ len  5   │       └───┴───┴───┴───┴───┘
-   │ cap  5   │              ▲
-   └──────────┘              │
-   let view: &str = &owned;  │   ← &str just borrows a window, owns nothing
-```
+## Why does Rust need both?
 
-## Where each comes from
+A **string literal** and the `String` type solve different problems.
 
 ```rust
-let literal: &str = "hello";           // string literals are &'static str
-let owned:   String = String::from("hello"); // or "hello".to_string()
-
-let view: &str = &owned;               // borrow a String as a &str
-let view2: &str = &owned[0..2];        // a sub-slice: "he"
+let fixed = "hello";                    // string literal: &'static str
+let mut changing = String::from("hello"); // owned String
+changing.push('!');
 ```
 
-A literal like `"hello"` is stored with the compiled program, so it can be
-borrowed for the program's entire run. Rust writes that type as `&'static str`.
-The `'static` part names how long the reference is valid; you do not need to
-write it yourself in ordinary literal code.
+The literal `"hello"` is text written directly in the source code. Its contents
+are known when the program is compiled, so Rust can place those bytes in the
+compiled program. They stay available for the program's entire run and cannot
+be resized. The variable `fixed` only refers to that existing text, which is why
+its type is `&str`—more precisely, `&'static str`.
 
-## The rule of thumb
-
-```
-   Need to build, grow, or own text?   →   String
-   Only need to read/pass text?        →   &str  (take &str in parameters!)
-```
-
-Accepting `&str` in a function is more flexible than `String`, because a
-`String` can be borrowed *as* a `&str` for free, but not vice versa:
+A `String` is needed for text whose contents or size are decided while the
+program runs: user input, a file's contents, a formatted message, or text built
+in a loop. It owns a growable buffer, so that text can outlive the operation
+that created it and can be changed when the `String` is mutable.
 
 ```rust
-fn greet(name: &str) {                 // accepts BOTH a literal and a &String
-    println!("Hi, {name}");
+let name = String::from("Ana");
+let message: String = format!("Hello, {name}!"); // created at runtime
+```
+
+Rust keeps these ideas separate so ownership and allocation are visible:
+
+| Text | Where it comes from | Can grow? | Common type |
+| --- | --- | --- | --- |
+| `"hello"` | fixed text in the compiled program | no | `&'static str` |
+| `String::from("hello")` | an owned runtime buffer | yes, if mutable | `String` |
+| `&owned[0..5]` | a borrowed view into existing text | no | `&str` |
+
+A string literal is an expression that denotes particular fixed text; `String`
+is a type that can hold many owned text values. Also, `&str` does **not** mean only
+“string literal.” It can borrow literal text, all of a `String`, or part of one.
+Without `String`, Rust would have no general growable, owned text value. Without
+`&str`, code would often have to copy or take ownership of text merely to read
+it.
+
+## Start with one example
+
+```rust
+let name: String = String::from("Ana");
+let view: &str = &name;
+
+println!("{name}"); // the String owns "Ana"
+println!("{view}"); // view borrows the same text
+```
+
+No text is copied when `view` is created. It temporarily refers to the text
+inside `name`.
+
+Read `&str` as **“a borrowed string slice.”** The `&` is the same borrow symbol
+used for other references.
+
+```text
+name: String  ── owns ──>  "Ana"
+view: &str    ── borrows ──┘
+```
+
+Because `view` borrows from `name`, Rust will not let the view remain valid
+after `name` is gone.
+
+## How to create each type
+
+A quoted string literal has type `&'static str`, which can be used wherever an
+`&str` is expected. `'static` means the literal's text remains valid for the
+entire program:
+
+```rust
+let a: &'static str = "hello";
+let b: &str = "world"; // the shorter spelling is usually enough
+```
+
+Use `String::from` or `.to_string()` when you need owned text:
+
+```rust
+let b: String = String::from("hello");
+let c: String = "hello".to_string();
+```
+
+Borrow a `String` to get an `&str`:
+
+```rust
+let owned = String::from("hello");
+let borrowed: &str = &owned;
+```
+
+So the common conversions are:
+
+```text
+"hello"                 has type &str
+String::from("hello")   creates a String
+&owned                  borrows a String as &str
+```
+
+## Function parameters: usually take `&str`
+
+If a function only reads text, give it an `&str` parameter:
+
+```rust
+fn greet(name: &str) {
+    println!("Hello, {name}!");
 }
 
-greet("Ana");                          // &str literal
-greet(&String::from("Bo"));            // String borrowed as &str
+let owned = String::from("Ana");
+
+greet("Bo");     // works: a literal is an &str
+greet(&owned);   // works: borrow the String
+println!("{owned}"); // still works: greet did not take ownership
 ```
 
-## Building and combining strings
+This is flexible: callers can pass either a string literal or a borrowed
+`String`.
+
+Compare that with taking a `String`:
 
 ```rust
-let mut s = String::from("Hello");
-s.push_str(", world");                 // append a &str
-s.push('!');                           // append one char
-
-let a = String::from("foo");
-let b = String::from("bar");
-let c = a + &b;                        // "foobar" — `a` is MOVED, `b` is borrowed
-// println!("{a}");                    // ❌ a was consumed by `+`, no longer valid
-```
-
-The `+` operator reuses the left operand's buffer, so it *moves* `a` — which is
-why `a` is unusable afterward. When you need all your inputs to survive, reach
-for `format!`, which only *borrows* its arguments:
-
-```rust
-let first = String::from("Ana");
-let last  = String::from("Smith");
-let full  = format!("{first} {last}");  // "Ana Smith"
-println!("{first} is still usable");    // ✅ format! borrowed — nothing moved
-```
-
-## The same in Python
-
-Python has just **one** string type, so the `String` vs `&str` split is
-Rust-specific. Python strings are also immutable, so "modifying" one actually
-builds a new string:
-
-```python
-s = "Hello"
-s += ", world"        # creates a NEW string; the old one is discarded
-```
-
-Loosely, a Rust `String` plays the role of the owned, growable buffer and `&str`
-the role of a borrowed view — two jobs Python's `str` blurs together behind its
-garbage collector. Like Rust, though, Python strings are Unicode, so iterating
-by character (rather than raw bytes) is the safe habit in both languages.
-
-## UTF-8: no integer indexing
-
-Rust strings are UTF-8, and a character may be several bytes. So Rust
-deliberately forbids `s[0]` — it would be ambiguous (a byte? a character?) and
-could split a multi-byte character. Iterate instead:
-
-```rust
-let s = "héllo";
-// let c = s[0];          // ❌ not allowed
-for ch in s.chars() {      // iterate by Unicode character
-    print!("{ch} ");       // h é l l o
+fn greet_owned(name: String) {
+    println!("Hello, {name}!");
 }
-println!("{}", s.len());   // 6 — BYTES, not characters (é is 2 bytes)
-println!("{}", s.chars().count()); // 5 — actual character count
+
+let owned = String::from("Ana");
+greet_owned(owned);     // moves the String into the function
+// println!("{owned}"); // error: owned was moved
 ```
 
-## A string slice is pointer plus length
+Taking a `String` is not wrong. Do it when the function needs to keep or take
+ownership of the text. Do not require ownership when borrowing is enough.
 
-`&str` is not the string data itself. Conceptually it contains a pointer to the
-first byte of valid UTF-8 and a byte length. It may refer to an entire `String`,
-a literal stored in the program, or part of another string:
+## Return `String` for newly created text
+
+A function cannot return a borrowed view of a temporary local string. When a
+function builds new text, it usually returns a `String` that owns the result:
 
 ```rust
-let owned = String::from("hello world");
-let first = &owned[0..5]; // borrows "hello"; no characters are copied
+fn full_name(first: &str, last: &str) -> String {
+    format!("{first} {last}")
+}
+
+let full = full_name("Ana", "Smith");
+println!("{full}");
 ```
 
-The byte indexes must land on UTF-8 character boundaries or slicing panics.
-That makes arbitrary user-facing slicing safer with `.chars()` or specialized
-Unicode libraries. Also, `&String` means “borrow this particular owned container,”
-while `&str` means “borrow text from any source”; this is why parameters normally
-use `&str`.
+Notice the useful pattern:
 
-## Syntax checkpoint
+```text
+borrow inputs as &str  →  build new text  →  return String
+```
 
-Read the ampersand before reading the word `str`:
+`format!` creates a new `String` and only borrows the values inserted into it.
+
+## Changing text requires a mutable `String`
+
+`String` owns a growable buffer, so a mutable `String` can be changed:
 
 ```rust
-fn count(text: &str) -> usize {
-    text.len()
+let mut message = String::from("Hello");
+message.push_str(", world"); // append text
+message.push('!');           // append one character
+
+assert_eq!(message, "Hello, world!");
+```
+
+An `&str` is a read-only view, so it cannot be grown with `push_str`.
+
+One way to combine strings is `+`, but it moves its left side:
+
+```rust
+let a = String::from("hello");
+let b = String::from(" world");
+let c = a + &b;
+
+// a is no longer usable
+println!("{b}"); // b was only borrowed, so it is still usable
+```
+
+For beginner code, `format!` is often clearer because it does not consume its
+arguments:
+
+```rust
+let a = String::from("hello");
+let b = String::from("world");
+let c = format!("{a} {b}");
+
+println!("{a}, {b}, {c}"); // all three are usable
+```
+
+## What does “slice” mean?
+
+An `&str` may view all of a string or only part of it:
+
+```rust
+let message = String::from("hello world");
+let hello: &str = &message[0..5];
+
+println!("{hello}");
+```
+
+The slice stores where the borrowed text starts and how many bytes it contains.
+It does not own or copy those bytes.
+
+You do not need to slice strings often as a beginner. Rust strings use UTF-8,
+so slice positions are byte positions and must be on valid character
+boundaries. For example, arbitrary indexes can be unsafe for text containing
+characters such as `é` or `日`.
+
+## UTF-8 means no `text[0]`
+
+Rust does not allow integer indexing into a string:
+
+```rust
+let text = "héllo";
+// let first = text[0]; // error
+```
+
+A character can use more than one byte, so `0` could mean “first byte” or
+“first character.” Iterate explicitly instead:
+
+```rust
+for ch in "héllo".chars() {
+    println!("{ch}");
+}
+
+println!("{}", "héllo".len());           // 6 bytes
+println!("{}", "héllo".chars().count()); // 5 characters
+```
+
+This UTF-8 rule applies to both `String` and `&str`.
+
+## Quick decision guide
+
+Ask what the code needs to do:
+
+| Need | Choose |
+| --- | --- |
+| Store text in a struct or collection | `String` |
+| Build, append to, or modify text | `String` (usually `mut`) |
+| Return newly created text | `String` |
+| Read text in a function | `&str` |
+| Refer to a string literal | `&str` |
+| Refer to part of existing text | `&str` |
+
+A useful function-signature pattern is:
+
+```rust
+fn transform(input: &str) -> String {
+    // borrow existing text, return newly owned text
+    input.to_uppercase()
 }
 ```
-
-`&str` means “borrowed text”; `String` means “owned text.” The function above
-only reads, so it borrows. A caller with a `String` writes `count(&owned)`, while
-a string literal can be passed directly with `count("hello")`.
-
-You are ready to continue when you can choose `&str` for read-only input and
-`String` for a returned value that must own its text. The next lesson uses the
-same owner/view distinction for sequences: an owned array and a borrowed
-`&[T]` slice.
 
 ## Try it
 
-1. **Classify:** For a literal, a `String::from(...)`, and `&owned`, state which
-   value owns text and which only borrows it.
-2. **Fill:** Write `greet(name: &str)` and call it with both a literal and a
-   borrowed `String`.
-3. **Compare ownership:** Combine two strings with `format!` and confirm the
-   originals remain usable.
-4. **Measure:** Print both `s.len()` and `s.chars().count()` for `"héllo"` and
-   explain why the numbers differ.
+1. Identify the type of each value:
 
-> **Takeaway:** `String` owns and grows; `&str` borrows and reads. Store owned
-> text as `String`, but accept `&str` in your function signatures for maximum
-> flexibility — and remember strings are UTF-8, so index by iteration, never by
-> integer.
+   ```rust
+   let a = "hello";
+   let b = String::from("hello");
+   let c: &str = &b;
+   ```
+
+2. Write `greet(name: &str)` and call it with both `"Ana"` and a borrowed
+   `String`.
+3. Write `full_name(first: &str, last: &str) -> String` using `format!`.
+4. Print both `.len()` and `.chars().count()` for `"héllo"` and explain the
+   difference.
+
+> **Takeaway:** `String` owns text; `&str` borrows text. For read-only function
+> inputs, prefer `&str`. When building or storing new text, use `String`.

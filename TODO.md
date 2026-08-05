@@ -5,6 +5,7 @@ this file tracks concrete, actionable items. Check things off as they land.
 
 ## Quick wins
 
+- [ ] Reading progress (80%, 90%...)
 - [x] Lecture update feature — `:capture` / `:capture all` save chat Q&A to a linked
       companion note (`My Notes/<Lecture>.md`), leaving the lecture untouched;
       `:weave [instruction]` reorganizes that note into coherent subject-grouped

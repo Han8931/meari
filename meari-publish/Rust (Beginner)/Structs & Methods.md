@@ -74,6 +74,19 @@ let mut u = u;
 u.age += 1;             // needs `mut u`
 ```
 
+A struct owns its owned fields. Field access therefore follows the same move
+rules as any other value:
+
+```rust
+let name = u.name;        // moves the String out of u
+let age = u.age;          // copies the u32
+```
+
+After the first line, `u.name` is gone and `u` is **partially moved**, although
+unmoved fields such as `u.age` may still be used. Borrow with `let name =
+&u.name` when you only need to read the string and want to keep the whole struct
+usable.
+
 ### Later: two ergonomic shortcuts
 
 **Field init shorthand** — when a variable has the same name as the field:
@@ -153,6 +166,12 @@ The three receiver forms, and when to reach for each:
 | `&mut self` | borrow mutably                 | you modify the instance in place       |
 | `self`      | take ownership (consumes it)   | you transform/finalize and it's done   |
 
+“Consumes” means the method receives the actual value rather than a reference.
+After `let total = r.consume();`, the caller cannot use `r` again. By contrast,
+`r.area()` only borrows `r`, and that temporary borrow ends after the call.
+Calling an `&mut self` method also requires a mutable binding such as `let mut
+r` and temporarily prevents other access to that value.
+
 Note the two call syntaxes: `Rectangle::new(..)` uses `::` because `new` is an
 **associated function** (no `self`, like a static/class method). `r.area()` uses
 `.` because `area` is a **method** on an instance. `new` is just a convention —
@@ -208,8 +227,10 @@ them when the struct itself goes out of scope.
 
 Calling `book.is_long()` is roughly method-call syntax for
 `Book::is_long(&book)`. Rust automatically creates the `&book` borrow required
-by the receiver. This automatic borrowing is convenient, but the ordinary
-borrowing rules still apply.
+by the receiver; you normally do not write `(&book).is_long()`. This explains
+why a method declared with `&self` does not take ownership even though the call
+is written with `book.`. Automatic borrowing is only syntax convenience—the
+ordinary borrowing rules still apply.
 
 ## Syntax checkpoint
 

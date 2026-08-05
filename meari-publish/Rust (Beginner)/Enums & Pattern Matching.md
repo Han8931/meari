@@ -61,7 +61,9 @@ let heading = Direction::North;
 ```
 
 The real power appears when variants **carry data** — and each variant can carry
-a *different shape* of data:
+a *different shape* of data. A variant is not a separate type: every value below
+still has the single type `Message`. The variant records which shape is present
+right now.
 
 ```rust
 enum Message {
@@ -99,9 +101,30 @@ fn describe(msg: Message) -> String {
 ```
 
 Each arm can **bind** the data inside the variant (`x`, `y`, `text`, `r/g/b`)
-straight into local variables. If you forget a variant, the program won't
+straight into local variables. These are new variables, not comparisons against
+variables that already existed. If you forget a variant, the program won't
 compile — add a new `Message` variant later and the compiler points you at every
 `match` that needs updating.
+
+Here `describe` receives `Message` by value, so matching consumes the message.
+The `text` binding moves the inner `String` into that arm. Match a reference
+when the caller should retain ownership:
+
+```rust
+fn kind(msg: &Message) -> &str {
+    match msg {
+        Message::Quit => "quit",
+        Message::Move { .. } => "move",       // .. ignores these fields
+        Message::Write(_) => "write",         // _ ignores one payload
+        Message::ChangeColor(_, _, _) => "color",
+    }
+}
+```
+
+Although `msg` has type `&Message`, the patterns are still written
+`Message::Quit`, not `&Message::Quit`. Rust's **match ergonomics** automatically
+looks through the reference. Because this match only borrows, the original
+message remains usable after `kind(&message)`.
 
 ### The `_` catch-all
 
@@ -115,6 +138,11 @@ match n {
     _ => println!("something else"),   // required to be exhaustive
 }
 ```
+
+For numbers, a catch-all is often necessary because there are too many values
+to list. For a small enum, spelling out every variant is usually better: a `_`
+arm also accepts variants added in the future, so the compiler can no longer
+point out that your logic may need updating.
 
 ## The same in Python
 
@@ -190,8 +218,10 @@ let instruction = match light {
 };
 ```
 
-All arms must return compatible types. This is the same rule you learned for an
-`if` expression, now applied to more than two possible shapes.
+All arms must return compatible types because the whole `match` has one type.
+For example, one arm cannot produce `"stop"` while another produces `42`. This
+is the same rule you learned for an `if` expression, now applied to more than
+two possible shapes.
 
 ## Syntax checkpoint
 

@@ -41,43 +41,73 @@ shared ownership explicitly; they do not invalidate this starting model.
 
 ## Scope and `drop`
 
-When a value's owner leaves its block, Rust runs that value's cleanup — no
-manual `free()` or `delete`, and no garbage collector deciding when to act:
+A **scope** is a region of code, usually surrounded by `{` and `}`. A variable
+can normally be used from its `let` statement until the end of that scope.
+When its owner leaves the scope, Rust **drops** the value: Rust runs whatever
+cleanup that value needs.
 
 ```rust
 fn main() {
-    let s = String::from("hello"); // s owns a heap-allocated string
+    let s = String::from("hello"); // s owns the String
     println!("{s}");
-}                                  // s goes out of scope → memory freed here
+}                                  // s leaves scope; Rust drops its String
 ```
 
-## Stack vs heap (why moves exist)
+For a number, cleanup has almost nothing to do. For a `String`, cleanup includes
+returning the memory used for its text. Rust inserts that cleanup automatically;
+you do not call `free()` or wait for a garbage collector.
 
-The stack and heap explain why some values need cleanup, but they do **not**
-decide whether assignment copies or moves.
+## A small memory detour: stack and heap
 
-- An `i32` contains its whole value directly and needs no heap allocation.
-- A `String` value is a small handle—pointer, length, and capacity—that owns a
-  separate byte buffer on the heap.
-- A user-defined type may contain only direct fields and still choose move
-  behavior. The actual rule is whether the type implements `Copy`.
+Why does a `String` have memory to return while an `i32` does not? Answering that
+requires two new terms: **stack** and **heap**. They are simply two places a
+program can keep data. You do not need to memorize their implementation to
+follow ownership.
+
+- The **stack** holds fixed-size data used by function calls. Rust knows how
+  much space such data needs before the program runs and manages that space
+  automatically.
+- The **heap** holds allocations requested while the program is running. It is
+  useful for data whose size can vary or grow, but each allocation eventually
+  has to be returned so that its memory can be reused.
+
+An `i32` is always four bytes, so its entire value can be stored directly with
+the local variable. The text in a `String` can have any length and can grow, so
+a `String` uses both places:
+
+1. The text bytes are stored in a buffer allocated on the heap.
+2. The local variable stores a small, fixed-size description of that buffer.
+   This description contains a **pointer** (the buffer's address), its current
+   **length**, and its **capacity** (how much room the buffer currently has).
+3. The `String` owns that heap buffer, so dropping the `String` returns the
+   buffer to the allocator.
+
+For `let s = String::from("hi");`, the picture is:
 
 ```
-   let s = String::from("hi");
+   local variable s                 allocated buffer
+   (usually on the stack)           (on the heap)
 
-   STACK              HEAP
-   ┌───────────┐      ┌───┬───┐
-   │ ptr   ●───┼────► │ h │ i │
-   │ len   2   │      └───┴───┘
-   │ cap   2   │
-   └───────────┘
+   ┌──────────────┐                 ┌───┬───┐
+   │ pointer  ●───┼────────────────►│ h │ i │
+   │ length   2   │                 └───┴───┘
+   │ capacity 2   │
+   └──────────────┘
 ```
+
+The boxes are one logical value, not two separate Rust values: `s` is a
+`String`, and that `String` owns its buffer. This layout helps explain what a
+`String` move costs, but it is **not** the rule for deciding whether a type
+moves. Assignment copies a type only if that type implements `Copy`; otherwise,
+it moves. A user-defined type can therefore move even if all of its data is
+stored directly in its local variable.
 
 ## A move transfers ownership
 
 Assigning a non-`Copy` value to another variable transfers responsibility. Rust
-calls this a **move**. For a `String`, the small handle is copied internally, the
-heap bytes stay in place, and the old variable becomes unusable:
+calls this a **move**. For a `String`, the pointer, length, and capacity are
+transferred to the new variable; the text bytes do not have to move to a new
+place on the heap. The old variable becomes unusable:
 
 ```rust
 let s1 = String::from("hello");
@@ -94,9 +124,12 @@ println!("{s1}");      // ❌ error: value borrowed after move
    s2 ●──► "hello"       ← only ONE owner, as rule #2 demands
 ```
 
-Why invalidate `s1`? If both handles independently believed they owned the same
-buffer, both would try to clean it up—a double free. Rust instead transfers the
-one cleanup responsibility to `s2`.
+Why invalidate `s1`? Imagine that Rust duplicated only the pointer, length, and
+capacity. Both variables would point to the same buffer, and both would believe
+that they must return it when dropped. The first cleanup would free the buffer;
+the second would try to free the same buffer again. This is a **double free** and
+can corrupt a program's memory. Rust prevents it by leaving only `s2` usable and
+transferring the one cleanup responsibility to `s2`.
 
 Trace the state after each line:
 
