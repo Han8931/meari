@@ -1,5 +1,7 @@
 package tutor
 
+import "strings"
+
 // Built-in content used when no AI provider is configured. It keeps the whole
 // app runnable offline so the editor loop can be exercised without a key.
 
@@ -30,13 +32,22 @@ func offlineChallenge(topic string) Challenge {
 	}
 }
 
-func offlineFeedback(passed bool) string {
+// offlineFeedback gives canned feedback when no AI provider is configured. On
+// failure it prefers the challenge's own shipped hint (study.hint) over any
+// generic text, so the message is about the current exercise rather than the
+// built-in demo. It never mentions a specific operator unless that hint does.
+func offlineFeedback(ch Challenge, passed bool) string {
 	if passed {
-		return "Nice work — all tests passed! You used a clear return value. " +
+		return "Nice work — all tests passed! " +
 			"(Configure an AI provider for personalized feedback.)"
 	}
-	return "Not quite. Think about how the modulo operator `%` tells you the " +
-		"remainder when dividing by 2. (Configure an AI provider for tailored hints.)"
+	if hint := strings.TrimSpace(ch.Hint); hint != "" {
+		return "Not quite. Hint: " + hint +
+			" (Configure an AI provider for feedback tailored to your code.)"
+	}
+	return "Not quite — compare your output against the failing test above and " +
+		"re-check your logic step by step. " +
+		"(Configure an AI provider for feedback tailored to your code.)"
 }
 
 // offlineNote returns a placeholder lesson note when no AI provider is set, so

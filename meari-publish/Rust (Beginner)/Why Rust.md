@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: The function is already written. Replace the `"TODO"` placeholder with `"compile time"` to show when Rust checks many memory-safety rules. You only need to fill in one line.
+  hint: |
+    Rust's borrow checker enforces most memory-safety rules while your code is compiled, before it ever runs. Fill in that two-word phrase, lowercase.
   starter: |
     fn rust_checks_memory_safety() -> &'static str {
         "TODO" // replace this string

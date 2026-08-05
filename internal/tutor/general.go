@@ -114,6 +114,24 @@ func (t *Tutor) ModelAnswer(ctx context.Context, prompt string) (string, error) 
 	return t.chat(ctx, system, "Provide a model answer to:\n"+prompt)
 }
 
+// Hint returns a nudge toward a study prompt WITHOUT revealing the full answer,
+// for a learner who is stuck but wants to keep trying. Unlike ModelAnswer, it
+// deliberately withholds the solution — it names the concept, method, or first
+// step and stops there.
+func (t *Tutor) Hint(ctx context.Context, prompt string) (string, error) {
+	if t.offline {
+		return "I'm offline (no AI provider configured), so I can't write a custom hint. " +
+			"Re-read the lesson for the method the prompt is pointing at, then try again — " +
+			"or use :answer to see the full solution.", nil
+	}
+	system := "You are a tutor giving a HINT for a study prompt, for a learner who is stuck " +
+		"but wants to solve it themselves. Point at the key concept, method, or first step in " +
+		"one or two sentences. Do NOT write the solution, and do NOT give the final code or " +
+		"answer verbatim — leave the learner something to do. Plain text, no markdown headers." +
+		t.levelClause()
+	return t.chat(ctx, system, "Give a hint (not the answer) for:\n"+prompt)
+}
+
 // --- parsing helpers ---
 
 func parseNoteContent(raw string) (NoteContent, error) {

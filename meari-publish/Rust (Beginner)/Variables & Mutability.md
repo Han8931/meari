@@ -12,6 +12,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Complete `update_score()`: declare mutable `score` as 10, add 5 to it with `+=`, then return it.'
+  hint: |
+    Bindings are immutable by default, so declare the counter with `let mut` before you can change it. Then add to it with `+=` and return it as the final expression.
   starter: |
     fn update_score() -> i32 {
         0

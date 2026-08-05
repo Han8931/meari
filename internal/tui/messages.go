@@ -17,6 +17,7 @@ type (
 	challengeMsg struct{ ch tutor.Challenge }
 	feedbackMsg  struct{ text string }
 	answerMsg    struct{ text string }
+	hintMsg      struct{ text string }
 	runResultMsg struct {
 		res  executor.Result
 		ch   tutor.Challenge
@@ -77,6 +78,23 @@ func answerCmd(t *tutor.Tutor, ch tutor.Challenge) tea.Cmd {
 			return errMsg{kind: "answer", err: err}
 		}
 		return answerMsg{text: s}
+	}
+}
+
+// hintCmd asks the tutor for a nudge on the current challenge — the learner is
+// stuck but wants to keep trying, so this withholds the full solution.
+func hintCmd(t *tutor.Tutor, ch tutor.Challenge) tea.Cmd {
+	return func() tea.Msg {
+		lang := ch.Lang
+		if lang == "" {
+			lang = "python"
+		}
+		prompt := "Give a hint (not the solution) for this " + lang + " exercise:\n" + ch.Prompt
+		s, err := t.Hint(context.Background(), prompt)
+		if err != nil {
+			return errMsg{kind: "hint", err: err}
+		}
+		return hintMsg{text: s}
 	}
 }
 

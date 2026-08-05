@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Complete `first_and_last(xs: &[i32]) -> (i32, i32)`. For this non-empty slice, use `xs[0]` for the first value and `xs[xs.len() - 1]` for the last, then return them as a tuple.'
+  hint: |
+    A slice knows its own length via `.len()`, but indexing starts at 0 — so the last element sits one before that count. Wrap the two values in parentheses to return a tuple.
   starter: |
     fn first_and_last(xs: &[i32]) -> (i32, i32) {
         (0, 0)

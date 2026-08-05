@@ -14,6 +14,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Complete the one marked line in `word_count`: use `entry`, `or_insert(0)`, and `+= 1` to update the count for each word. (`HashMap` is already in scope.)'
+  hint: |
+    Use the map's `entry(...)` API with an owned key (`word.to_string()`): `or_insert(0)` hands you a mutable reference to the count — creating it at 0 if new — which you dereference with `*` and increment.
   starter: |
     fn word_count(text: &str) -> HashMap<String, u32> {
         let mut counts = HashMap::new();

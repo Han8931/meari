@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Write `boxed_value(value: i32) -> Box<i32>` that stores the given value in a `Box` and returns it.'
+  hint: |
+    You only need a single owner here, so reach for `Box`, not `Rc` or `RefCell`. Its constructor takes the value by move and hands back the heap-allocated box.
   starter: |
     fn boxed_value(value: i32) -> Box<i32> {
         Box::new(0)

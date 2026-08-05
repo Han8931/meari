@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Complete `full_name(first: &str, last: &str) -> String` with `format!("{first} {last}")`. It borrows two string slices and returns a new owned `String`.'
+  hint: |
+    The inputs are borrowed `&str` slices but the output is a fresh owned `String`. A formatting macro lets you interpolate both names with a space between and produces a `String` for you.
   starter: |
     fn full_name(first: &str, last: &str) -> String {
         String::new()

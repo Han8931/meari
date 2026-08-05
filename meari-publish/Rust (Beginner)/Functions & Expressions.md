@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Complete `rectangle_area(width: i32, height: i32) -> i32`. Return `width * height` as a final expression without a semicolon.'
+  hint: |
+    A function returns its final expression when that line has no semicolon — so the body is just the product of the two parameters, with no `return` keyword.
   starter: |
     fn rectangle_area(width: i32, height: i32) -> i32 {
         0

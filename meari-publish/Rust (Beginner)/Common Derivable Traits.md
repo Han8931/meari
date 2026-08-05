@@ -12,6 +12,8 @@ study:
   kind: code
   lang: rust
   prompt: Add the right `#[derive(...)]` so `Point { x, y }` can be compared with `==`, cloned, and printed with `{:?}`.
+  hint: |
+    Don't implement these by hand — one `#[derive(...)]` line above the struct generates them. You need three traits: one for `==`, one for `{:?}`, and one for `.clone()`.
   starter: |
     struct Point {
         x: i32,

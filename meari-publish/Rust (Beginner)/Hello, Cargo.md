@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: Fill in the missing string returned by `fastest_check_command`. It should return the Cargo command that checks your code without producing the final executable. Only replace `"TODO"`; the function syntax is provided for you.
+  hint: |
+    You want the Cargo subcommand that type-checks your crate and reports errors but skips producing the binary — which is why it's quicker than a full build. It's named after that single action.
   starter: |
     fn fastest_check_command() -> &'static str {
         "TODO" // replace this string

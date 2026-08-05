@@ -11,6 +11,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Complete `next_score`. Make a variable named `bonus` with value `1`, then return `score + bonus` as the final line (no semicolon on that line).'
+  hint: |
+    Two lines: bind `bonus` to 1 with `let`, then finish with `score + bonus` and no semicolon so it becomes the returned value.
   starter: |
     fn next_score(score: i32) -> i32 {
         0

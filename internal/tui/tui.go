@@ -551,6 +551,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: "Model answer:\n" + msg.text})
 		return m, nil
 
+	case hintMsg:
+		m.pending--
+		m.chat.append(roleLesson, "Hint\n\n"+msg.text)
+		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: "Hint:\n" + msg.text})
+		return m, nil
+
 	case runResultMsg:
 		m.pending--
 		return m, m.handleRunResult(msg)
@@ -1104,7 +1110,7 @@ func (m Model) updateCmdLine(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // for Tab completion in the command prompt.
 var tutorExCmds = []string{
 	"answer", "capture", "chat", "clear", "compact", "config", "copy", "course", "export", "fold",
-	"help", "notes", "paste", "progress", "q", "quit", "run", "sidebar",
+	"help", "hint", "notes", "paste", "progress", "q", "quit", "run", "sidebar",
 	"subject", "submit", "theme", "topic", "vault", "view", "wide", "yank",
 }
 
@@ -1177,6 +1183,8 @@ func (m Model) runEx(raw string) (tea.Model, tea.Cmd) {
 		return m.cmdResizeEditor(editorBiasStep)
 	case "answer":
 		return m.cmdAnswer()
+	case "hint":
+		return m.cmdHint()
 	case "submit", "run":
 		// Submission without the Ctrl-S chord: works from any pane (the
 		// editor's own ":submit" already handles the editing case).
@@ -1406,6 +1414,24 @@ func (m Model) cmdAnswer() (tea.Model, tea.Cmd) {
 	m.pending++
 	m.loadKind = "writing model answer"
 	return m, answerCmd(m.deps.Tutor, m.current)
+}
+
+// cmdHint offers a nudge for the current challenge without revealing the answer.
+// Built-in course topics ship a hint (study.hint), shown verbatim with no AI
+// provider needed; otherwise the tutor writes one on the fly.
+func (m Model) cmdHint() (tea.Model, tea.Cmd) {
+	if m.current.ID == "" {
+		m.flash("no challenge open — pick one on the left first")
+		return m, nil
+	}
+	if h := strings.TrimSpace(m.current.Hint); h != "" {
+		m.chat.append(roleLesson, "Hint\n\n"+h)
+		m.chatHist = append(m.chatHist, tutor.ChatTurn{Role: "assistant", Content: "Hint:\n" + h})
+		return m, nil
+	}
+	m.pending++
+	m.loadKind = "writing a hint"
+	return m, hintCmd(m.deps.Tutor, m.current)
 }
 
 // formatSolution renders a shipped reference answer for the chat. Code answers
@@ -1640,6 +1666,7 @@ func helpView() string {
 		"  :chat              hide/show the chat pane (editor takes the width)",
 		"  :compact / :wide   shrink/grow the editor (frees chat space)",
 		"  :theme [<name>]    switch color theme (no name lists them)",
+		"  :hint              a nudge for the open challenge (no answer revealed)",
 		"  :answer            reveal a model solution for the open challenge",
 		"  :capture [all]     save the lesson's Q&A to your own note (My Notes/<Lesson>.md)",
 		"  :vault             switch to the notes vault (Obsidian-style)",
@@ -2173,6 +2200,7 @@ func (m *Model) startTopicView(t curriculum.Topic, view string) tea.Cmd {
 		Tests:       t.Challenge.Tests,
 		Lang:        lang,
 		Solution:    t.Challenge.Solution,
+		Hint:        t.Challenge.Hint,
 	}
 	m.current = ch
 	*m.curID = ch.ID

@@ -64,6 +64,7 @@ type CourseTopic struct {
 	Starter   string                    `json:"starter"`
 	Tests     []string                  `json:"tests"`
 	Answer    string                    `json:"answer"`
+	Hint      string                    `json:"hint"`
 	Questions []curriculum.QuizQuestion `json:"questions"` // quiz steps
 
 	// DegradedQuiz marks a topic authored as kind:quiz whose questions were
@@ -221,6 +222,7 @@ func (c Course) Curriculum() curriculum.Curriculum {
 					StarterCode: t.Starter,
 					Tests:       t.Tests,
 					Solution:    t.Answer,
+					Hint:        t.Hint,
 				},
 			})
 		}
@@ -288,6 +290,7 @@ func courseTopic(courseID string, n vault.Note) CourseTopic {
 	t.Prompt = get("prompt")
 	t.Starter = get("starter")
 	t.Answer = get("answer")
+	t.Hint = get("hint")
 	if tests, ok := study["tests"].([]any); ok {
 		for _, v := range tests {
 			if s := strings.TrimSpace(fmt.Sprint(v)); s != "" {

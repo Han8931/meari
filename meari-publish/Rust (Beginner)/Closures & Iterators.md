@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Write `sum_of_squares(xs: &[i32]) -> i32` using iterator adapters (`.iter().map(...).sum()`).'
+  hint: |
+    Chain off `xs.iter()`: map each element through a closure that squares it, then collapse the results into one total. Let the return type drive inference — no manual loop or mutable accumulator needed.
   starter: |
     fn sum_of_squares(xs: &[i32]) -> i32 {
         0

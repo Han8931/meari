@@ -10,6 +10,8 @@ study:
   kind: code
   lang: rust
   prompt: 'Write `add_exclamation(text: &mut String)` so it mutably borrows the caller''s string and appends one `!` without taking ownership.'
+  hint: |
+    The `&mut String` means you borrow the caller's string and change it in place, returning nothing. Look for the `String` method that pushes a single `char` (write `'!'` with single quotes).
   starter: |
     fn add_exclamation(text: &mut String) {
     }

@@ -40,6 +40,10 @@ type Challenge struct {
 	// directly with no model call, so answers stay checkable fully offline.
 	// Empty for LLM-generated challenges, which have no pre-written answer.
 	Solution string `json:"-"`
+	// Hint is an optional shipped nudge (from a note's study.hint). When present,
+	// ":hint" reveals it with no model call — a middle ground between struggling
+	// and revealing the full Solution. Empty challenges fall back to the tutor.
+	Hint string `json:"-"`
 }
 
 // Tutor issues model requests for one configured provider.
@@ -232,7 +236,7 @@ exercise the function the learner writes. Provide 3-5 tests.` + t.levelClause()
 // reveals the full solution.
 func (t *Tutor) Feedback(ctx context.Context, ch Challenge, code, runOutput string, passed bool) (string, error) {
 	if t.offline {
-		return offlineFeedback(passed), nil
+		return offlineFeedback(ch, passed), nil
 	}
 
 	system := "You are a supportive programming tutor giving feedback on a learner's code. " +
